@@ -21,14 +21,18 @@ its own code against a browser of this test's own, never by reading names.
   * An app that does use the person's tab on the provider's site, as most
     document apps do, has that tab moved to another site, the way a person
     might move it during a run, and the loop Resume runs over the items left
-    is given one item. Nothing may be read or clicked in that tab while it
-    is on the other site. Loading it somewhere by address is not counted,
-    the way the receipt apps open each purchase by its own address. And the
-    item has to reach an end that shows it was looked after. Either the run
-    stops and says the tab the person signed in with is not open, or a tab
-    gets onto the provider's site and the run carries on there. A run that
-    stops saying its documents page did not open, with every address it
-    asks for answered here, has an opener that never opens the page.
+    is given one item of each kind the app saves, for each tab of the
+    person's it takes, as Uber takes one for rides and one for Uber Eats.
+    Nothing may be read, clicked or loaded in that tab while it is on the
+    other site, since it is theirs where they took it. A tab of the run's
+    own may be loaded anywhere. When the run asks for that tab again for an
+    item, or the item goes to any tab at all, it has to reach an end that
+    shows it was looked after, and each tab taken has to be asked for again
+    by at least one item. Either the run stops and says the tab the person
+    signed in with is not open, or a tab of the run's own gets onto the
+    provider's site and the run carries on there. A run that stops saying
+    its documents page did not open, with every address it asks for
+    answered here, has an opener that never opens the page.
 
 The browser here is a stand-in. Every app reaches it through its own
 browser() and connect_over_cdp, exactly as it attaches at home, and a tab
@@ -36,8 +40,9 @@ records what was done to it and where it was at the time. Any address it
 is sent to answers. A tab of the run's own shows nothing until it is on the
 provider's site, so a look at it fails the way a look at a blank page can,
 and the first look once it is on the site ends the run there, since all that
-is asked is which tab the app turned to. A look at the person's tab while it
-is off the site ends the run too, since that is the failure.
+is asked is which tab the app turned to. A look at the person's tab, or a
+load of it, while it is off the site ends the run too, since that is the
+failure.
 
 Resume's loop is the one over its method's own first parameter that hands
 each item on and records how it went. Another loop that records items and
@@ -99,7 +104,8 @@ BUSY = 200
 
 class Tab:
     """A tab. Its address changes when it is sent somewhere by address, and
-    everything else done to it is noted with where it was at the time."""
+    everything else done to it is noted with where it was at the time. So is
+    sending the person's tab anywhere while it is off the site."""
 
     def __init__(self, url, context, on_its_host, own=False):
         object.__setattr__(self, "_state", {
@@ -123,8 +129,14 @@ class Tab:
         return self._state["closed"]
 
     def goto(self, url, **_kw):
-        self._state["loads"].append(url)
-        self._state["url"] = url
+        st = self._state
+        # Loading the person's tab while it is off the site takes it back
+        # from where they took it, which is acting on it.
+        if not st["own"] and st["armed"] and not self.on_the_site():
+            st["acts"].append(("goto", st["url"], False))
+            self._ended("their tab off the site", "goto")
+        st["loads"].append(url)
+        st["url"] = url
         return MagicMock(status=200, ok=True)
 
     def wait_for_timeout(self, *_a, **_kw):
@@ -170,8 +182,6 @@ class Tab:
             raise Blank(name)
         if not on:
             self._ended("their tab off the site", name)
-        if st["armed"]:
-            self._ended("their tab on the site", name)
 
     def __getattr__(self, name):
         if name.startswith("__"):
@@ -253,6 +263,7 @@ def built(app: Path, tmp_path, monkeypatch):
     """The app, constructed by its own parser and __init__ from a config that
     attaches over CDP, with a stand-in browser behind that attach."""
     mod, site, storage = load(app)
+    tmp_path.mkdir(parents=True, exist_ok=True)
     example = app / "config.example.json"
     config = json.loads(example.read_text(encoding="utf-8")) if example.exists() else {}
     config.update({
@@ -510,9 +521,34 @@ def other_loops_in_a_tab(mod):
     return sorted(set(out))
 
 
-def an_item(mod, storage, address):
-    """One item of the kind the app saves, invented, dated well inside any
-    window, with its own address on the provider's site."""
+def kinds_of(mod, storage):
+    """Every kind of purchase the app saves, its own kinds when it names
+    them and Online and In-Store when it does not, or one document. An app
+    may keep a tab for each kind, as Uber keeps one for rides and one for
+    Uber Eats, and asks for each only for a purchase of its own kind."""
+    if hasattr(mod, "Document"):
+        return [None]
+    from paperpull_core import models
+    return list(getattr(storage, "PURCHASE_TYPES", None) or models.PURCHASE_TYPES)
+
+
+def counting(inst, name):
+    """Counts each time the run asks this picker for its tab, so the test
+    knows whether an item needed that tab at all."""
+    calls = []
+    picker = getattr(inst, name)
+
+    def asked(*args, **kwargs):
+        calls.append(name)
+        return picker(*args, **kwargs)
+
+    setattr(inst, name, asked)
+    return calls
+
+
+def an_item(mod, address, kind):
+    """One item of this kind, invented, dated well inside any window, with
+    its own address on the provider's site."""
     if hasattr(mod, "Document"):
         params = inspect.signature(mod.Document).parameters
         wanted = {"title": "Statement", "category": "Statement",
@@ -521,38 +557,49 @@ def an_item(mod, storage, address):
                   "href": address, "source_url": address}
         return mod.Document(**{k: v for k, v in wanted.items() if k in params})
     from paperpull_core.models import Purchase
-    kinds = list(getattr(getattr(storage, "SPEC", None), "routes", {}) or ["Online"])
-    return Purchase(purchase_type=kinds[0], purchase_date="2026-06-15",
+    return Purchase(purchase_type=kind, purchase_date="2026-06-15",
                     order_number="900000000000001", details_url=address,
                     total="$10.00")
 
 
 @pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
-def test_nothing_is_read_or_clicked_in_the_persons_tab_once_it_is_off_the_site(
+def test_the_persons_tab_is_let_go_once_it_is_off_the_site(
         app, tmp_path, monkeypatch, capsys):
-    mod, site, storage, inst, context = built(app, tmp_path, monkeypatch)
+    mod, site, storage, inst, context = built(app, tmp_path / "found", monkeypatch)
     names, attrs = tab_pickers(mod)
-    theirs = None
+    # Every picker that takes a tab of the person's, each tab where it was
+    # taken.
+    taken = []
     for name in names:
         theirs = theirs_for(inst, name, site, context, attrs)
         if theirs is not None:
-            break
-    if theirs is None:
+            taken.append((name, theirs.url))
+    if not taken:
         pytest.skip("%s never works in a tab of the person's, only in its own" % app.name)
     loops = resume_loops(mod)
     assert loops, "%s has no loop over the items it saves" % app.name
 
-    for loop in loops:
-        # The run took the person's tab on the site, and then it was moved.
-        item = an_item(mod, storage, theirs.url)
+    runs = [(name, home, kind, loop) for name, home in taken
+            for kind in kinds_of(mod, storage) for loop in loops]
+    asked_for = set()
+    for n, (name, home, kind, loop) in enumerate(runs):
+        # Each from a new run, so one that stopped a side leaves nothing
+        # behind for the next. The run took the person's tab on the site,
+        # and then it was moved.
+        mod, site, storage, inst, context = built(app, tmp_path / str(n), monkeypatch)
+        theirs = Tab(home, context, site.is_safe_url)
         context.pages[:] = [theirs]
-        context.ended = None
-        forget_tabs(inst, attrs)
         assert getattr(inst, name)() is theirs
         theirs.url = ELSEWHERE
-        theirs._state["acts"].clear()
-        theirs._state["loads"].clear()
+        for tab in [theirs] + context.opened:
+            tab._state["acts"].clear()
+            tab._state["loads"].clear()
+        opened = len(context.opened)
         theirs._state["armed"] = True
+        asked = counting(inst, name)
+        item = an_item(mod, home, kind)
+        what = "%s.%s, given %s with the person's tab taken by %s()," % (
+            app.name, loop, "an item of kind %r" % kind if kind else "a document", name)
 
         stopped = False
         try:
@@ -565,20 +612,29 @@ def test_nothing_is_read_or_clicked_in_the_persons_tab_once_it_is_off_the_site(
 
         off_site = [(act, where) for act, where, on in theirs._state["acts"] if not on]
         assert not off_site, (
-            "%s read or clicked the person's tab while it was on another site, %s"
-            % (app.name, off_site))
+            "%s read, clicked or loaded the person's tab while it was on another "
+            "site, %s" % (what, off_site))
         said = " ".join(out.split())
+        touched = context.ended is not None or len(context.opened) > opened or any(
+            tab._state["acts"] or tab._state["loads"] for tab in [theirs] + context.opened)
         if stopped:
             assert "tab you signed in with is not open" in said, (
-                "%s.%s stopped without saying the tab the person signed in with is "
+                "%s stopped without saying the tab the person signed in with is "
                 "not open, so a tab of its own never got onto the provider's site, "
-                "with every address it asked for answered\n%s" % (app.name, loop, out))
-        else:
-            assert context.ended and context.ended[0] in (
-                "own tab on the site", "their tab on the site"), (
-                "%s.%s neither stopped nor carried on in a tab on the provider's site "
-                "(%s), so the item never reached a tab and this proves nothing\n%s"
-                % (app.name, loop, context.ended, out))
+                "with every address it asked for answered\n%s" % (what, out))
+        elif asked or touched:
+            assert context.ended and context.ended[0] == "own tab on the site", (
+                "%s neither stopped nor carried on in a tab of its own on the "
+                "provider's site (%s), so the item never reached a tab and this "
+                "proves nothing\n%s" % (what, context.ended, out))
+        # Otherwise the item needed no tab, as an Apple Store order Apple has
+        # not invoiced yet needs none, and none was asked for.
+        if asked:
+            asked_for.add(name)
+    for name, _home in taken:
+        assert name in asked_for, (
+            "%s never asked %s() for its tab again for an item of any kind it saves, "
+            "so this proved nothing for the person's tab it takes" % (app.name, name))
 
 
 @pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
