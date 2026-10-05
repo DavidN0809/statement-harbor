@@ -3357,8 +3357,11 @@ function run(action, opts) {
       setStatus('err', (code === '130' ? 'interrupted, progress saved' : `exited (code ${code}), check output`) +
                        (again ? '. ' + AGAIN_LEFT : ''));
     } else if (result && result.stopped) {
+      // Resume downloads, and Discover was pressed only to see what is there.
       setStatus('warn', again ? 'stopped before finishing. ' + AGAIN_LEFT
-                              : 'stopped before finishing, see the output, then press Resume');
+        : action === 'discover'
+          ? 'stopped before finishing, see the output, then press Discover again'
+          : 'stopped before finishing, see the output, then press Resume');
     } else if (result && result.attention) {
       const details = [];
       if (result.wrong_document) details.push(`${result.wrong_document} refused as the wrong document`);

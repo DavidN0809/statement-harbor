@@ -447,9 +447,9 @@ def test_run_all_and_discover_do_not_finish_on_a_history_cut_short(attached, com
     assert "Only 1 page(s) of your purchase history came" in said, said
     assert "Discovery complete" not in said, said
     assert sorted(known(tmp_path)) == sorted(NEWER_KEYS)
+    assert panel_reads(out)["stopped"] == 1, "the panel reads either run as stopped"
     if command[0] == "--all":
         assert downloaded(tmp_path) == sorted(NEWER_KEYS)
-        assert panel_reads(out)["stopped"] == 1
 
 
 def test_a_history_of_several_pages_is_read_to_its_last(attached, tmp_path, capsys):
@@ -463,6 +463,7 @@ def test_a_history_of_several_pages_is_read_to_its_last(attached, tmp_path, caps
     assert sorted(known(tmp_path)) == sorted(ALL_KEYS)
     assert sorted(set(SITE.asked)) == [1, 2]
     assert not failure_files(tmp_path)
+    assert panel_reads(out)["stopped"] == 0, "the panel reads the Discover as finished"
 
 
 # -- Resume after a run that stopped ---------------------------------------------------

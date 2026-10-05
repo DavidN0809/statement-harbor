@@ -31,6 +31,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and a second PayPal account on Coinbase's, and the two browsers attached
   to each other's signed-in session. The new port now moves past any port
   another app or account already uses.
+- **The panel says when a Discover stopped.** In every app, Discover told
+  the panel nothing about how it ended, so one that stopped, with its list
+  cut short or never coming, read "finished, check output" just as one
+  that read the whole list did, and its failure file was never offered.
+  Discover now tells the panel how it ended. One that stopped reads as
+  stopped, offers its failure file and says to press Discover again rather
+  than Resume, which downloads. Discover still downloads nothing and leaves
+  new-this-run.txt as the last download run wrote it.
 
 ## [0.46.0] - 2026-10-11
 

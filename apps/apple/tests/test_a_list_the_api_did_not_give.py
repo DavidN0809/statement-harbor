@@ -534,9 +534,9 @@ def test_run_all_and_discover_do_not_finish_on_a_list_cut_short(attached, comman
     assert "stopped answering the purchase search partway" in said, said
     assert "Discovery complete" not in said, said
     assert known(tmp_path) == NEWER_KEYS
+    assert panel_reads(out)["stopped"] == 1, "the panel reads either run as stopped"
     if command[0] == "--all":
         assert downloaded(tmp_path) == NEWER_KEYS
-        assert panel_reads(out)["stopped"] == 1
 
 
 # -- what worked before -------------------------------------------------------------------
@@ -600,7 +600,8 @@ def test_resume_goes_on_with_what_was_found_when_the_search_is_refused_again(att
 def test_resume_after_whole_lists_does_not_read_them_again(attached, tmp_path, capsys):
     """A Discover that read both lists to their end leaves nothing for
     Resume to read again, so Resume goes straight to the purchases found."""
-    finished_run(tmp_path, attached, capsys, "--discover")
+    out = finished_run(tmp_path, attached, capsys, "--discover")
+    assert panel_reads(out)["stopped"] == 0, "the panel reads the Discover as finished"
 
     SITE.asked.clear()
     SITE.seen.clear()

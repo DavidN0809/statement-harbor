@@ -186,3 +186,12 @@ def test_a_run_that_stopped_needs_attention_and_is_named():
     assert run_result.parse(line(stopped=-1)) is None
     src = (Path(app.__file__)).read_text(encoding="utf-8")
     assert "stopped before finishing" in src
+
+
+def test_a_discover_that_stopped_says_to_press_discover_again():
+    """Discover now tells the panel how it ended. Resume downloads, and
+    somebody who pressed Discover asked only to see what the provider has,
+    so a Discover that stopped says to press it again rather than Resume."""
+    src = (Path(app.__file__)).read_text(encoding="utf-8")
+    assert "action === 'discover'" in src
+    assert "then press Discover again" in src
