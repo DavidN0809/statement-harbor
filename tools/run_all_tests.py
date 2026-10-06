@@ -94,6 +94,26 @@ writes them down as pytest holds them. The whole output of a failing suite
 is kept in test-output/<suite>.log, and on CI it is printed as well, in a
 group that opens with a click, because a CI run cannot be asked again.
 
+WHERE A SUITE STOPPED FOR TIME WAS
+
+On 2026-10-06 a full run stopped the homedepot suite at its time limit,
+and its whole output held the dots of the 37 tests that had passed and the
+line saying it was stopped. Nothing said where the 38th test sat, and the
+suite passed twice when run alone. So pytest's faulthandler now writes the
+stack of every thread into a suite's output once a test has run for
+STACKS_AFTER seconds, and the test goes on until it ends or the suite is
+stopped. The stacks name files by their place on the machine, so they are
+read in the whole output, and what is printed here only says they are
+there. A test waiting inside a Playwright call shows only Playwright's
+event loop, since the test's own frames are in a greenlet that is not the
+one running.
+
+What a suite writes to its error stream is read as part of its output
+now, in the order the two were written, so stacks written during a slow
+test that then passed come before pytest's last line, which is still the
+one read as the summary. They used to be added after it, and that line
+would have been a stack's.
+
 SIDE BY SIDE
 
 Sixty-three suites one after another took an hour and a half on this
@@ -266,6 +286,14 @@ PACE_FROM_S = 60
 # 49.7 days on Windows, ends the run at that suite, since a wait cannot be
 # that long. So a longer time is read from neither file.
 TIMES_UP_TO = 86400
+
+# How long one test may run before every thread's stack is written into
+# its suite's output. The longest test of a full run on 2026-10-06 took 60s,
+# setup and teardown included, and a run on a busy night took twice as long
+# as a usual one, so 300 is far past either. The longest suite took 1300s
+# of its 1800s limit, so a test still waiting near its end has its stacks
+# written before the suite is stopped.
+STACKS_AFTER = 300
 
 DETAILED = 5          # failures per suite printed with their frames
 NAMED = 20            # failures named after those, one line each
@@ -607,12 +635,13 @@ def descendants(pid: int) -> list:
     return found
 
 
-def run_suite(d: Path, py: Path, timeout: int = SUITE_LIMIT_S):
+def run_suite(d: Path, py: Path, timeout: int = SUITE_LIMIT_S, stacks_after: int = STACKS_AFTER):
     """Run one suite. Its whole output, its exit code, and what the plugin
     wrote down, each failure and how each test of the suite's own canary
     file ended, which only the core suite has. A suite that runs out of
     time is ended with everything it started and comes back as a failure
-    that says so."""
+    that says so. A test still running after stacks_after seconds has every
+    thread's stack written into the output first."""
     fd, record = tempfile.mkstemp(prefix="paperpull-where-", suffix=".jsonl")
     os.close(fd)
     env = with_this_core(PLUGINS)
@@ -626,18 +655,19 @@ def run_suite(d: Path, py: Path, timeout: int = SUITE_LIMIT_S):
         # them, and the runner passing them on still lost suites. So
         # stop_tree follows what the suite started instead of ending a group.
         proc = subprocess.Popen([str(py), "-m", "pytest", "-q", "--no-header",
-                                 "-rsfE", "-p", "no:cacheprovider", "-p", WHERE],
-                                cwd=d, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 "-rsfE", "-p", "no:cacheprovider", "-p", WHERE,
+                                 "-o", "faulthandler_timeout=%d" % stacks_after],
+                                cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, errors="replace", env=env)
         with _RUNNING_LOCK:
             _RUNNING.add(proc)
         try:
-            out, err = proc.communicate(timeout=timeout)
+            out, _ = proc.communicate(timeout=timeout)
             code = proc.returncode
         except subprocess.TimeoutExpired:
             stop_tree(proc.pid)
-            out, err = proc.communicate()
-            err = (err or "") + "\ntimed out after %ds, the suite was stopped\n" % timeout
+            out, _ = proc.communicate()
+            out = (out or "") + "\ntimed out after %ds, the suite was stopped\n" % timeout
             code = -1
         finally:
             with _RUNNING_LOCK:
@@ -648,7 +678,7 @@ def run_suite(d: Path, py: Path, timeout: int = SUITE_LIMIT_S):
             os.remove(record)
         except OSError:
             pass
-    return (out or "") + (err or ""), code, records
+    return out or "", code, records
 
 
 def stop_everything() -> None:
@@ -752,18 +782,56 @@ def summary_of(output: str, returncode: int) -> str:
     return said[-1] if said else lines[-1]
 
 
+# What faulthandler writes, for a test still running at STACKS_AFTER and for
+# a crash. A line saying how long the test had run, then each thread, a
+# header and its frames, most recent call first. Python 3.14 names the
+# thread in its header.
+STACKS_BEGIN = re.compile(r"Timeout \((\d+):(\d\d):(\d\d)(?:\.\d+)?\)!$")
+THREAD_HEAD = re.compile(r"(?:(?:Current thread|Thread) 0x[0-9a-fA-F]+(?: \[.*\])?|Stack) "
+                         r"\(most recent call first\):$")
+STACK_LINE = re.compile(r"  (?:File .*|\.\.\.|<no Python frame>|Garbage-collecting)$")
+
+
+def without_stacks(lines: list) -> tuple:
+    """A suite's output lines with every stack faulthandler wrote taken
+    out, and one line saying they are in the whole output, or None when
+    there were none. A stack names each file by its place on the machine,
+    so it is never printed here. A stack can start in the middle of a line
+    of dots, which are kept."""
+    kept, told, inside = [], None, False
+    for ln in lines:
+        begins = STACKS_BEGIN.search(ln)
+        if begins:
+            if ln[:begins.start()].strip():
+                kept.append(ln[:begins.start()])
+            h, m, s = (int(x) for x in begins.groups())
+            told = ("every thread's stack, written once a test had run %ds, is in the whole output"
+                    % (h * 3600 + m * 60 + s))
+            inside = True
+        elif THREAD_HEAD.match(ln):
+            if not inside:
+                told = "every thread's stack is in the whole output"
+            inside = True
+        elif not (inside and (not ln.strip() or STACK_LINE.match(ln))):
+            inside = False
+            kept.append(ln)
+    return kept, told
+
+
 def where_it_failed(output: str, failures: list, root: Path = REPO) -> list:
     """What to print about a failing suite. Each failure with every frame
     of its traceback and the exception that ended it, as the plugin wrote
     them down, then any failure that raised nothing, from pytest's own
     summary. With no record at all, pytest's failure lines, as before.
     What the plugin wrote about how each canary test ended is no failure
-    and is left out here."""
+    and is left out here. Last, whether faulthandler wrote the threads'
+    stacks, which only the whole output holds."""
     failures = [rec for rec in failures if "outcome_of" not in rec]
-    lines = output.splitlines()
+    lines, told = without_stacks(output.splitlines())
+    stacks = [told] if told else []
     if not failures:
         said = [ln.rstrip()[:WIDTH] for ln in lines if ln.startswith(("FAILED ", "ERROR ", "E   "))]
-        return said[:40] or [ln.rstrip()[:WIDTH] for ln in lines if ln.strip()][-10:]
+        return (said[:40] or [ln.rstrip()[:WIDTH] for ln in lines if ln.strip()][-10:]) + stacks
 
     out = []
     for n, rec in enumerate(failures):
@@ -799,7 +867,7 @@ def where_it_failed(output: str, failures: list, root: Path = REPO) -> list:
             said = ln.split(" ", 1)[1].rstrip()
             if not any(said == k or said.startswith(k + " - ") for k in known):
                 out.append(ln.rstrip()[:WIDTH])
-    return out
+    return out + stacks
 
 
 def keep_whole_output(name: str, output: str, ci=None, folder=None, stream=None) -> None:
@@ -1276,7 +1344,9 @@ def run(args, lock=None) -> int:
         took[name], codes[name] = round(seconds), returncode
         if name == CANARY_SUITE:
             canary = canary_counts(records)
-        summary = summary_of(out, returncode)
+        # pytest's own last line, read once the stacks faulthandler wrote are
+        # taken out, so a suite with no such line never ends on a stack.
+        summary = summary_of("\n".join(without_stacks(out.splitlines())[0]), returncode)
         for n, kindword in re.findall(r"(\d+) (passed|failed|skipped|error)", summary):
             if kindword == "passed":
                 passed += int(n)

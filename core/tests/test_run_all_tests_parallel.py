@@ -8,7 +8,8 @@ runs out of time ends with everything it started, the parts CI splits the
 suites into cover each suite once, a second run waits for the first one's
 lock, a run of the same checkout is named rather than waited for, a run
 whose checkout is not known yet is waited for, and --stop ends a run with
-the processes it started.
+the processes it started. A test still running at its suite's limit
+leaves every thread's stack in the output the run keeps.
 
 On POSIX a suite out of time used to end the runner and every suite beside
 it, and a test's cleanup ended the test's own pytest, because stop_tree
@@ -29,6 +30,7 @@ import concurrent.futures
 import io
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -567,6 +569,185 @@ def test_a_suite_out_of_time_is_not_the_end_of_the_run(fake_run, tmp_path, monke
     assert any(ln.split()[:2] == ["FAIL", "slow"] and "timed out after 3s" in ln for ln in lines), out
     assert any(ln.split()[:2] == ["ok", "steady"] and "1 passed" in ln for ln in lines), out
     assert "1 passed, 0 failed" in out, out
+
+
+# A test still running when its suite ran out of time used to leave only the
+# dots of the tests before it. On 2026-10-06 the homedepot suite sat in its
+# 38th test for half an hour and nothing said where. Now pytest's faulthandler
+# writes every thread's stack into the suite's output once a test has run
+# stacks_after seconds, SOON in these tests. This suite's test starts a thread
+# of its own, waits until its stacks are due, says so, then sleeps for ten
+# minutes, so only the runner can end it.
+SOON = 2
+STUCK = """
+    import os, threading, time
+    def a_helper_that_waits(gate):
+        gate.wait()
+    def test_never_ends():
+        gate = threading.Event()
+        threading.Thread(target=a_helper_that_waits, args=(gate,), daemon=True).start()
+        time.sleep(%(due)d)
+        with open(%(part)r, "w") as f:
+            f.write("due")
+        os.replace(%(part)r, %(mark)r)
+        time.sleep(600)
+    """
+
+
+def main_watched(argv, limit: int) -> int:
+    """rat.main, failing the test when it has not come back ENDS_WITHIN
+    seconds after a suite's limit, and ending what it left, as run_watched
+    does for a single suite."""
+    late = []
+
+    def end_what_is_left():
+        late.append("the run had not come back %ds after the suite's %ds limit" % (ENDS_WITHIN, limit))
+        with rat._RUNNING_LOCK:
+            running = [proc.pid for proc in rat._RUNNING]
+        for p in running:
+            end_tree(p)
+    watch = threading.Timer(limit + ENDS_WITHIN, end_what_is_left)
+    watch.daemon = True
+    watch.start()
+    try:
+        code = rat.main(argv)
+    finally:
+        watch.cancel()
+        watch.join()
+    assert not late, late[0]
+    return code
+
+
+def printed_places(out: str, tmp_path: Path) -> list:
+    """Which folders of this machine the printed lines name. The line saying
+    where the whole output went is left out, since that folder is the
+    test's own here and the checkout's at home."""
+    lines = [ln for ln in out.splitlines() if not ln.strip().startswith("whole output in ")]
+    text = "\n".join(lines).lower()
+    return [p for p in {tmp_path, Path.home(), Path(sys.prefix), Path(sys.base_prefix)} if str(p).lower() in text]
+
+
+def test_a_test_out_of_time_leaves_every_threads_stack_in_the_kept_output(fake_run, tmp_path, monkeypatch,
+                                                                          capsys):
+    mark = tmp_path / "due"
+    fake_run({"stuck": suite_with(tmp_path / "s", "stuck", STUCK % {
+        "due": SOON + 3, "part": str(tmp_path / "due.part"), "mark": str(mark)})})
+    real, now = rat.run_suite, {}
+    monkeypatch.setattr(rat, "run_suite",
+                        lambda d, py, timeout=1800: real(d, py, timeout=now["limit"], stacks_after=SOON))
+    # A limit that ran out before the stacks were due proves nothing, so it is
+    # tried again with a longer one, as for the test that only sleeps above.
+    for limit in (10, 30, 90):
+        now["limit"] = limit
+        assert main_watched(["--jobs", "1"], limit) == 1
+        out = capsys.readouterr().out
+        if mark.exists():
+            break
+    else:
+        pytest.fail("the suite's test never reached the time its stacks were due, even in %ds" % limit)
+    kept = (tmp_path / "test-output" / "stuck.log").read_text(encoding="utf-8")
+    assert "Timeout (0:00:%02d)!" % SOON in kept, kept
+    assert re.search(r'File ".*test_it\.py", line \d+ in test_never_ends\n', kept), kept
+    assert re.search(r'File ".*test_it\.py", line \d+ in a_helper_that_waits\n', kept), kept
+    assert kept.rstrip().endswith("timed out after %ds, the suite was stopped" % limit), kept
+    lines = out.splitlines()
+    assert any(ln.split()[:2] == ["FAIL", "stuck"] and "timed out after %ds" % limit in ln for ln in lines), out
+    assert ("       every thread's stack, written once a test had run %ds, is in the whole output" % SOON
+            in lines), out
+    # The stacks name each file by its place on the machine, so none of them
+    # is printed, only where they are.
+    assert "File " not in out and "most recent call first" not in out, out
+    assert not printed_places(out, tmp_path), out
+
+
+SLOW = """
+    import time
+    def test_slow():
+        time.sleep(%(seconds)d)
+    """
+
+
+def test_stacks_written_during_a_test_that_passed_leave_its_summary_alone(fake_run, tmp_path, monkeypatch,
+                                                                          capsys):
+    # The suite's errors are read in the order they were written. They used
+    # to come after pytest's last line, which is read as the suite's summary,
+    # so the summary would have been the end of a stack, with a place on the
+    # machine in it, and the suite's tests not counted.
+    fake_run({"slow": suite_with(tmp_path / "s", "slow", SLOW % {"seconds": SOON + 3})})
+    real, seen = rat.run_suite, []
+
+    def run_suite(d, py, timeout=1800):
+        came = real(d, py, timeout=timeout, stacks_after=SOON)
+        seen.append(came[0])
+        return came
+    monkeypatch.setattr(rat, "run_suite", run_suite)
+    assert rat.main(["--jobs", "1"]) == 0
+    out = capsys.readouterr().out
+    lines = [ln for ln in seen[0].splitlines() if ln.strip()]
+    at = [i for i, ln in enumerate(lines) if "Timeout (0:00:%02d)!" % SOON in ln]
+    assert at, "no stacks were written, so this proves nothing\n" + seen[0]
+    assert re.search(r"\b1 passed\b", lines[-1]) and at[-1] < len(lines) - 1, seen[0]
+    assert any(ln.split()[:2] == ["ok", "slow"] and "1 passed" in ln for ln in out.splitlines()), out
+    assert "1 passed, 0 failed" in out, out
+    assert not printed_places(out, tmp_path), out
+
+
+GONE = """
+    import os, time
+    def test_ends_its_own_pytest():
+        time.sleep(%(seconds)d)
+        os._exit(3)
+    """
+
+
+def test_a_suite_that_ended_after_its_stacks_were_written_prints_none_of_them(fake_run, tmp_path, monkeypatch,
+                                                                              capsys):
+    # pytest ends with no summary at all, so the last line of the output is
+    # the end of a stack, and that line was the one printed for the suite.
+    fake_run({"gone": suite_with(tmp_path / "s", "gone", GONE % {"seconds": SOON + 3})})
+    real = rat.run_suite
+    monkeypatch.setattr(rat, "run_suite",
+                        lambda d, py, timeout=1800: real(d, py, timeout=timeout, stacks_after=SOON))
+    assert rat.main(["--jobs", "1"]) == 1
+    out = capsys.readouterr().out
+    assert any(ln.split()[:2] == ["FAIL", "gone"] for ln in out.splitlines()), out
+    assert "every thread's stack, written once a test had run %ds, is in the whole output" % SOON in out, out
+    assert "File " not in out and "most recent call first" not in out, out
+    assert not printed_places(out, tmp_path), out
+    kept = (tmp_path / "test-output" / "gone.log").read_text(encoding="utf-8")
+    assert re.search(r'File ".*test_it\.py", line \d+ in test_ends_its_own_pytest\n', kept), kept
+
+
+def test_a_stack_is_taken_out_whole_and_what_was_around_it_kept():
+    # A stack can start in the middle of a line of dots, Python 3.14 names a
+    # thread in its header, and a crash writes stacks with no timeout first.
+    timed_out = [
+        "....Timeout (0:05:00)!",
+        "Thread 0x00007f3a2b1c4640 [Thread-1 (serve_fo] (most recent call first):",
+        '  File "/home/jane/work/selectors.py", line 415 in select',
+        "  ...",
+        "",
+        "Current thread 0x000041b0 (most recent call first):",
+        '  File "C:\\Users\\jane\\work\\test_x.py", line 5 in test_x',
+        "  <no Python frame>",
+        "..",
+        "timed out after 1800s, the suite was stopped",
+    ]
+    assert rat.without_stacks(timed_out) == (
+        ["....", "..", "timed out after 1800s, the suite was stopped"],
+        "every thread's stack, written once a test had run 300s, is in the whole output")
+    crashed = [
+        ".",
+        "Fatal Python error: Segmentation fault",
+        "",
+        "Stack (most recent call first):",
+        '  File "/home/jane/work/test_x.py", line 9 in test_y',
+        "Extension modules: greenlet._greenlet (total: 1)",
+    ]
+    assert rat.without_stacks(crashed) == (
+        [".", "Fatal Python error: Segmentation fault", "", "Extension modules: greenlet._greenlet (total: 1)"],
+        "every thread's stack is in the whole output")
+    assert rat.without_stacks(["...", "1 passed in 0.01s"]) == (["...", "1 passed in 0.01s"], None)
 
 
 # A real run of two suites side by side, with signals as a run started at a
