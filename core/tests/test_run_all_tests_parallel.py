@@ -8,8 +8,8 @@ runs out of time ends with everything it started, the parts CI splits the
 suites into cover each suite once, a second run waits for the first one's
 lock, a run of the same checkout is named rather than waited for, a run
 whose checkout is not known yet is waited for, and --stop ends a run with
-the processes it started. A test still running at its suite's limit
-leaves every thread's stack in the output the run keeps.
+the processes it started. A test still running at its suite's limit, and
+not yet failed, leaves every thread's stack in the output the run keeps.
 
 On POSIX a suite out of time used to end the runner and every suite beside
 it, and a test's cleanup ended the test's own pytest, because stop_tree
@@ -720,7 +720,8 @@ def test_a_suite_that_ended_after_its_stacks_were_written_prints_none_of_them(fa
 
 def test_a_stack_is_taken_out_whole_and_what_was_around_it_kept():
     # A stack can start in the middle of a line of dots, Python 3.14 names a
-    # thread in its header, and a crash writes stacks with no timeout first.
+    # thread in its header, and a crash writes stacks with no timeout first,
+    # which on 3.14 end with the C stack, as it wrote them in WSL.
     timed_out = [
         "....Timeout (0:05:00)!",
         "Thread 0x00007f3a2b1c4640 [Thread-1 (serve_fo] (most recent call first):",
@@ -747,6 +748,21 @@ def test_a_stack_is_taken_out_whole_and_what_was_around_it_kept():
     assert rat.without_stacks(crashed) == (
         [".", "Fatal Python error: Segmentation fault", "", "Extension modules: greenlet._greenlet (total: 1)"],
         "every thread's stack is in the whole output")
+    crashed_on_314 = [
+        ".Fatal Python error: Segmentation fault",
+        "",
+        "Current thread 0x0000781e8e67c1c0 [python3] (most recent call first):",
+        '  File "/home/jane/work/test_x.py", line 18 in test_crashes',
+        '  File "<frozen runpy>", line 198 in _run_module_as_main',
+        "",
+        "Current thread's C stack trace (most recent call first):",
+        '  Binary file "/home/jane/work/.venv/bin/python", at _Py_DumpStack+0x4a [0x47728a]',
+        '  Binary file "/home/jane/work/.venv/bin/python" [0x5044d7]',
+        '  Binary file "/usr/lib/x86_64-linux-gnu/libc.so.6", at pthread_kill+0x11c [0x781e8e4a61ac]',
+        "  <truncated rest of calls>",
+    ]
+    assert rat.without_stacks(crashed_on_314) == (
+        [".Fatal Python error: Segmentation fault", ""], "every thread's stack is in the whole output")
     assert rat.without_stacks(["...", "1 passed in 0.01s"]) == (["...", "1 passed in 0.01s"], None)
 
 

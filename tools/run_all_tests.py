@@ -102,11 +102,13 @@ line saying it was stopped. Nothing said where the 38th test sat, and the
 suite passed twice when run alone. So pytest's faulthandler now writes the
 stack of every thread into a suite's output once a test has run for
 STACKS_AFTER seconds, and the test goes on until it ends or the suite is
-stopped. The stacks name files by their place on the machine, so they are
-read in the whole output, and what is printed here only says they are
-there. A test waiting inside a Playwright call shows only Playwright's
-event loop, since the test's own frames are in a greenlet that is not the
-one running.
+stopped. pytest stops that clock once a test has failed, so a test that
+fails and then hangs in its teardown leaves no stacks, though its failure
+is still named. The stacks name files by their place on the machine, so
+they are read in the whole output, and what is printed here only says
+they are there. A test waiting inside a Playwright call shows only
+Playwright's event loop, since the test's own frames are in a greenlet
+that is not the one running.
 
 What a suite writes to its error stream is read as part of its output
 now, in the order the two were written, so stacks written during a slow
@@ -640,8 +642,8 @@ def run_suite(d: Path, py: Path, timeout: int = SUITE_LIMIT_S, stacks_after: int
     wrote down, each failure and how each test of the suite's own canary
     file ended, which only the core suite has. A suite that runs out of
     time is ended with everything it started and comes back as a failure
-    that says so. A test still running after stacks_after seconds has every
-    thread's stack written into the output first."""
+    that says so. A test still running after stacks_after seconds, and not
+    yet failed, has every thread's stack written into the output first."""
     fd, record = tempfile.mkstemp(prefix="paperpull-where-", suffix=".jsonl")
     os.close(fd)
     env = with_this_core(PLUGINS)
@@ -785,11 +787,13 @@ def summary_of(output: str, returncode: int) -> str:
 # What faulthandler writes, for a test still running at STACKS_AFTER and for
 # a crash. A line saying how long the test had run, then each thread, a
 # header and its frames, most recent call first. Python 3.14 names the
-# thread in its header.
+# thread in its header, and after a crash it writes the C stack as well,
+# each line naming a program or library by its place on the machine.
 STACKS_BEGIN = re.compile(r"Timeout \((\d+):(\d\d):(\d\d)(?:\.\d+)?\)!$")
-THREAD_HEAD = re.compile(r"(?:(?:Current thread|Thread) 0x[0-9a-fA-F]+(?: \[.*\])?|Stack) "
-                         r"\(most recent call first\):$")
-STACK_LINE = re.compile(r"  (?:File .*|\.\.\.|<no Python frame>|Garbage-collecting)$")
+THREAD_HEAD = re.compile(r"(?:(?:Current thread|Thread) 0x[0-9a-fA-F]+(?: \[.*\])?|Stack"
+                         r"|Current thread's C stack trace) \(most recent call first\):$")
+STACK_LINE = re.compile(r"  (?:File .*|Binary file .*|\.\.\.|<no Python frame>|Garbage-collecting"
+                        r"|<truncated rest of calls>|<cannot get C stack on this system>)$")
 
 
 def without_stacks(lines: list) -> tuple:
