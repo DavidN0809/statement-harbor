@@ -350,7 +350,8 @@ def rename_names_for(app, saved: Path) -> list:
             for c in seen if str(c.old_path) == str(saved)]
 
 
-def the_saved_record_stands(home: Home, saved: Path, before: dict, found_before: dict, app):
+def the_saved_record_stands(home: Home, saved: Path, before: dict, found_before: dict, app,
+                            renames: bool = True):
     key = home.key
     after = app.progress.get(key)
     changed = unchanged(before, after)
@@ -362,7 +363,7 @@ def the_saved_record_stands(home: Home, saved: Path, before: dict, found_before:
     plain = home.build()
     assert plain._already_done(home.mod.Document.from_dict(plain.discovery.get(key))) is True, (
         "%s's next plain run would fetch the saved document again" % home.app.name)
-    if saved.exists():
+    if renames and saved.exists():
         assert rename_names_for(plain, saved) == [saved.name], (
             "%s's Rename would no longer name the saved file as it was saved"
             % home.app.name)
@@ -435,8 +436,10 @@ def test_an_id_a_later_listing_gave_never_reaches_a_saved_record(home):
     """Capital One and Schwab keep a document under its account, date,
     title and place, and write the id a later listing gives it over the one
     in discovery. A Download again that saved nothing wrote that id over the
-    one the saved file was named for, so Rename named the file for an id it
-    was never saved under."""
+    one the saved file was named for, in the record Rename reads for the
+    id. Which id Rename names a file for after a later listing is the
+    rename census's to hold (test_every_app_renames_each_file_for_its_own_record),
+    so this asks it nothing."""
     saved, before, found_before = saved_by_a_first_run(home)
     app = home.build()
     lists = getattr(app, relists_with_a_new_id(home.app))
@@ -449,7 +452,7 @@ def test_an_id_a_later_listing_gave_never_reaches_a_saved_record(home):
 
     app = a_download_again_of_nothing(home)
     assert app.progress.get(home.key)["document_id"] == SAVED_ID
-    the_saved_record_stands(home, saved, before, found_before, app)
+    the_saved_record_stands(home, saved, before, found_before, app, renames=False)
 
 
 # -- each way the app's own code ends an attempt with nothing saved ------------------
