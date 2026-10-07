@@ -19,11 +19,14 @@ Apple and Uber read the state discovery keeps to decide which purchases
 are settled, so a failed attempt had their next Discover open those again.
 Target went further and wrote downloaded_ok False after an invoice walk
 that fell short, so a failed Download again turned an order saved for good
-into one fetched on every run.
+into one fetched on every run. Kroger wrote the store the attempt read
+into the purchase list, and Walmart a date read outside the run's dates
+into the record, both outside _record_state.
 
-These drive each receipt app's own _record_state, _write_csv_rows and the
-branches that end an attempt without a copy, over an output folder on
-disk. Every name, number, amount and answer is invented.
+These drive each receipt app's own _record_state, _write_csv_rows and
+_finish_pdf, its _refuse_page and _left_unread where it has them, its Pilot
+report and its Review Names, and Kroger's and Walmart's own writes, over an
+output folder on disk. Every name, number, amount and answer is invented.
 """
 import argparse
 import ast
@@ -373,6 +376,104 @@ def test_review_names_after_a_copy_was_put_aside(app, tmp_path, monkeypatch):
     aside = [r for r in plain.index_csv.read_all()
              if Path(r["PDF Full Path"] or ".").parent == plain.paths.manual_review]
     assert aside and all(r["Processing Status"] != "Completed" for r in aside), aside
+
+
+@pytest.mark.parametrize("app", APPS, ids=IDS)
+def test_the_pilot_report_says_a_download_again_saved_nothing(app, tmp_path, capsys):
+    """The record keeps the saved copy, so its state says nothing of the
+    attempt. The Pilot report of that run names the attempt among what
+    needs attention, and a later run's report, which did not try it, does
+    not."""
+    from paperpull_core import saved_copy
+    mod = load(app)
+    out = tmp_path / "out"
+    saved, before, _found = saved_by_a_first_run(mod, out)
+    inst = app_in(mod, out, redownload=True)
+    put_aside_beside_the_saved_copy(inst, listed(), saved)
+    capsys.readouterr()
+    inst._pilot_report([listed()])
+    said = capsys.readouterr().out
+    assert "Needs attention" in said, said
+    assert saved_copy.NOTE in said.split("Needs attention")[-1], said
+
+    app_in(mod, out, redownload=False)._pilot_report([listed()])
+    assert saved_copy.NOTE not in capsys.readouterr().out
+
+
+# -- writes an app makes outside _record_state ---------------------------------------
+
+def kroger_takes(inst, p: Purchase, store: str):
+    """Kroger's process_one from the receipt read to the record and the
+    purchase list, as it writes them."""
+    p.store_info = store
+    inst._record_state(p, State.DETAILS_EXTRACTED, extra={"store_read": bool(p.store_info)})
+    inst._note_store(p)
+
+
+@pytest.mark.parametrize("saved_before", [True, False], ids=["saved", "never saved"])
+def test_kroger_keeps_the_store_a_saved_receipt_was_named_for(saved_before, tmp_path):
+    """Kroger writes the store read off a receipt into the purchase list as
+    well, which Rename reads over the record. A Download again that read
+    another store's banner and saved nothing gave that banner to the saved
+    receipt. A purchase never saved takes what its page says, as before."""
+    mod = load(REPO / "apps" / "kroger")
+    out = tmp_path / "out"
+    first = app_in(mod, out, redownload=False)
+    first.discovery.update(listed().key, listed().to_dict())
+    kroger_takes(first, listed(), "Invented Banner")
+    if saved_before:
+        p = listed()
+        p.store_info = "Invented Banner"
+        p.summary, p.confidence = SAVED_SUMMARY, "High"
+        path = opening_pdf(first.paths.folder_for(ONLINE) / name_for(SAVED_SUMMARY))
+        p.pdf_path, p.pdf_filename = str(path), path.name
+        first._record_state(p, State.PDF_VERIFIED, extra={
+            "pdf_size": path.stat().st_size, "pdf_pages": 1, "downloaded_ok": True})
+        first._record_state(p, State.COMPLETED)
+
+    inst = app_in(mod, out, redownload=True)
+    kroger_takes(inst, listed(), "Invented Other Banner")
+    want = "Invented Banner" if saved_before else "Invented Other Banner"
+    assert inst.discovery.get(listed().key)["store_info"] == want
+    assert inst._store_kept(listed().key) == want
+
+
+@pytest.mark.parametrize("saved_before", [True, False], ids=["saved", "never saved"])
+def test_walmart_keeps_the_date_of_a_saved_receipt(saved_before, tmp_path, monkeypatch):
+    """Download again is always limited to dates, and Walmart places a
+    purchase by the date its order page shows. One whose page dated it
+    outside them had that date written into the record a run left. For a
+    saved receipt that rewrote its record with nothing saved. A purchase
+    put aside before, never saved, still takes the date its page shows."""
+    mod = load(REPO / "apps" / "walmart")
+    out = tmp_path / "out"
+    if saved_before:
+        saved_by_a_first_run(mod, out)
+    else:
+        first = app_in(mod, out, redownload=False)
+        p = listed()
+        first._record_state(p, State.DETAILS_EXTRACTED)
+        assert finish(first, p, failing_copy(first.paths.folder_for(ONLINE)
+                                             / name_for(SAVED_SUMMARY))) is False
+    inst = app_in(mod, out, redownload=True)
+    inst.args.year, inst.args.start_date, inst.args.end_date = None, "2026-05-01", "2026-05-31"
+    record = dict(inst.progress.get(listed().key))
+    listing = dict(inst.discovery.get(listed().key) or {})
+
+    def read(page, purchase):
+        purchase.purchase_date = "2026-03-02"
+        return purchase
+
+    monkeypatch.setattr(mod.site, "goto_details", lambda page, purchase: None)
+    monkeypatch.setattr(mod.site, "extract_details", read)
+    inst.check_session = lambda page: False
+    assert inst.process_one(None, listed(), by_dates=True) == mod.OUTSIDE_DATES
+    if saved_before:
+        assert inst.progress.get(listed().key) == record
+        assert (inst.discovery.get(listed().key) or {}) == listing
+    else:
+        assert inst.progress.get(listed().key)["purchase_date"] == "2026-03-02"
+        assert inst.discovery.get(listed().key)["purchase_date"] == "2026-03-02"
 
 
 # -- an attempt that does save still takes the record --------------------------------

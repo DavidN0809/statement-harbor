@@ -23,17 +23,43 @@ since Apple and Uber read it to tell which purchases are settled. A write
 that saves a copy carries downloaded_ok True, and from then on the
 attempt's writes take the record as they always did, since it now names
 the attempt's own copy. downloaded_ok is never taken away here, so a
-purchase saved once is still never fetched again by a plain run.
+purchase saved once is still never fetched again by a plain run, and only
+another Download again tries it.
+
+holding() is the same question for a write an app makes outside
+_record_state, Kroger's store in the purchase list and Walmart's date read
+off an order page, and tried() is what the Pilot report says of an
+attempt held in this run.
 """
 from __future__ import annotations
 
-# What an attempt that saved nothing adds to the saved copy's notes. A later
-# attempt's takes its place, so the notes say only how the latest one ended.
-NOTE = "Not downloaded again"
+# The first words of what an attempt that saved nothing adds to the saved
+# copy's notes. A later attempt's entry takes the place of the one found by
+# them, so the notes say only how the latest one ended.
+NOTE = "Download again saved nothing new"
+_ENTRY = NOTE + ", and only another Download again tries it (%s)"
 
-# The purchases this run has saved a copy of, kept on the app, since a run
-# is one app object and a new run starts with none.
+# Kept on the app, since a run is one app object and a new run starts with
+# neither. The purchases this run has saved a copy of, and the entry each
+# held attempt left in the notes.
 _SAVED_NOW = "_saved_copies_this_run"
+_HELD_NOW = "_held_attempts_this_run"
+
+
+def _kept_on(app, name: str, empty):
+    found = getattr(app, name, None)
+    if found is None:
+        found = empty
+        setattr(app, name, found)
+    return found
+
+
+def holding(app, key: str) -> bool:
+    """True while the record of `key` is that of a purchase saved before
+    and this run has saved no copy of its own for it."""
+    if key in _kept_on(app, _SAVED_NOW, set()):
+        return False
+    return bool((app.progress.get(key) or {}).get("downloaded_ok"))
 
 
 def holds(app, key: str, rec: dict, also=()) -> bool:
@@ -45,30 +71,31 @@ def holds(app, key: str, rec: dict, also=()) -> bool:
     `also` names keys of the attempt's own that are written all the same,
     Target's list of the invoices a walk put on disk, so that none of them
     is saved twice."""
-    mine = getattr(app, _SAVED_NOW, None)
-    if mine is None:
-        mine = set()
-        setattr(app, _SAVED_NOW, mine)
     if rec.get("downloaded_ok") is True:
-        mine.add(key)
+        _kept_on(app, _SAVED_NOW, set()).add(key)
+        _kept_on(app, _HELD_NOW, {}).pop(key, None)
         return False
-    if key in mine:
+    if not holding(app, key):
         return False
     old = app.progress.get(key) or {}
-    if not old.get("downloaded_ok"):
-        return False
     patch = {name: rec[name] for name in also if name in rec}
-    patch["notes"] = noted(old.get("notes"), rec.get("state"), rec.get("notes"))
+    entry = _ENTRY % ", ".join(_said(rec.get("state"), rec.get("notes")))
+    patch["notes"] = "; ".join(
+        [p for p in str(old.get("notes") or "").split("; ") if p and not p.startswith(NOTE)]
+        + [entry])
     app.progress.update(key, patch)
+    _kept_on(app, _HELD_NOW, {})[key] = entry
     return True
 
 
-def noted(kept, state, said) -> str:
-    """The saved copy's notes, with one entry for the latest attempt in
-    place of any earlier one. The entries are joined the way an app joins
-    a purchase's notes, so the attempt's own are joined by commas inside
-    its entry, and an earlier entry is found by its first words."""
-    parts = [p for p in str(kept or "").split("; ") if p and not p.startswith(NOTE)]
-    what = [str(state or "")] + [p for p in str(said or "").split("; ") if p]
-    parts.append("%s (%s)" % (NOTE, ", ".join(w for w in what if w)))
-    return "; ".join(parts)
+def tried(app, key: str) -> str:
+    """The entry a Download again held in this run left in the notes of
+    `key`, or empty when there was none."""
+    return _kept_on(app, _HELD_NOW, {}).get(key, "")
+
+
+def _said(state, notes) -> list:
+    """The attempt's state and its own notes, each a part of one entry. An
+    app joins a purchase's notes with semicolons, so they are taken apart
+    here and joined with commas inside the entry."""
+    return [w for w in [str(state or "")] + str(notes or "").split("; ") if w]

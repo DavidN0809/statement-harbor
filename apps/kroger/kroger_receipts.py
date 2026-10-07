@@ -975,6 +975,10 @@ class App:
                       f"({rec.get('pdf_size','?')} bytes, {rec.get('pdf_pages','?')} pages)")
                 if not exists:
                     problems.append(f"{p.key}: PDF missing")
+            # A Download again that saved nothing kept the saved copy's
+            # record as it was, so it is said here (paperpull_core.saved_copy).
+            if saved_copy.tried(self, p.key):
+                problems.append(f"{p.key}: {saved_copy.tried(self, p.key)}")
             if state in (State.NEEDS_MANUAL_REVIEW.value, State.FAILED.value,
                          State.NO_RECEIPT_AVAILABLE.value):
                 problems.append(f"{p.key}: {state} - {rec.get('notes','')}")
@@ -1121,7 +1125,11 @@ class App:
 
     def _note_store(self, purchase: Purchase) -> None:
         """The purchase list says the same as the record, since Rename reads
-        the list over the record (review)."""
+        the list over the record (review). A receipt saved before keeps the
+        store its record has while a Download again saves no copy of its
+        own (paperpull_core.saved_copy)."""
+        if saved_copy.holding(self, purchase.key):
+            return
         if self.discovery.get(purchase.key) is not None:
             self.discovery.update(purchase.key, {
                 "store_info": purchase.store_info,

@@ -1591,6 +1591,10 @@ class App:
                       f"({rec.get('pdf_size','?')} bytes, {rec.get('pdf_pages','?')} pages)")
                 if not exists:
                     problems.append(f"{p.key}: PDF missing")
+            # A Download again that saved nothing kept the saved copy's
+            # record as it was, so it is said here (paperpull_core.saved_copy).
+            if saved_copy.tried(self, p.key):
+                problems.append(f"{p.key}: {saved_copy.tried(self, p.key)}")
             if state in (State.NEEDS_MANUAL_REVIEW.value, State.FAILED.value,
                          State.NO_RECEIPT_AVAILABLE.value):
                 problems.append(f"{p.key}: {state} - {rec.get('notes','')}")

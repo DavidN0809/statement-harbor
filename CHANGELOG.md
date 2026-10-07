@@ -59,6 +59,34 @@ All notable changes to PaperPull are recorded here. Versioning follows
   told apart by the last six characters of its id, as an EOB already was.
   A file saved before keeps its name until Rename is run, which offers the
   new name in a preview first.
+- **A receipt already saved keeps its record when Download again saves
+  nothing.** Download again takes every purchase in scope again, the ones
+  saved before included. In every receipt app, an attempt that ended with
+  no copy of its own rewrote the saved receipt's record, at a page that
+  would not open or was not the purchase's, with no receipt on the page, a
+  control it could not read or an error, or with a copy that failed its
+  check and was put aside in Manual Review. The record then named no file,
+  or the copy put aside, with the attempt's summary and a state of Needs
+  Manual Review, No Receipt Available or Failed, and after a wrong page
+  that page's own total and items. Kroger also gave its purchase list the
+  store the attempt read, which Rename reads for a receipt saved before
+  0.41.0, and Walmart gave the record a date the attempt's page showed
+  outside the dates of the run. Nothing was fetched again because of it.
+  But the Pilot report showed the failed attempt in place of the saved
+  receipt, the File names page's preview showed the copy put aside or left
+  the receipt out, Rename named the saved file for the failed attempt,
+  after a wrong page for another purchase, and Review Names no longer took
+  the record for the saved file's. Apple's and Uber's next Discover also
+  read the purchase from the site again, as one not yet settled. Now an
+  attempt changes nothing in a saved receipt's record until it has saved
+  a copy of its own. The record's notes say how it ended and that only
+  another Download again tries it, since a plain run never does, and the
+  Pilot report of that run lists it among what needs attention. Target
+  also took the saved mark off an order when a Download again could not
+  save every one of its invoices, so every later run walked it again. It
+  now stays saved, the invoices that attempt did save are remembered so
+  none is saved twice, and a Download again of the same dates fetches the
+  rest.
 
 ### Security
 - **M&T presses a year heading only when nothing covers it, and once.**
@@ -394,28 +422,6 @@ did not read.
   at most thirty times and no further once a press draws nothing new. A
   row counts only once its download icon is drawn, where one in the
   page's text that was not drawn used to count. Contributed by tylerverry.
-- **A receipt already saved keeps its record when Download again saves
-  nothing.** Download again takes every purchase in scope again, the ones
-  saved before included. In every receipt app, an attempt that ended with
-  no copy of its own rewrote the saved receipt's record, at a page that
-  would not open or was not the purchase's, with no receipt on the page, a
-  control it could not read or an error, or with a copy that failed its
-  check and was put aside in Manual Review. The record then named no file,
-  or the copy put aside, with the attempt's summary and a state of Needs
-  Manual Review, No Receipt Available or Failed, and after a wrong page
-  that page's own total and items. Nothing was fetched again because of
-  it. But the Pilot report listed the receipt as needing attention, the
-  File names page's preview showed the copy put aside or left the receipt
-  out, Rename named the saved file for the failed attempt, after a wrong
-  page for another purchase, and Review Names no longer took the record
-  for the saved file's. Apple's and Uber's next Discover also read the
-  purchase from the site again, as one not yet settled. Now an attempt
-  changes nothing in a saved receipt's record until it has saved a copy
-  of its own, and the record's notes say how it ended. Target also took
-  the saved mark off an order when a Download again could not save every
-  one of its invoices, so every later run walked it again. It now stays
-  saved, the invoices that attempt did save are remembered so none is
-  saved twice, and a Download again of the same dates fetches the rest.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never

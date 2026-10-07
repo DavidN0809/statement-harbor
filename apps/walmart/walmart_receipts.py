@@ -757,11 +757,15 @@ class App:
                 # Not saved and not recorded as done, so a run that includes
                 # its date takes it. Only the date is kept, in discovery and
                 # in a record an earlier run left, which the selection reads
-                # first, so that run and every other places it unopened.
+                # first, so that run and every other places it unopened. A
+                # receipt saved before keeps the date its record has, since
+                # Download again is always limited to dates and a page that
+                # dates it otherwise saved nothing (paperpull_core.saved_copy).
                 read = {"purchase_date": purchase.purchase_date}
-                self.discovery.update(purchase.key, read)
-                if self.progress.get(purchase.key):
-                    self.progress.update(purchase.key, read)
+                if not saved_copy.holding(self, purchase.key):
+                    self.discovery.update(purchase.key, read)
+                    if self.progress.get(purchase.key):
+                        self.progress.update(purchase.key, read)
                 self.stats["outside_dates"] += 1
                 print(f"  Its order page dates it {purchase.purchase_date}, outside the dates")
                 print("  asked for, so it is left for a run that includes them.")
@@ -1247,6 +1251,10 @@ class App:
                 print(f"    PDF exists: {exists}  ({size} bytes, {pages} pages)")
                 if not exists:
                     problems.append(f"{p.key}: PDF missing")
+            # A Download again that saved nothing kept the saved copy's
+            # record as it was, so it is said here (paperpull_core.saved_copy).
+            if saved_copy.tried(self, p.key):
+                problems.append(f"{p.key}: {saved_copy.tried(self, p.key)}")
             if state in (State.NEEDS_MANUAL_REVIEW.value, State.FAILED.value,
                          State.NO_RECEIPT_AVAILABLE.value):
                 problems.append(f"{p.key}: {state} - {rec.get('notes','')}")
