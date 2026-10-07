@@ -20,7 +20,10 @@ Concretely, and stated as what the code actually does:
 - **Exactly one thing is ever clicked**: a collapsed year section on the
   statements page, so the older years can be read. Its label is checked against
   the blocklist (`FORBIDDEN_CONTROL_RE`) first, and the click is skipped if
-  anything about it reads like a payment or settings control.
+  anything about it reads like a payment or settings control. It is clicked
+  only when nothing covers it, inside the frame the list sits in or over that
+  frame on the page, and the run stops instead when something does. No year
+  section is clicked twice.
 - **Only pages served by M&T are touched.** This attaches to your ordinary
   browser, so every frame is host-checked before it is read or clicked. Other
   tabs you have open are ignored entirely.

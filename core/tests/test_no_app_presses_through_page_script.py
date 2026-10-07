@@ -99,15 +99,6 @@ REVIEWED = {
         "tell stops the run, and a control the page took away is not pressed at all. "
         "When this press itself raises it may have been made, and nothing more is "
         "pressed.",
-    ("apps/mtb/mtb_site.py", "_OPEN_TABLE_CLICK_JS", "click()"):
-        "The first collapsed year heading on M&T's statements list, in a frame "
-        "M&T serves, whose press lists that year through a GET. Its heading's words "
-        "are read first and checked against the forbidden words, and the press then "
-        "finds the first collapsed heading again in a call of its own. The loop "
-        "stops the moment the count of collapsed years stops falling, so a heading "
-        "that does not open is pressed once. Nothing checks what covers it, and "
-        "paperpull_core.pressing reads only a page's main frame, so it could not "
-        "check a heading in this frame.",
     ("apps/pge/pge_site.py", "_SAVE_BLOB_JS", "click()"):
         "A link this code makes itself, pointing at a PDF the page made, on the "
         "page's own origin and marked as a download, never one of the page's own "

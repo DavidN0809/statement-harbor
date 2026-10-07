@@ -36,12 +36,15 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from paperpull_core import pressing
 from paperpull_core import redirects
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core.words import words_for as _words_for
 
 log = logging.getLogger("mtb_docs.site")
 
@@ -407,22 +410,73 @@ _TAX_ROWS_JS = r"""() => {
 }"""
 
 
-# The collapsed-year expander. Read its label first, click only if the label
-# clears the blocklist, then re-count. Kept as three tiny reads so the click is
-# a separate, guarded step rather than something buried in a bigger script.
+# The collapsed-year expander. Its heading's words are read from the very
+# element that is then pressed, through paperpull_core.pressing, which presses
+# only when nothing covers it in its frame or covers the frame in the page.
+_OPEN_TABLE = "span.open-table"
 _OPEN_TABLE_COUNT_JS = r"""() => document.querySelectorAll('span.open-table').length"""
-_OPEN_TABLE_LABEL_JS = r"""() => {
-  const s = document.querySelector('span.open-table');
-  if (!s) return '';
+_HEADING_WORDS_JS = r"""(s) => {
   const h = s.closest('h2') || s.parentElement;
   return ((h ? h.innerText : s.innerText) || '').replace(/\s+/g, ' ').trim();
 }"""
-_OPEN_TABLE_CLICK_JS = r"""() => {
-  const s = document.querySelector('span.open-table');
-  if (!s) return false;
-  s.click();
-  return true;
-}"""
+# Whether the element is one of those already pressed.
+_ONE_OF_JS = r"""(s, pressed) => pressed.some((p) => p === s)"""
+_YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
+
+
+def _words():
+    """This app's own words for paperpull_core.words, from what its source
+    calls it, for saying what covered a control."""
+    return _words_for("M&T Bank", sys.modules[__name__])
+
+
+def _open_years(fr) -> None:
+    """Open every collapsed year of the statements list in frame `fr`.
+
+    Each heading is pressed once at most, through paperpull_core.pressing
+    from a handle on the heading itself, so the words checked are the words
+    of the heading pressed. Something over a heading, inside its frame or
+    over the frame in the page, stops the run (pressing.Covered), and so
+    does a heading that cannot be checked (pressing.Unread). A heading
+    already pressed, the same element or one with its words or its id, is
+    never pressed again, and the loop ends the moment the count of
+    collapsed years stops falling."""
+    page = fr.page
+    pressed = []
+    known = set()
+    remaining = fr.evaluate(_OPEN_TABLE_COUNT_JS)
+    for _ in range(20):
+        if not remaining:
+            break
+        heading = fr.query_selector(_OPEN_TABLE)
+        if heading is None:
+            break
+        label = heading.evaluate(_HEADING_WORDS_JS) or ""
+        if FORBIDDEN_CONTROL_RE.search(label):
+            log.warning("refusing to expand a section labeled %r", label[:40])
+            break
+        ident = heading.get_attribute("id") or ""
+        if ((label and ("words", label) in known) or (ident and ("id", ident) in known)
+                or heading.evaluate(_ONE_OF_JS, pressed)):
+            log.warning("a year section pressed once already is still collapsed (%d left); "
+                        "reading what is on screen. Expand the years yourself and re-run "
+                        "if statements look short.", remaining)
+            break
+        year = _YEAR_RE.search(label)
+        what = ("the heading of the year %s on the statements list" % year.group(0) if year
+                else "a year heading on the statements list")
+        pressing.click(page, heading, css=_OPEN_TABLE, what=what, words=_words(),
+                       step="open a year of statements", frame=fr)
+        pressed.append(heading)
+        known.update(k for k in (("words", label), ("id", ident)) if k[1])
+        fr.wait_for_timeout(1200)
+        now = fr.evaluate(_OPEN_TABLE_COUNT_JS)
+        if now >= remaining:
+            log.warning("a year section did not open (%d left); reading "
+                        "what is on screen. Expand the years yourself "
+                        "and re-run if statements look short.", now)
+            break
+        remaining = now
 
 
 def _tax_year(row_text: str, fallback: str) -> str:
@@ -498,28 +552,11 @@ def collect_statement_rows(page) -> List[dict]:
         # <span class="open-table"> whose click fires a FetchYearlyStatements
         # GET that lists that year - a read, not a form submit. Expand them all
         # or five-plus years are silently missed (they were, until a user
-        # noticed). The click is guarded like any other control, and the loop
-        # stops the moment the count stops falling, so a span whose class never
-        # flips is clicked once, not fifteen times.
+        # noticed). Each press is guarded like any other control (_open_years),
+        # and a stop at a press is a SystemExit, which passes this except and
+        # ends the run.
         try:
-            remaining = fr.evaluate(_OPEN_TABLE_COUNT_JS)
-            for _ in range(20):
-                if not remaining:
-                    break
-                label = fr.evaluate(_OPEN_TABLE_LABEL_JS) or ""
-                if FORBIDDEN_CONTROL_RE.search(label):
-                    log.warning("refusing to expand a section labeled %r", label[:40])
-                    break
-                if not fr.evaluate(_OPEN_TABLE_CLICK_JS):
-                    break
-                fr.wait_for_timeout(1200)
-                now = fr.evaluate(_OPEN_TABLE_COUNT_JS)
-                if now >= remaining:
-                    log.warning("a year section did not open (%d left); reading "
-                                "what is on screen. Expand the years yourself "
-                                "and re-run if statements look short.", now)
-                    break
-                remaining = now
+            _open_years(fr)
         except Exception as e:
             log.info("year expansion stopped: %s", str(e).splitlines()[0][:80])
         # Harvest regardless of whether expansion worked, so a failed expand

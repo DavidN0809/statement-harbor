@@ -59,11 +59,12 @@ def load(app: Path):
 
 def test_every_app_that_presses_through_pressing_is_here():
     """Not vacuous. American Express, Vanguard, ADP, whose View statement
-    goes through press_once, and the twelve whose fallback press does,
-    found by what their code calls."""
+    goes through press_once, the twelve whose fallback press does, and
+    M&T, whose year headings are pressed in their frame through
+    pressing.click, found by what their code calls."""
     assert {d.name for d in APPS} >= {
         "amex", "vanguard", "adp", "amfam", "applecard", "att", "etrade", "golden1",
-        "newrez", "pge", "sba", "smud", "statefarm", "verizonmobile", "wellsfargo"}
+        "newrez", "pge", "sba", "smud", "statefarm", "verizonmobile", "wellsfargo", "mtb"}
 
 
 @pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)

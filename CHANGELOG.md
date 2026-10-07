@@ -412,9 +412,8 @@ did not read.
   the apps and the core hand to a page, followed back through names,
   imports, joins, formats and the helpers that pass a script along, and
   fails on any press a page script makes that is not on its reviewed list
-  with the reason it is safe. Besides the core's own, three remain on it,
-  M&T's year headings in its statements frame, and two links PG&E makes
-  itself to save a PDF.
+  with the reason it is safe. Besides the core's own, the two that remain
+  on it are links PG&E makes itself to save a PDF.
 - **ADP presses the View statement that shows its identity check only when
   it shows with nothing over it.** When ADP holds back a tax statement until
   the person verifies themselves, the app presses the Tax Statements card's
@@ -426,6 +425,22 @@ did not read.
   run before it says a prompt is showing, saying why in PaperPull's own
   words and writing the failure file. The scaffold capture ADP carried,
   which no run called, is gone.
+- **M&T presses a year heading only when nothing covers it, and never
+  twice.** M&T's statements list opens one year at a time, and the app
+  pressed each collapsed year's heading through the page with nothing
+  checking what was drawn over it, since the core could check what covers
+  a control only in a page's main frame and the list sits in a frame. The
+  core now reads a control inside a frame in that frame, then checks that
+  the frame is the thing on top in the page at the point to be pressed, as
+  Playwright checks before its own press, and reads that point once more
+  right after the press. M&T presses each heading that way, with
+  Playwright's own press. Something over a heading, inside the frame or
+  over the frame in the page, stops the run before anything is pressed, and
+  so does a heading that cannot be checked, with the reason said in
+  PaperPull's own words and the failure file written. The words held to
+  the forbidden list are now those of the heading pressed, where a second
+  call used to find the heading again, and a heading pressed once is never
+  pressed again, whether it stayed collapsed or the list was drawn anew.
 
 ## [0.44.0] - 2026-10-07
 
