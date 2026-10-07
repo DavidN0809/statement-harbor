@@ -12,7 +12,9 @@ which it sends when it opens an address by itself, for a link opened from
 an email, a chat or a PDF. So an address of the API opened that way is
 shown refused, with the header the browser really sent, and the page's own
 spreadsheet and failure file on PaperPull Server, the two addresses of the
-API the page sends the browser to, are shown still handed over.
+API the page sends the browser to, are shown still handed over. The
+server's forms that choose a password and sign in and out ask the same
+question as the API, so they are posted here too.
 
 Playwright's own headless Chromium, never a browser of the person's,
 against the real panel served on a free local port, with every setting
@@ -221,6 +223,35 @@ def test_on_the_server_the_page_still_hands_over_its_spreadsheet_and_failure_fil
         with tab.expect_download(timeout=15000) as handed:
             tab.evaluate("revealFailure()")
         assert Path(handed.value.path()).read_bytes() == b'{"step": "a step"}'
+    finally:
+        context.close()
+
+
+def test_on_the_server_its_own_forms_still_set_the_password_and_sign_in_and_out(
+        browser, port, shop, monkeypatch):
+    """Each is a form a page of the server's posts, which the browser marks
+    same-origin, and each asks the same question as the API. Refused, nobody
+    could choose a password or sign in."""
+    monkeypatch.setenv("PAPERPULL_SERVER", "1")
+    base = "http://127.0.0.1:%d" % port
+    context = browser.new_context()
+    try:
+        tab = context.new_page()
+        tab.goto(base + "/")
+        assert tab.url == base + "/setup"
+        tab.fill("#code", server_mode.setup_code())
+        tab.fill("#password", PASSWORD)
+        tab.fill("#again", PASSWORD)
+        with tab.expect_navigation():
+            tab.get_by_role("button", name="Set the password").click()
+        assert tab.url == base + "/"
+        with tab.expect_navigation():
+            tab.get_by_role("button", name="Sign out").click()
+        assert tab.url == base + "/login"
+        tab.fill("#password", PASSWORD)
+        with tab.expect_navigation():
+            tab.get_by_role("button", name="Sign in").click()
+        assert tab.url == base + "/" and tab.title() == "PaperPull"
     finally:
         context.close()
 
