@@ -438,9 +438,11 @@ def _open_years(fr) -> None:
     of the heading pressed. Something over a heading, inside its frame or
     over the frame in the page, stops the run (pressing.Covered), and so
     does a heading that cannot be checked (pressing.Unread). A heading
-    already pressed, the same element or one with its words or its id, is
-    never pressed again, and the loop ends the moment the count of
-    collapsed years stops falling."""
+    already pressed, the same element or one drawn anew with both its words
+    and its id, is never pressed again, and the loop ends the moment the
+    count of collapsed years stops falling. Words or an id alone do not tell
+    a heading, since two years can share either one, and taking them for
+    one heading would leave a year unread."""
     page = fr.page
     pressed = []
     known = set()
@@ -455,12 +457,11 @@ def _open_years(fr) -> None:
         if FORBIDDEN_CONTROL_RE.search(label):
             log.warning("refusing to expand a section labeled %r", label[:40])
             break
-        ident = heading.get_attribute("id") or ""
-        if ((label and ("words", label) in known) or (ident and ("id", ident) in known)
-                or heading.evaluate(_ONE_OF_JS, pressed)):
-            log.warning("a year section pressed once already is still collapsed (%d left); "
-                        "reading what is on screen. Expand the years yourself and re-run "
-                        "if statements look short.", remaining)
+        key = (heading.get_attribute("id") or "", label)
+        if (all(key) and key in known) or heading.evaluate(_ONE_OF_JS, pressed):
+            log.warning("a year section pressed once already is still collapsed (%d left), "
+                        "so the run reads what is on screen. Expand the years yourself and "
+                        "re-run if statements look short.", remaining)
             break
         year = _YEAR_RE.search(label)
         what = ("the heading of the year %s on the statements list" % year.group(0) if year
@@ -468,7 +469,7 @@ def _open_years(fr) -> None:
         pressing.click(page, heading, css=_OPEN_TABLE, what=what, words=_words(),
                        step="open a year of statements", frame=fr)
         pressed.append(heading)
-        known.update(k for k in (("words", label), ("id", ident)) if k[1])
+        known.add(key)
         fr.wait_for_timeout(1200)
         now = fr.evaluate(_OPEN_TABLE_COUNT_JS)
         if now >= remaining:

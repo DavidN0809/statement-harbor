@@ -228,6 +228,24 @@ def test_a_heading_pressed_once_is_never_pressed_again(show, how):
     assert frame.locator("span.open-table").count() == 1
 
 
+@pytest.mark.parametrize("shared", ["id", "words"])
+def test_years_that_share_an_id_or_words_are_each_opened(show, shared):
+    """Two years can share a heading's id, or its words when the year is
+    written somewhere else. Each heading is still a heading of its own, and
+    every year is opened and read."""
+    years_ = [heading(2026, open_=True)]
+    for year in (2025, 2024, 2023):
+        h = heading(year, words="Statements" if shared == "words" else None)
+        if shared == "id":
+            h = h.replace("spViewStatementsElectronic-%s" % year, "spViewStatementsElectronic-7")
+        years_.append(h)
+    page = show("".join(years_))
+    frame = page.frame(name="statements")
+    rows = site.collect_statement_rows(page)
+    assert said(frame) == ["open-2025", "open-2024", "open-2023"]
+    assert listed_years(rows) == ["2023", "2024", "2025", "2026"]
+
+
 def test_a_heading_whose_words_are_refused_is_not_pressed(show):
     page = show(heading(2026, open_=True)
                 + heading(2025, words="Change paperless options for 2025"))

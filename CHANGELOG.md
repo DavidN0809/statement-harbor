@@ -433,7 +433,9 @@ did not read.
   core now reads a control inside a frame in that frame, then checks that
   the frame is the thing on top in the page at the point to be pressed, as
   Playwright checks before its own press, and reads that point once more
-  right after the press. M&T presses each heading that way, with
+  right after the press, unless the control heard the browser's own click
+  of it, so a loading cover put up once the press went through does not
+  stop the run. M&T presses each heading that way, with
   Playwright's own press. Something over a heading, inside the frame or
   over the frame in the page, stops the run before anything is pressed, and
   so does a heading that cannot be checked, with the reason said in

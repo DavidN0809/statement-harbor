@@ -15,6 +15,7 @@ into a line of its own, read back through a locator. The control sits far
 down a frame that sits far down the page, so nothing is read before it is
 brought to the middle of the window. Every word on these pages is made up.
 """
+import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -47,11 +48,14 @@ FRAME = ('<iframe id="%s" name="%s" src="%s" style="border: 3px solid; padding: 
 
 def frame_tag(name, src, style=""):
     return FRAME % (name, name, src, style)
+
+
 SPACE = '<div style="height: 1500px"></div>'
 
 # The control, far down its frame.
 CONTROL = ('<div style="height: 900px"></div><button id="go" type="button" '
-           'onclick="said(\'go\')%s">Statements of 2024</button><div style="height: 900px"></div>')
+           'style="padding: 12px 24px" onclick="said(\'go\')%s">Statements of 2024</button>'
+           '<div style="height: 900px"></div>')
 COVER = ('<div class="cover" role="dialog" aria-label="Chat with %s" onclick="said(\'cover\')" '
          'onmousedown="said(\'cover-down\')"><span>%s</span></div>' % (CANARY, CANARY))
 
@@ -273,13 +277,80 @@ def test_a_frame_of_another_site_drawn_by_a_process_of_its_own(isolated, site, w
     assert said(page.main_frame) == []
 
 
-@pytest.mark.parametrize("drawn, why", [("transform: scale(0.8)", "frame scaled"),
-                                        ("transform: rotate(3deg)", "frame")])
-def test_a_frame_not_drawn_at_its_own_size_and_square_is_not_read(browser, site, drawn, why):
+# A frame of another site with 30 pixels of padding, where Playwright's
+# press lands 33 pixels above and left of the control's middle, and a wide
+# control placed so that its middle is at 250 across the frame's window and
+# the press at 217. On the page the frame's window begins 33 across, so the
+# middle is at 283 and the press at 250.
+WIDE = ('<div style="height: 900px"></div><button id="go" type="button" style="position: '
+        'absolute; left: 100px; top: 900px; width: 300px; height: 120px" '
+        'onclick="said(\'go\')">Statements of 2024</button><div style="height: 900px"></div>')
+PADDED = "; padding: 30px"
+
+
+def test_in_a_frame_of_its_own_a_cover_where_the_press_lands_is_found(isolated, site):
+    """A box of the page over the frame's left part, over where the press
+    lands and not over the control's middle. It is found before the press."""
+    cover = ('<div style="position: fixed; left: 0; top: 0; width: 265px; height: 100vh; '
+             'z-index: 10; background: #06c" onclick="said(\'cover\')">Offer</div>')
+    main = SPACE + frame_tag("f", site.other + "inner", PADDED) + SPACE + cover
+    page = opened(isolated, site, main, inner=WIDE)
+    frame = page.frame(name="f")
+    page.context.new_cdp_session(frame).detach()
+    with pytest.raises(pressing.Covered) as stopped:
+        press(page, frame)
+    assert stopped.value.facts["over_the_frame"] is True
+    assert stopped.value.after_a_press is False
+    assert said(frame) == [] and said(page.main_frame) == []
+
+
+def test_in_a_frame_of_its_own_the_point_read_after_the_press_is_where_it_landed(
+        isolated, site):
+    """A frame inside the control's frame comes over the frame's left part
+    as the pointer comes, over where the press lands and not over the
+    control's middle, and takes the press. The point is read again where
+    the press landed, so the run stops."""
+    late = ('<iframe id="late" style="position: fixed; left: 0; top: 0; width: 235px; '
+            'height: 100vh; border: 0; z-index: 9; visibility: hidden" '
+            'srcdoc="<body style=&quot;margin: 0&quot;><button style=&quot;width: 100vw; '
+            'height: 100vh&quot; onmousedown=&quot;parent.said(\'frame-down\')&quot;>Chat'
+            '</button></body>"></iframe>')
+    main = SPACE + frame_tag("f", site.other + "inner", PADDED) + SPACE
+    page = opened(isolated, site, main, inner=WIDE + late + SHOW_LATE % "document")
+    frame = page.frame(name="f")
+    page.context.new_cdp_session(frame).detach()
+    with pytest.raises(pressing.Covered) as stopped:
+        press(page, frame)
+    assert stopped.value.facts["after_the_press"] is True
+    assert said(frame) == ["frame-down"]
+
+
+def test_in_a_frame_of_its_own_a_press_that_would_land_beside_the_control_is_not_made(
+        isolated, site):
+    """The control is shorter than the frame's border and padding, so
+    Playwright's press would land above it. Nothing is pressed."""
+    main = SPACE + frame_tag("f", site.other + "inner", PADDED) + SPACE
+    page = opened(isolated, site, main, inner=CONTROL % "")
+    frame = page.frame(name="f")
+    with pytest.raises(pressing.Unread) as stopped:
+        press(page, frame)
+    assert stopped.value.facts == {"why": "off the control"}
+    assert said(frame) == []
+
+
+@pytest.mark.parametrize("drawn, why, own", [("transform: scale(0.8)", "frame scaled", False),
+                                             ("transform: rotate(3deg)", "frame", False),
+                                             ("transform: rotate(3deg)", "frame", True)])
+def test_a_frame_not_drawn_at_its_own_size_and_square_is_not_read(request, site, drawn, why,
+                                                                   own):
     """A point does not carry across into a frame drawn at another size
-    than its own window, or turned, so nothing is pressed."""
-    main, frames = framed(site, style="; " + drawn + "; transform-origin: 0 0")
-    page = opened(browser, site, main, **frames)
+    than its own window, or turned, so nothing is pressed. A turned frame
+    of the page's own process is not even found by where its element sits,
+    and one drawn by a process of its own is refused where it is placed."""
+    main, frames = framed(site, style="; " + drawn + "; transform-origin: 0 0",
+                          host=site.other if own else None)
+    page = opened(request.getfixturevalue("isolated" if own else "browser"), site, main,
+                  **frames)
     frame = page.frame(name="f")
     with pytest.raises(pressing.Unread) as stopped:
         press(page, frame)
@@ -287,11 +358,26 @@ def test_a_frame_not_drawn_at_its_own_size_and_square_is_not_read(browser, site,
     assert said(frame) == []
 
 
-def test_two_frames_alike_are_not_told_apart_so_nothing_is_pressed(browser, site):
-    """Two frames of the page with the same address and the same name. Which
-    one the control is in cannot be told, so nothing is pressed."""
+def test_two_frames_alike_in_two_places_are_told_apart_by_where_they_sit(browser, site):
+    """Two frames of the page with the same address and the same name, one
+    after the other. Where each one's element sits tells them apart, and
+    only the control in the one handed over is pressed."""
     main = (SPACE + frame_tag("f", site.here + "inner") + frame_tag("f", site.here + "inner")
             + SPACE)
+    page = opened(browser, site, main, inner=CONTROL % "")
+    first, second = page.frames[1], page.frames[2]
+    assert first.name == second.name == "f" and first.url == second.url
+    press(page, second)
+    assert said(second) == ["go"] and said(first) == []
+
+
+def test_two_frames_alike_in_one_place_are_not_told_apart_so_nothing_is_pressed(browser, site):
+    """Two frames with the same address and the same name, drawn in the same
+    place. Which one the control is in cannot be told, so nothing is
+    pressed."""
+    place = "; position: absolute; left: 0; top: 1500px"
+    main = (SPACE + frame_tag("f", site.here + "inner", place)
+            + frame_tag("f", site.here + "inner", place) + SPACE)
     page = opened(browser, site, main, inner=CONTROL % "")
     second = page.frames[2]
     assert second.name == "f" and second.parent_frame == page.main_frame
@@ -299,6 +385,47 @@ def test_two_frames_alike_are_not_told_apart_so_nothing_is_pressed(browser, site
         press(page, second)
     assert stopped.value.facts == {"why": "frame"}
     assert said(second) == [] and said(page.frames[1]) == []
+
+
+def _tree_children(page) -> list:
+    session = page.context.new_cdp_session(page)
+    try:
+        tree = session.send("Page.getFrameTree")["frameTree"]
+    finally:
+        session.detach()
+    return [c["frame"] for c in tree.get("childFrames") or []]
+
+
+def test_a_frame_that_renamed_itself_is_still_found(browser, site):
+    """The frame's own script gives its window another name. Playwright
+    still knows it by the name it loaded with, and the frame is found by
+    where its element sits."""
+    main, frames = framed(site, inner_extra="<script>window.name = 'renamed';</script>")
+    page = opened(browser, site, main, **frames)
+    frame = page.frame(name="f")
+    # Not vacuous. The browser's own frame tree names it otherwise.
+    assert [c.get("name") for c in _tree_children(page)] == ["renamed"]
+    press(page, frame)
+    assert said(frame) == ["go"]
+
+
+def test_a_frame_its_page_wrote_into_is_still_found(browser, site):
+    """The page makes an empty frame and writes the control into it.
+    Playwright still gives the frame its first address, about:blank, and
+    the browser's own frame tree gives it the page's."""
+    # Within the page's script, every </ is written <\/ so it ends nothing.
+    written = json.dumps(HEAD + CONTROL % "" + "</body></html>").replace("</", "<\\/")
+    main = (SPACE + '<div id="here"></div>' + SPACE
+            + "<script>const f = document.createElement('iframe'); f.name = 'w';"
+            " f.style.cssText = 'border: 3px solid; padding: 6px; width: 500px; height: 300px';"
+            " document.getElementById('here').appendChild(f); const d = f.contentDocument;"
+            " d.open(); d.write(%s); d.close();</script>" % written)
+    page = opened(browser, site, main)
+    frame = page.frame(name="w")
+    assert frame.url == "about:blank"
+    assert [c.get("url") for c in _tree_children(page)] == [site.here + "main"]
+    press(page, frame)
+    assert said(frame) == ["go"]
 
 
 def test_a_control_the_selector_does_not_find_in_its_frame_is_not_pressed(browser, site):
@@ -364,36 +491,83 @@ def test_a_frame_that_comes_over_the_control_inside_its_frame_as_it_is_pressed_s
 
 
 def test_something_under_the_frame_before_the_press_is_not_taken_for_a_cover(browser, site):
-    """Pressing the control moves its frame away from the point. What the
-    page shows there now was under the frame before the press, so nothing
-    came over the frame and nothing stops."""
-    main, frames = framed(site, onclick="; parent.document.getElementById('f').style.marginLeft"
-                                        " = '600px'")
+    """The frame moves away from the point as the pointer comes, so the
+    press goes to what the page shows there, which was under the frame
+    before the press. Nothing came over the frame, so nothing stops."""
+    move = SHOW_LATE.replace('%s.getElementById("late").style.visibility = "visible"',
+                             'parent.document.getElementById("f").style.marginLeft = "600px"')
+    main, frames = framed(site, inner_extra=move)
     page = opened(browser, site, main, **frames)
     frame = page.frame(name="f")
     press(page, frame)
-    assert said(frame) == ["go"]
+    assert said(frame) == []
     # Not vacuous. The frame did leave the point.
     assert frame.frame_element().bounding_box()["x"] >= 600
 
 
-def test_something_raised_over_a_frame_still_there_stops_the_run(browser, site):
-    """A box of the page sits under the frame, and pressing the control
-    raises the box over the frame. The box was at the point before the
-    press, but the frame is still there under it, so the box came over the
-    frame and the run stops."""
-    under = ('<div id="under" style="position: absolute; left: 0; top: 1400px; width: 800px; '
-             'height: 600px; z-index: 0; background: #ccc" onmousedown="said(\'under-down\')">'
-             '</div>')
-    main, frames = framed(site, main_extra=under, style="; position: relative; z-index: 1",
-                          onclick="; parent.document.getElementById('under').style.zIndex = 9")
+# A box of the page under the frame, which the page can raise over it.
+UNDER = ('<div id="under" style="position: absolute; left: 0; top: 1400px; width: 800px; '
+         'height: 600px; z-index: 0; background: #ccc" onmousedown="said(\'under-down\')">'
+         '</div>')
+RAISE = "parent.document.getElementById('under').style.zIndex = 9"
+
+
+def test_something_raised_over_a_frame_still_there_as_it_is_pressed_stops_the_run(
+        browser, site):
+    """The box under the frame is raised over it as the pointer comes, and
+    takes the press. The box was at the point before the press, but the
+    frame is still there under it, so the box came over the frame and the
+    run stops."""
+    raise_it = SHOW_LATE.replace('%s.getElementById("late").style.visibility = "visible"',
+                                 RAISE.replace("'", '"'))
+    main, frames = framed(site, main_extra=UNDER, style="; position: relative; z-index: 1",
+                          inner_extra=raise_it)
     page = opened(browser, site, main, **frames)
     frame = page.frame(name="f")
     with pytest.raises(pressing.Covered) as stopped:
         press(page, frame)
     assert stopped.value.facts["after_the_press"] is True
     assert stopped.value.facts["over_the_frame"] is True
+    assert said(frame) == []
+    assert said(page.main_frame) == ["under-down"]
+
+
+def test_a_cover_put_over_the_frame_once_the_control_heard_its_press_does_not_stop_the_run(
+        browser, site):
+    """The control's own press raises the box over the frame, the way a page
+    puts up a loading cover. The control heard the browser's own click
+    first, so the press was the control's, and nothing stops."""
+    main, frames = framed(site, main_extra=UNDER, style="; position: relative; z-index: 1",
+                          onclick="; " + RAISE)
+    page = opened(browser, site, main, **frames)
+    frame = page.frame(name="f")
+    press(page, frame)
     assert said(frame) == ["go"]
+    # Not vacuous. The box is over the frame now, and takes a press there.
+    box = frame.frame_element().bounding_box()
+    middle = {"x": box["x"] + box["width"] / 2, "y": box["y"] + box["height"] / 2}
+    page.mouse.click(middle["x"], middle["y"])
+    assert said(page.main_frame) == ["under-down"]
+
+
+def test_a_click_the_control_did_not_get_is_not_taken_for_its_press(browser, site):
+    """The browser's own click lands beside the control in its frame, and
+    raises the box under the frame over it. Only a click through the
+    control counts as its press being heard, so the box over the frame
+    stops the run."""
+    elsewhere = '<span id="elsewhere" onclick="%s">Other</span>' % RAISE
+    main, frames = framed(site, main_extra=UNDER, style="; position: relative; z-index: 1")
+    frames["inner"] = frames["inner"].replace("</button>", "</button>" + elsewhere)
+    page = opened(browser, site, main, **frames)
+    frame = page.frame(name="f")
+    seen = pressing.look(page, frame.locator("#go"), "button", frame=frame)
+    assert seen["state"] == "inside"
+    box = frame.locator("#elsewhere").bounding_box()
+    page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    with pytest.raises(pressing.Covered) as stopped:
+        pressing.after(page, seen, "the heading of the year 2024", WORDS, frame=frame)
+    assert stopped.value.facts["over_the_frame"] is True
+    assert said(frame) == []
 
 
 def test_the_page_s_own_frame_is_read_as_the_page(browser, site):
