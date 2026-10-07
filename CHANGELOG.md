@@ -201,6 +201,19 @@ did not read.
   fit the folder's limit, where it is told apart by a number as before. It
   happened in the apps that tell a second statement apart by an id, and
   for PayPal's business statements, told apart by their first day.
+- **Anthem names its member documents, ID cards and letters as Rename
+  does.** Anthem takes these from lists of their own, apart from its EOBs,
+  and named each file from the row its list gave rather than from the
+  record written down for the file, which is where a name pattern and
+  Rename find the document's id. So under a File names pattern with
+  {number} in it, these files were saved without their id, and Rename
+  offered to add it to every one. When two of them wanted one name, as two
+  letters of one subject on one day can, the second was saved with " (2)"
+  and Rename offered it the end of its id. Each file is now named from the
+  record written down for it, and the second of two files of one name is
+  told apart by the last six characters of its id, as an EOB already was.
+  A file saved before keeps its name until Rename is run, which offers the
+  new name in a preview first.
 - **Every receipt app's Resume reads the purchase list again after a run
   that stopped while reading it.** After a Discover, Pilot or Run All that
   stopped while it read the purchase list, at a sign-in, a check or a

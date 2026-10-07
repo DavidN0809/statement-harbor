@@ -760,8 +760,14 @@ class App:
                     self.stats["skipped_completed"] += 1
                     continue
             fdate = r.get("date") or date.today().isoformat()
+            # What the file is written down by, and named from, since Rename
+            # names it from what was written down. The row keeps the id as
+            # "doc_id", so a name made from the row left out the id a File
+            # names pattern's {number} reads, and Rename offered to add it.
+            record = {"title": label, "date": fdate, "document_id": r.get("doc_id", "")}
+            filename = build_pdf_filename(fdate, label, "", record=record)
             if getattr(self.args, "dry_run", False):
-                print(f"  DRY RUN - would save: {build_pdf_filename(fdate, label, '', record=r)}")
+                print(f"  DRY RUN - would save: {filename}")
                 continue
             try:
                 pdf = fetch_fn(self._on_its_site(), r)
@@ -781,8 +787,11 @@ class App:
                 continue
             folder = getattr(self.paths, r["folder_attr"])
             folder.mkdir(parents=True, exist_ok=True)
-            out_path = unique_path(folder, build_pdf_filename(fdate, label, "", record=r),
-                                   self.config["max_path_length"])
+            # The last of the document id, used only if the name is taken,
+            # as for the EOBs. Two letters of one subject on one day were
+            # " (2)" apart, and Rename offered the second the end of its id.
+            out_path = unique_path(folder, filename, self.config["max_path_length"],
+                                   distinguisher=(record["document_id"] or "")[-6:])
             try:
                 out_path.write_bytes(pdf)
             except Exception as e:
@@ -797,17 +806,16 @@ class App:
                     out_path.replace(quarantine)
                 except OSError:
                     quarantine = out_path
-                self.progress.update(key, {
-                    "state": State.NEEDS_MANUAL_REVIEW.value,
-                    "pdf_path": str(quarantine), "title": label,
-                    "notes": f"PDF validation failed: {result.reason}"})
+                self.progress.update(key, dict(
+                    record, state=State.NEEDS_MANUAL_REVIEW.value,
+                    pdf_path=str(quarantine),
+                    notes=f"PDF validation failed: {result.reason}"))
                 self.stats["manual_review"] += 1
                 print(f"  !! Validation failed for {label}; moved to Manual Review.")
                 continue
-            self.progress.update(key, {
-                "state": State.COMPLETED.value, "downloaded_ok": True,
-                "pdf_path": str(out_path), "pdf_filename": out_path.name,
-                "title": label, "date": fdate, "document_id": r.get("doc_id", "")})
+            self.progress.update(key, dict(
+                record, state=State.COMPLETED.value, downloaded_ok=True,
+                pdf_path=str(out_path), pdf_filename=out_path.name))
             self.index_csv.append_rows([{
                 "Account Holder": self.config.get("owner", ""),
                 "Document Date": fdate,
