@@ -151,7 +151,8 @@ def reads_the_scope(node, fn) -> bool:
     Discover set from them, as Apple's `narrowed` was."""
     def direct(n):
         text = ast.unparse(n)
-        return any("args.%s" % s in text or "'%s'" % s in text for s in SCOPE)
+        return ("scoped(" in text or "narrow" in text
+                or any("args.%s" % s in text or "'%s'" % s in text for s in SCOPE))
     if direct(node):
         return True
     names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
@@ -286,6 +287,9 @@ class App:
     assert check(good.replace("        if self._read_to_the_end:\n",
                               "        if self._read_to_the_end:\n"
                               "            pass\n        if not self.args.end_date:\n")) == own_rule
+    for helper in ("listing.scoped(self)", "self._narrowed()"):
+        assert check(good.replace("        if self._read_to_the_end:\n",
+                                  "        if not %s:\n" % helper)) == own_rule, helper
 
 
 # -- the browser that is not there -------------------------------------------------

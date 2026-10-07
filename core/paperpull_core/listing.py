@@ -91,15 +91,44 @@ def scoped(app) -> bool:
     return any(getattr(args, flag, None) for flag in SCOPE_FLAGS)
 
 
+_NOT_STARTED = object()
+
+
+def _before(app):
+    """What the note said of the whole list before this listing, True,
+    False, or None for no note. A scoped listing that stopped said nothing
+    about the rest of the history, so what it kept from before it is
+    carried on, or a scope kept set after one stop would stay stopped
+    for good (review)."""
+    try:
+        got = json.loads(app.paths.last_listing.read_text(encoding="utf-8"))
+    except Exception:
+        got = None
+    if (isinstance(got, dict) and got.get("scoped") is True and got.get("complete") is False
+            and got.get("before", "") in (True, False, None)):
+        return got["before"]
+    try:
+        return {COMPLETE: True, STOPPED: False}.get(last(app))
+    except Exception:
+        return None
+
+
 def started(app) -> None:
     """A listing begins. Until read_whole() it is a listing that stopped.
-    What the note said before is kept in it, for a scoped listing to put
-    back when it ends."""
+    What the note said of the whole list before is kept, in the note for
+    the next listing and on the app for this one's end to put back."""
+    before = _before(app)
+    # Only a start that was noted may be put back at the end. A note that
+    # could not be written leaves an older listing's on disk.
     try:
-        before = {COMPLETE: True, STOPPED: False}.get(last(app))
+        app._listing_before = _NOT_STARTED
     except Exception:
-        before = None
-    if _note(app, False, before=before):
+        pass
+    if _note(app, False, before=before, scoped=scoped(app)):
+        try:
+            app._listing_before = before
+        except Exception:
+            pass
         # The note says from here on what the old mark said, so the mark goes.
         try:
             _old_mark(app).unlink(missing_ok=True)
@@ -115,14 +144,12 @@ def read_whole(app) -> None:
     if not scoped(app):
         _note(app, True)
         return
-    try:
-        got = json.loads(app.paths.last_listing.read_text(encoding="utf-8"))
-    except Exception:
+    before = getattr(app, "_listing_before", _NOT_STARTED)
+    if before is _NOT_STARTED:
         return
-    if not isinstance(got, dict) or "before" not in got:
-        return
-    if isinstance(got["before"], bool):
-        _note(app, got["before"])
+    app._listing_before = _NOT_STARTED
+    if isinstance(before, bool):
+        _note(app, before)
         return
     try:
         app.paths.last_listing.unlink(missing_ok=True)
@@ -157,11 +184,17 @@ def _whose(provider: str) -> str:
     return provider if provider.endswith("'s") else provider + "'s"
 
 
-def _nothing_listed(noun: str) -> None:
+def _whole_run(app) -> str:
+    """Pilot or Run All, and for a scoped run, that it has to be unscoped,
+    since the same scope would read the same part again."""
+    return "Pilot or Run All%s" % (" with no year or dates set" if scoped(app) else "")
+
+
+def _nothing_listed(app, noun: str) -> None:
     provider = spec().provider
     _say("Nothing to resume. No %s %s have been listed yet, because no run "
-         "has read %s list to its end. Run Pilot or Run All, which read "
-         "the list first." % (provider, noun, _whose(provider)))
+         "has read %s list to its end. Run %s, which read the list first."
+         % (provider, noun, _whose(provider), _whole_run(app)))
     raise SystemExit(0)
 
 
@@ -175,7 +208,7 @@ def before_resume(app, noun: str = "documents") -> bool:
     provider = spec().provider
     said = last(app)
     if not app.discovery.data and said != COMPLETE:
-        _nothing_listed(noun)
+        _nothing_listed(app, noun)
     if said == STOPPED:
         _say("The last run stopped before it read %s whole list, so there may "
              "be %s this app has not seen." % (_whose(provider), noun))
@@ -189,7 +222,7 @@ def after_resume(app) -> None:
     one that did not finish."""
     if last(app) == STOPPED:
         _say("This run stops here, because %s list was not read to its end. "
-             "Run Pilot or Run All to read it again." % _whose(spec().provider))
+             "Run %s to read it again." % (_whose(spec().provider), _whole_run(app)))
         raise SystemExit(0)
 
 
@@ -222,8 +255,11 @@ def read_again_first(app, noun: str = "purchases") -> bool:
     said = last(app)
     if said == STOPPED:
         _say("The last run did not read %s whole list, so Resume reads it "
-             "before anything else." % _whose(spec().provider))
+             "before anything else.%s" % (
+                 _whose(spec().provider),
+                 " Only a run with no year or dates set reads all of it."
+                 if scoped(app) else ""))
         return True
     if not app.discovery.data and said != COMPLETE:
-        _nothing_listed(noun)
+        _nothing_listed(app, noun)
     return False

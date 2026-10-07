@@ -614,13 +614,15 @@ did not read.
   once its part was, in every app but Best Buy, Apple and Uber. So after
   a run that stopped partway through the whole history, one scoped run
   let the next unscoped Resume finish clean with the rest never read. A
-  scoped run that reaches the end of its part now leaves things as they
-  were before it, so a list that stopped stays unfinished until a run
-  reads all of it, and a list read whole stays whole. Best Buy, Apple and
-  Uber, which treated every scoped run as unfinished and so read the list
-  again on each Resume after one, now do the same, so a scope kept set
-  never costs a second reading. A scoped run that stops is still a run
-  that stopped.
+  scoped run that reaches the end of its part now leaves things as the
+  last unscoped run left them, so a list that stopped stays unfinished
+  until a run with no year or dates set reads all of it, and Resume says
+  to run one. A list read whole stays whole through scoped runs, even
+  after one of them stops. Best Buy, Apple and Uber, which counted a run
+  for a year or from a start date as unfinished and so read the list
+  again on every Resume after one, now do the same, so keeping a scope
+  set after a whole listing costs no second reading. A scoped run that
+  stops is still a run that stopped.
 
 ## [0.44.0] - 2026-10-07
 

@@ -346,6 +346,52 @@ def test_a_scoped_listing_that_stops_is_a_listing_that_stopped(tmp_path):
     assert listing.last(app) == listing.STOPPED
 
 
+@pytest.mark.parametrize("first", ["whole", "stopped"])
+def test_a_scoped_listing_after_a_scoped_one_that_stopped_puts_back_the_whole_list_s_word(
+        tmp_path, first):
+    """Someone who keeps a scope set. One scoped run stopped partway and the
+    next read its part to the end, which leaves the rest of the history as
+    the last unscoped run left it, not stopped for good (review)."""
+    app = _app(tmp_path, known=["one"])
+    _run(app, whole=(first == "whole"))
+    _run(app, ("year", 2026), whole=False)
+    assert listing.last(app) == listing.STOPPED
+    _run(app, ("year", 2026), whole=False)
+    _run(app, ("year", 2026))
+    assert listing.last(app) == (listing.COMPLETE if first == "whole" else listing.STOPPED)
+
+
+def test_a_scoped_end_puts_back_only_what_its_own_start_kept(tmp_path, monkeypatch):
+    """The start of a scoped listing could not be noted, so the note on disk
+    is an older listing's, and what it kept from before is not this one's
+    to put back (review)."""
+    app = _app(tmp_path, known=["one"])
+    _run(app, whole=False)
+    real = listing.atomic_write_json
+
+    def refuse_once(*a, **kw):
+        monkeypatch.setattr(listing, "atomic_write_json", real)
+        raise OSError("the file is in use")
+    monkeypatch.setattr(listing, "atomic_write_json", refuse_once)
+    _run(app, ("year", 2026))
+    assert listing.last(app) == listing.STOPPED
+
+
+def test_a_scoped_run_is_told_how_to_read_the_whole_list(tmp_path, capsys):
+    """Run Pilot or Run All alone would read the same part again while the
+    scope stays set."""
+    app = _app(tmp_path, known=["one"])
+    _run(app, ("year", 2026), whole=False)
+    with pytest.raises(SystemExit):
+        listing.after_resume(app)
+    assert listing.read_again_first(app) is True
+    said = _said(capsys)
+    assert said.count("with no year or dates set") == 2, said
+    app.args = SimpleNamespace(year=None, start_date=None, end_date=None)
+    listing.read_again_first(app)
+    assert "with no year or dates set" not in _said(capsys)
+
+
 def test_a_scoped_listing_on_a_new_install_leaves_no_note(tmp_path):
     """Nothing was noted before it, and its part says nothing about the
     rest, so there is still nothing noted."""
