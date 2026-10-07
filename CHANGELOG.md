@@ -550,6 +550,25 @@ did not read.
   at most thirty times and no further once a press draws nothing new. A
   row counts only once its download icon is drawn, where one in the
   page's text that was not drawn used to count. Contributed by tylerverry.
+- **Target fetches an invoice put aside again once its copy is deleted,
+  and no longer saves a renamed invoice twice.** An online order with no
+  store receipt is saved as its invoices, and one that fails its check is
+  put aside in Manual Review, as a delivery driver's tip always is, since
+  it names no item. When every invoice of an order was put aside,
+  deleting the copy the order's record names asks for the order again, as
+  it does for a receipt put aside. The next run counted the deleted copy
+  as still on file, so it went through the order's invoices on Target,
+  saved nothing, and wrote the order down as needing review again under
+  the deleted file's name. Every run after did the same, adding a row to
+  the receipt index each time, and so did a copy that no longer opened as
+  a PDF. Now that invoice is fetched and checked again, once, and the
+  order is left alone while its copies are there. A tip fetched again is
+  put aside again. An invoice that was kept is still never fetched again
+  after its file is deleted. Review Names and Rename gave an invoice's
+  file a new name while the record's list of the order's invoices kept the
+  old one, so Download again took the renamed invoice for missing and
+  saved it a second time, though the panel says Target leaves an invoice
+  still on file as it is. It is now found under its new name.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never

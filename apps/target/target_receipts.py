@@ -1128,7 +1128,8 @@ class App:
         The order is marked done only once every invoice it has is on file.
         Until then it is tried again on each run, and an invoice saved before
         is not saved a second time, even after its file is deleted, which is
-        the promise every download here makes."""
+        the promise every download here makes. One put aside whose copy is
+        deleted is fetched again when the order is (_invoices_on_file)."""
         purchase.document_type = "Invoice"
         self._record_state(purchase, State.RECEIPT_LOCATED)
         walk = {"tokens": self._invoice_tokens(purchase),
@@ -1432,14 +1433,34 @@ class App:
 
         One saved counts even after its file is deleted, the promise every
         download here makes, unless --redownload asks for missing files
-        again. An order saved before every invoice was walked has one, its
+        again. One put aside in Manual Review counts only while its copy is
+        there and passes the check _already_done gives a copy put aside. An
+        order whose every invoice was put aside is tried again once the copy
+        its record names is deleted or fails that check, and the walk then
+        counted that copy as on file all the same. It saved nothing and
+        wrote the order down as needing review again, naming the same copy,
+        so every run after walked the order's invoices on Target again and
+        added an index row. Now the invoice is fetched again, as a receipt
+        put aside is.
+
+        An order saved before every invoice was walked has one, its
         row in the receipt index, known by what its file says."""
         rec = self.progress.get(purchase.key) or {}
         again = getattr(self.args, "redownload", False)
         if rec.get("invoices"):
-            return [dict(e) for e in rec["invoices"]
-                    if isinstance(e, dict) and e.get("file")
-                    and (not again or Path(e["file"]).exists())]
+            entries = [dict(e) for e in rec["invoices"]
+                       if isinstance(e, dict) and e.get("file")]
+            self._follow_renames(purchase, entries)
+            return [e for e in entries
+                    if (receipt_pdf.validate_pdf(Path(e["file"]),
+                                                 self.config["min_pdf_bytes"]).ok
+                        if not e.get("kept", True)
+                        else not again or Path(e["file"]).exists())]
+        return self._indexed_invoices(purchase)
+
+    def _indexed_invoices(self, purchase: Purchase) -> list:
+        """The order's invoices its rows in the receipt index name, each
+        known by what its file says, and only files that are there."""
         entries, seen = [], set()
         for row in self.index_csv.read_all():
             path = (row.get("PDF Full Path") or "").strip()
@@ -1458,6 +1479,30 @@ class App:
                     "names": self._names_the_order(text, purchase),
                     "size": row.get("PDF File Size", ""), "pages": row.get("PDF Page Count", "")})
         return entries
+
+    def _follow_renames(self, purchase: Purchase, entries: list) -> None:
+        """Point an invoice's entry at the name its file has now.
+
+        Review Names and Rename give the file an index row names a new name
+        and correct the row, and the record's list of invoices kept the old
+        name, so --redownload took the invoice for missing and saved it a
+        second time. The record's own pdf_path is no help, since the run has
+        written the purchase over it before the walk starts. Only an entry
+        whose file is gone is followed, and only to a file of the order's
+        index rows that says it is that invoice, by the rule the walk uses."""
+        gone = [e for e in entries if not Path(e["file"]).exists()]
+        if not gone:
+            return
+        named = {e["file"] for e in entries}
+        for found in self._indexed_invoices(purchase):
+            if found["file"] in named:
+                continue
+            part = tuple(int(n) for n in found["part"].split(" of ")) if found["part"] else None
+            for e in gone:
+                if self._on_file({"saved": [e]}, part, found["number"]):
+                    e["file"] = found["file"]
+                    gone.remove(e)
+                    break
 
     def _on_file(self, walk: dict, part, number: str) -> bool:
         """Whether this invoice is one of the order's already saved. By its

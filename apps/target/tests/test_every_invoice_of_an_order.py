@@ -44,7 +44,7 @@ import storage  # noqa: F401  binds this provider's AppSpec
 import target_receipts as app_mod
 import target_site as site
 from paperpull_core import browser as browser_launcher
-from paperpull_core import receipt_pdf, run_reporting
+from paperpull_core import receipt_pdf, run_reporting, testkit
 from paperpull_core.models import ONLINE, Item, Purchase
 
 # Every host name fails to resolve, and only this machine's own address is
@@ -105,7 +105,15 @@ UNSURE = Order("902000000000051", "2026-02-09", "Mon, Feb 9, 2026",
                [("Invented Frobnicator", "$4.71")],
                [("10000000000000051", ["10000051 - Invented Frobnicator"], "$4.71")])
 
-PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Orders : %s</title></head>
+# An order whose every invoice is put aside. The tip names nothing of the
+# order, and the item's invoice words the item as a till does, not as the
+# order's page does, so neither passes the check.
+ASIDE = Order("902000000000061", "2026-02-10", "Tue, Feb 10, 2026",
+              [("Invented Ceramic Planter, Large", "$21.43")],
+              [("10000000000000062", ["10000062 - shipt_tip"], "$3.21"),
+               ("10000000000000061", ["10000061 - INV CERAMIC PLNTR LG"], "$21.43")])
+
+PAGE ="""<!doctype html><html><head><meta charset="utf-8"><title>Orders : %s</title></head>
 <body><header><p>Ship to 00000</p><a href="/">Home</a></header>
 <main>%s</main><footer><p>Help</p><p>Returns</p></footer></body></html>"""
 
@@ -485,7 +493,7 @@ def invoice_numbers(paths):
     return sorted(n for p in paths for n, _, _ in ALL_INVOICES if n in text_of(p))
 
 
-ALL_INVOICES = [v for o in (SPLIT, SINGLE, DIRECT, TIPPED, UNSURE) for v in o.invoices]
+ALL_INVOICES = [v for o in (SPLIT, SINGLE, DIRECT, TIPPED, UNSURE, ASIDE) for v in o.invoices]
 
 
 def opened(path):
@@ -749,6 +757,73 @@ def test_a_redownload_saves_the_missing_invoice_and_not_the_first_again(
     assert same_file(index[-1]["PDF Full Path"], item[0]), index
 
 
+def test_a_deleted_copy_of_an_invoice_put_aside_is_fetched_again_once(attached, tmp_path):
+    """Every invoice of the order was put aside, so it waits for a person,
+    and its copies are left alone while they are there. Deleting the copy
+    its record names asks for the order again, as it does a receipt put
+    aside. The next run walked the order's invoices on Target and saved
+    nothing, since it counted the deleted copy as on file. It wrote the
+    order down as needing review again, naming the deleted file, so every
+    run after walked the order again and added an index row. Now the
+    deleted invoice is fetched once and checked again, the other is not
+    saved a second time, and later runs leave the order alone."""
+    SITE.show(ASIDE)
+    pages = ["/orders/%s/invoices/%s" % (ASIDE.number, inv) for inv, _, _ in ASIDE.invoices]
+    assert run(tmp_path, attached, "--pilot-online") == 0
+    aside = pdfs(tmp_path, "Manual Review", ASIDE)
+    assert invoice_numbers(aside) == sorted(inv for inv, _, _ in ASIDE.invoices), aside
+    assert len(aside) == 2 and not pdfs(tmp_path, "Invoices", ASIDE), aside
+    rec = record(tmp_path, ASIDE)
+    assert rec["state"] == "Needs Manual Review" and not rec.get("downloaded_ok"), rec
+    assert len(rows_of(tmp_path, INDEX, ASIDE)) == 1
+
+    assert run(tmp_path, attached, "--resume") == 0
+    assert [opened(p) for p in pages] == [1, 1], "left alone while its copies are there"
+    assert len(rows_of(tmp_path, INDEX, ASIDE)) == 1
+
+    named = Path(rec["pdf_path"])
+    deleted = invoice_numbers([named])
+    named.unlink()
+    assert run(tmp_path, attached, "--resume") == 0
+    aside = pdfs(tmp_path, "Manual Review", ASIDE)
+    assert invoice_numbers(aside) == sorted(inv for inv, _, _ in ASIDE.invoices), \
+        "the deleted invoice %s is fetched again, %s" % (deleted, aside)
+    assert len(aside) == 2, "the other is not saved a second time, %s" % aside
+    rec = record(tmp_path, ASIDE)
+    assert rec["state"] == "Needs Manual Review" and Path(rec["pdf_path"]).exists(), rec
+    assert len(rows_of(tmp_path, INDEX, ASIDE)) == 2
+
+    walked = [opened(p) for p in pages]
+    assert run(tmp_path, attached, "--resume") == 0
+    assert [opened(p) for p in pages] == walked, "left alone again, %s" % SITE.seen
+    assert len(rows_of(tmp_path, INDEX, ASIDE)) == 2
+
+
+def test_an_invoice_renamed_by_review_names_is_not_saved_again_by_download_again(
+        attached, tmp_path, monkeypatch):
+    """Review Names gives the file the order's record names a new name, and
+    the record's list of the order's invoices kept the old one. Download
+    again (--redownload) fetches each invoice whose file is gone, so it took
+    the renamed invoice for missing and saved it a second time, though the
+    panel says Target leaves an invoice still on file as it is."""
+    SITE.show(UNSURE)
+    assert run(tmp_path, attached, "--pilot-online") == 0
+    monkeypatch.setattr(app_mod, "ask", lambda prompt: "Frobnicators")
+    assert run(tmp_path, attached, "--review-names") == 0
+    renamed = pdfs(tmp_path, "Invoices", UNSURE)
+    assert len(renamed) == 1 and "Frobnicators" in renamed[0].name, renamed
+    before = renamed[0].read_bytes()
+
+    assert run(tmp_path, attached, "--online", "--order-number", UNSURE.number,
+               "--redownload") == 0
+    assert pdfs(tmp_path, "Invoices", UNSURE) == renamed, "not saved a second time"
+    assert renamed[0].read_bytes() == before
+    assert not pdfs(tmp_path, "Manual Review", UNSURE)
+    rec = record(tmp_path, UNSURE)
+    assert rec["downloaded_ok"] is True and same_file(rec["pdf_path"], renamed[0]), rec
+    assert [same_file(e["file"], renamed[0]) for e in rec["invoices"]] == [True], rec
+
+
 # -- the rules, each on its own -------------------------------------------------
 
 def test_an_invoice_page_says_which_of_the_order_it_is():
@@ -806,6 +881,88 @@ def test_an_invoice_saved_before_counts_after_its_file_is_deleted(tmp_path):
          "names": True}]})
     assert [e["number"] for e in app._invoices_on_file(purchase)] == ["10000000000000041"]
     assert an_app(tmp_path, "--redownload")._invoices_on_file(purchase) == []
+
+
+def invoice_pdf(path, part, number, line):
+    """A saved invoice reading the way Target prints one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(testkit.text_pdf(["Invoice %s" % part, "Invoice number: %s" % number,
+                                       line, "Invoice total $4.32"]))
+    return path
+
+
+def test_an_invoice_put_aside_counts_only_while_its_copy_is_there_and_opens(tmp_path):
+    """An order whose every invoice was put aside is tried again once the
+    copy its record names is deleted, or no longer passes the check
+    _already_done gives a copy put aside. The walk then counted that
+    invoice as on file all the same, so it saved nothing and wrote the
+    order down as needing review again, naming the same copy, and the next
+    run did the same. Such an invoice is not on file, so it is fetched
+    again, with or without --redownload."""
+    app = an_app(tmp_path)
+    purchase = tipped_purchase()
+    tip = invoice_pdf(app.paths.manual_review / "tip (1 of 1).pdf", "1 of 1",
+                      "10000000000000042", "10000042 - shipt_tip")
+    entry = {"file": str(tip), "part": "1 of 1", "number": "10000000000000042",
+             "kept": False, "names": False, "size": tip.stat().st_size, "pages": 1}
+    walk = {"tokens": [], "held": [], "missed": [], "count": 1, "list_page": None,
+            "saved": [dict(entry)]}
+    assert app._file_invoices(purchase, walk) is False
+    rec = app.progress.get(purchase.key)
+    assert rec["state"] == "Needs Manual Review" and same_file(rec["pdf_path"], tip), rec
+    assert app._already_done(purchase), "left alone while its copy is there"
+    assert app._invoices_on_file(purchase) == [entry]
+    assert an_app(tmp_path, "--redownload")._invoices_on_file(purchase) == [entry]
+
+    good = tip.read_bytes()
+    tip.write_bytes(good[:400])
+    assert not app._already_done(purchase), "a copy cut short is tried again"
+    assert app._invoices_on_file(purchase) == [], "and its invoice fetched again"
+
+    tip.unlink()
+    assert not app._already_done(purchase), "a copy deleted is tried again"
+    assert app._invoices_on_file(purchase) == [], "and its invoice fetched again"
+    assert an_app(tmp_path, "--redownload")._invoices_on_file(purchase) == []
+
+
+def test_an_invoice_renamed_since_is_on_file_under_its_new_name(tmp_path):
+    """Review Names and Rename give the file an index row names a new name
+    and correct the row, and the record's list of invoices kept the old
+    name. The entry is known by what the renamed file says, as an invoice
+    saved before the walk is, so --redownload does not save it a second
+    time. One whose file is gone is still missing, and a file that is not
+    that invoice is never taken for it."""
+    app = an_app(tmp_path, "--redownload")
+    purchase = tipped_purchase()
+    renamed = invoice_pdf(app.paths.invoices / "renamed (2 of 2).pdf", "2 of 2",
+                          "10000000000000041", "10000041 - Invented Wooden Puzzle Box")
+    tip = app.paths.invoices / "imported and deleted (1 of 2).pdf"
+    old = app.paths.invoices / "old name (2 of 2).pdf"
+    app.progress.update(purchase.key, {"pdf_path": "", "invoices": [
+        {"file": str(tip), "part": "1 of 2", "number": "10000000000000042", "kept": True,
+         "names": False},
+        {"file": str(old), "part": "2 of 2", "number": "10000000000000041", "kept": True,
+         "names": True}]})
+    app.index_csv.append_rows([{
+        "Purchase Date": purchase.purchase_date, "Purchase Type": purchase.purchase_type,
+        "Order or Receipt Number": purchase.order_number, "PDF Filename": renamed.name,
+        "PDF Full Path": str(renamed), "Document Type": "Invoice",
+        "Receipt Status": "Downloaded", "Processing Status": "Completed"}])
+    on_file = app._invoices_on_file(purchase)
+    assert [(e["number"], e["file"]) for e in on_file] == [
+        ("10000000000000041", str(renamed))], on_file
+    # Without --redownload every invoice saved counts, under the name it has.
+    assert [e["file"] for e in an_app(tmp_path)._invoices_on_file(purchase)] == [
+        str(tip), str(renamed)]
+
+    # An entry whose file is there keeps it, though a row names another copy.
+    invoice_pdf(old, "2 of 2", "10000000000000041", "10000041 - Invented Wooden Puzzle Box")
+    assert [e["file"] for e in app._invoices_on_file(purchase)] == [str(old)]
+    old.unlink()
+
+    # The row's file is another invoice, so the renamed one is missing.
+    invoice_pdf(renamed, "1 of 1", "10000000000000099", "10000099 - Invented Other Thing")
+    assert app._invoices_on_file(purchase) == []
 
 
 def test_an_invoice_control_that_does_something_else_is_never_pressed(attached):
