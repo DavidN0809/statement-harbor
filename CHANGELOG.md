@@ -561,14 +561,14 @@ did not read.
   saved nothing, and wrote the order down as needing review again under
   the deleted file's name. Every run after did the same, adding a row to
   the receipt index each time, and so did a copy that no longer opened as
-  a PDF. Now that invoice is fetched and checked again, once, and the
-  order is left alone while its copies are there. A tip fetched again is
-  put aside again. An invoice that was kept is still never fetched again
-  after its file is deleted. Review Names and Rename gave an invoice's
-  file a new name while the record's list of the order's invoices kept the
-  old one, so Download again took the renamed invoice for missing and
-  saved it a second time, though the panel says Target leaves an invoice
-  still on file as it is. It is now found under its new name.
+  a PDF. Now that invoice is fetched and checked again, as a receipt put
+  aside is, and the order is then left alone while its copies are there
+  and open. A tip fetched again is put aside again. An invoice that was
+  kept still counts as saved after its file is deleted, unless Download
+  again asks for it. Review Names and Rename gave an invoice's file a new
+  name while the record's list of the order's invoices kept the old one,
+  so Download again took the renamed invoice for missing and saved it a
+  second time. It is now found under its new name.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never

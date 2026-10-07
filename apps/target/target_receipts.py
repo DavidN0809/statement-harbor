@@ -1489,7 +1489,10 @@ class App:
         second time. The record's own pdf_path is no help, since the run has
         written the purchase over it before the walk starts. Only an entry
         whose file is gone is followed, and only to a file of the order's
-        index rows that says it is that invoice, by the rule the walk uses."""
+        index rows that says it is that invoice, by the rule the walk uses.
+        Neither rename moves a file to another folder, so one put aside is
+        followed only to a file in Manual Review, and one kept only to a
+        file outside it."""
         gone = [e for e in entries if not Path(e["file"]).exists()]
         if not gone:
             return
@@ -1499,7 +1502,8 @@ class App:
                 continue
             part = tuple(int(n) for n in found["part"].split(" of ")) if found["part"] else None
             for e in gone:
-                if self._on_file({"saved": [e]}, part, found["number"]):
+                if (found["kept"] == e.get("kept", True)
+                        and self._on_file({"saved": [e]}, part, found["number"])):
                     e["file"] = found["file"]
                     gone.remove(e)
                     break

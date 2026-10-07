@@ -44,7 +44,7 @@ import storage  # noqa: F401  binds this provider's AppSpec
 import target_receipts as app_mod
 import target_site as site
 from paperpull_core import browser as browser_launcher
-from paperpull_core import receipt_pdf, run_reporting, testkit
+from paperpull_core import receipt_pdf, renaming, run_reporting, testkit
 from paperpull_core.models import ONLINE, Item, Purchase
 
 # Every host name fails to resolve, and only this machine's own address is
@@ -113,7 +113,7 @@ ASIDE = Order("902000000000061", "2026-02-10", "Tue, Feb 10, 2026",
               [("10000000000000062", ["10000062 - shipt_tip"], "$3.21"),
                ("10000000000000061", ["10000061 - INV CERAMIC PLNTR LG"], "$21.43")])
 
-PAGE ="""<!doctype html><html><head><meta charset="utf-8"><title>Orders : %s</title></head>
+PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Orders : %s</title></head>
 <body><header><p>Ship to 00000</p><a href="/">Home</a></header>
 <main>%s</main><footer><p>Help</p><p>Returns</p></footer></body></html>"""
 
@@ -454,13 +454,13 @@ def fake_target(server, monkeypatch):
     assert not pressed, "pressed a control it must never press, %s" % pressed
 
 
-def config_for(tmp_path, cdp_url):
+def config_for(tmp_path, cdp_url, **settings):
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps({
         "owner": "Dana Example", "output_dir": str(tmp_path / "out"),
         "profile_dir": str(tmp_path / "launched-profile"), "cdp_url": cdp_url,
-        "include_invoices": True, "delay_min_seconds": 0, "delay_max_seconds": 0}),
-        encoding="utf-8")
+        "include_invoices": True, "delay_min_seconds": 0, "delay_max_seconds": 0,
+        **settings}), encoding="utf-8")
     return cfg
 
 
@@ -835,9 +835,9 @@ def test_an_invoice_page_says_which_of_the_order_it_is():
     assert site.invoice_identity("Something went wrong") == (None, "")
 
 
-def an_app(tmp_path, *args):
+def an_app(tmp_path, *args, **settings):
     return app_mod.App(app_mod.build_parser().parse_args(
-        ["--config", str(config_for(tmp_path, "http://127.0.0.1:9")), *args]))
+        ["--config", str(config_for(tmp_path, "http://127.0.0.1:9", **settings)), *args]))
 
 
 def tipped_purchase():
@@ -963,6 +963,50 @@ def test_an_invoice_renamed_since_is_on_file_under_its_new_name(tmp_path):
     # The row's file is another invoice, so the renamed one is missing.
     invoice_pdf(renamed, "1 of 1", "10000000000000099", "10000099 - Invented Other Thing")
     assert app._invoices_on_file(purchase) == []
+
+    # Nor is a kept invoice taken for a copy of it put aside, since a
+    # rename never moves a file to another folder.
+    aside = invoice_pdf(app.paths.manual_review / "put aside (2 of 2).pdf", "2 of 2",
+                        "10000000000000041", "10000041 - Invented Wooden Puzzle Box")
+    app.index_csv.append_rows([{
+        "Purchase Date": purchase.purchase_date, "Purchase Type": purchase.purchase_type,
+        "Order or Receipt Number": purchase.order_number, "PDF Filename": aside.name,
+        "PDF Full Path": str(aside), "Document Type": "Invoice",
+        "Receipt Status": "Validation Failed", "Processing Status": "Needs Manual Review"}])
+    assert app._invoices_on_file(purchase) == []
+
+
+def test_an_invoice_put_aside_and_renamed_by_rename_is_on_file_under_its_new_name(tmp_path):
+    """Rename, after a new naming pattern, renames the copy an order whose
+    every invoice was put aside names in its index row, as it renames any
+    file, and corrects the row. That copy's entry is followed to its new
+    name, so Download again counts the invoice rather than fetching it
+    again, and the other copy, which Rename leaves alone, counts as it
+    is."""
+    app = an_app(tmp_path, max_path_length=1000)
+    purchase = tipped_purchase()
+    purchase.document_type = "Invoice"      # as _save_invoices marks it
+    folder = app.paths.manual_review
+    tip = invoice_pdf(folder / ("%s Target Games Invoice (1 of 2).pdf" % TIPPED.iso), "1 of 2",
+                      "10000000000000042", "10000042 - shipt_tip")
+    item = invoice_pdf(folder / ("%s Target Games Invoice (2 of 2).pdf" % TIPPED.iso),
+                       "2 of 2", "10000000000000041", "10000041 - WOODEN PZL BX")
+    walk = {"tokens": [], "held": [], "missed": [], "count": 2, "list_page": None, "saved": [
+        {"file": str(tip), "part": "1 of 2", "number": "10000000000000042", "kept": False,
+         "names": False, "size": tip.stat().st_size, "pages": 1},
+        {"file": str(item), "part": "2 of 2", "number": "10000000000000041", "kept": False,
+         "names": False, "size": item.stat().st_size, "pages": 1}]}
+    assert app._file_invoices(purchase, walk) is False
+
+    pattern = "{date:yyyy-mm-dd} {summary}[ {kind}][ ({part})]"
+    renamer = an_app(tmp_path, max_path_length=1000, filename_pattern=pattern)
+    assert renaming.run_for(renamer, apply_changes=True, say=lambda *a: None).renamed == 1
+    renamed = folder / ("%s Games Invoice (1 of 2).pdf" % TIPPED.iso)
+    assert sorted(p.name for p in folder.glob("*.pdf")) == sorted([renamed.name, item.name])
+
+    again = an_app(tmp_path, "--redownload", max_path_length=1000)
+    assert [(e["number"], e["file"]) for e in again._invoices_on_file(purchase)] == [
+        ("10000000000000042", str(renamed)), ("10000000000000041", str(item))]
 
 
 def test_an_invoice_control_that_does_something_else_is_never_pressed(attached):
