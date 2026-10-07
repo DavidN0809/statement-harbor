@@ -604,7 +604,8 @@ def _runs_apps() -> bool:
     setup-all installs while the panel is open reaches only a process
     started after it. The answer is kept until the packages folder
     changes, so a page that lists every app starts one process, not one
-    for each."""
+    for each. The page's first list of apps asks it off the event loop,
+    and a request on the loop that asks again waits at most the limit."""
     key = (sys.executable, os.environ.get("PYTHONPATH", ""), _packages_stamp())
     if key not in _RUNS_APPS:
         probe = ("import importlib.util as u, sys; "
@@ -612,7 +613,7 @@ def _runs_apps() -> bool:
         try:
             ok = subprocess.run([sys.executable, "-c", probe], cwd=str(HERE),
                                 stdin=subprocess.DEVNULL, capture_output=True,
-                                timeout=120).returncode == 0
+                                timeout=30).returncode == 0
         except (OSError, subprocess.SubprocessError):
             ok = False
         _RUNS_APPS.clear()

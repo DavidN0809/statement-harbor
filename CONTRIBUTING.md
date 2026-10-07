@@ -155,14 +155,15 @@ Before changing anything, make sure the code runs on your machine as it is.
 Then when something breaks later you know it was your change.
 
 Every provider app runs on one shared Python environment, `gui/.venv`, which
-also runs the control panel. Build it once, from the repository folder.
+also runs the control panel. Build it once, by double-clicking
+`setup-all.bat` in the repository folder, or from a terminal there.
 
 ```bash
-setup-all.bat
+.\setup-all.bat
 ```
 
-On macOS it is `./setup-all.command`, and use `python3` wherever this page
-says `python`. It installs what every app needs, the same few packages for
+In Git Bash that is `./setup-all.bat`. On macOS it is `./setup-all.command`,
+and use `python3` wherever this page says `python`. It installs what every app needs, the same few packages for
 all of them, and the shared core. It takes a few minutes the first time.
 
 Every app reads its settings from a `config.json` beside it, which is yours

@@ -222,7 +222,7 @@ def _says_one_environment(r, checkout: Path, calls: list, venv_folder: str) -> N
         == SETUP_ALL_REQUIREMENTS, calls
     assert any(c.endswith("-e ./core") for c in calls), calls
     assert not (checkout / "apps" / "demo" / ".venv").exists(), "setup-all made a venv for an app"
-    assert "keep the .venv of their own" in r.stdout and " kept" in r.stdout, said
+    assert "which setup-all leaves as it" in r.stdout and " kept" in r.stdout, said
     assert "KEPT VENV RAN" not in said
 
 

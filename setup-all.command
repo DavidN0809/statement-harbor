@@ -96,8 +96,9 @@ else
 fi
 if [ -n "$own" ]; then
     echo
-    echo "These apps keep the .venv of their own that they already have, and run"
-    echo "on it. Delete one to have that app use gui/.venv and free its space."
+    echo "These apps run on a .venv of their own, which setup-all leaves as it"
+    echo "is. Run an app's own setup.command to bring its .venv up to date, or"
+    echo "delete the .venv to have that app use gui/.venv and free its space."
     echo " $own"
 fi
 if [ -n "$failed" ]; then

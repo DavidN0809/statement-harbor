@@ -328,9 +328,9 @@ did not read.
   needing setup.** It marked each app with no `.venv` of its own, which in
   the installed app, whose one Python carries everything, was all of them.
   It now marks only an app that nothing can run.
-- **The Mac sign-in and setup files print & and > as their Windows twins
-  do.** Nine of them showed the caret Windows needs before those
-  characters, as in "Statements ^& Activity".
+- **The Mac sign-in and setup files no longer print a stray caret.** Nine
+  of them showed the caret Windows needs before & and >, as in
+  "Statements ^& Activity".
 - **A run whose documents page would not open no longer finishes clean.**
   In twenty document apps, when Discover could not open the documents
   page, even after checking the session, it said so and returned. Pilot

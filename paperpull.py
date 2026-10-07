@@ -174,27 +174,44 @@ def venv_python(venv: Path) -> Path | None:
 
 
 def interpreter(app_dir: Path) -> Path:
-    """The app's own venv when it has one, otherwise the checkout's shared
-    one when setup-all has made it, otherwise the Python running this,
-    which in the packaged app is the one that carries every dependency."""
-    return (venv_python(app_dir / ".venv") or venv_python(SHARED_VENV)
-            or Path(sys.executable))
+    """The app's own venv when it has one. Otherwise the checkout's shared
+    one, once setup-all has given it what an app needs, or else the Python
+    running this when that one can run an app, which in the packaged app
+    is the one that carries every dependency. When neither can, the shared
+    one if there is one, and main says what to set up."""
+    own = venv_python(app_dir / ".venv")
+    if own:
+        return own
+    shared = venv_python(SHARED_VENV)
+    for python in (shared, Path(sys.executable)):
+        if python and runs_apps(python):
+            return python
+    return shared or Path(sys.executable)
+
+
+# {(interpreter, PYTHONPATH): whether it can run an app}, for one run of this.
+_RUNS: dict = {}
 
 
 def runs_apps(python: Path) -> bool:
     """Whether python can import what every app needs. The Python running
     this is asked directly. Any other is started and asked, since the
     gui/.venv every setup-all made before this one holds only the panel's
-    own packages."""
+    own packages. It is started in its own folder, so that nothing beside
+    whoever ran this answers for it."""
     if python == Path(sys.executable):
         return all(importlib.util.find_spec(name) for name in NEEDS)
-    probe = ("import importlib.util as u, sys; "
-             "sys.exit(not all(map(u.find_spec, %r)))" % (list(NEEDS),))
-    try:
-        return subprocess.call([str(python), "-c", probe], env=app_env(),
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
-    except OSError:
-        return False
+    key = (str(python), os.environ.get("PYTHONPATH", ""))
+    if key not in _RUNS:
+        probe = ("import importlib.util as u, sys; "
+                 "sys.exit(not all(map(u.find_spec, %r)))" % (list(NEEDS),))
+        try:
+            _RUNS[key] = subprocess.call(
+                [str(python), "-c", probe], env=app_env(), cwd=str(python.parent),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
+        except OSError:
+            _RUNS[key] = False
+    return _RUNS[key]
 
 
 def not_set_up(app_dir: Path, wanted: str) -> str:
@@ -340,14 +357,10 @@ def main(argv: list[str] | None = None) -> int:
             print("No apps under %s" % root)
             return 1
         print("apps under %s\n" % root)
-        ready = {}
         for d in apps:
             note = ""
-            if venv_python(d / ".venv") is None:
-                py = interpreter(d)
-                if py not in ready:
-                    ready[py] = runs_apps(py)
-                note = "" if ready[py] else "   (not set up yet)"
+            if venv_python(d / ".venv") is None and not runs_apps(interpreter(d)):
+                note = "   (not set up yet)"
             print("  %-36s %-14s %s%s" % (d.name, _slug(d), provider_name(d), note))
         return 0
 

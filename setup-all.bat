@@ -85,8 +85,9 @@ if defined FAILED (
 )
 if defined OWN (
   echo.
-  echo These apps keep the .venv of their own that they already have, and run
-  echo on it. Delete one to have that app use gui\.venv and free its space.
+  echo These apps run on a .venv of their own, which setup-all leaves as it
+  echo is. Run an app's own setup.bat to bring its .venv up to date, or delete
+  echo the .venv to have that app use gui\.venv and free its space.
   echo  !OWN!
 )
 echo.

@@ -42,6 +42,7 @@ def root(tmp_path, monkeypatch):
     # that wants one, so the gui/.venv of the checkout running these tests,
     # or its absence on CI, never decides what they see.
     monkeypatch.setattr(paperpull, "SHARED_VENV", tmp_path / "gui" / ".venv")
+    monkeypatch.setattr(paperpull, "_RUNS", {})
     _app(tmp_path, "pge", "PG&E", folder="PG&E Statements", venv=True)
     _app(tmp_path, "chase", "Chase")
     _app(tmp_path, "target", "Target", login_flag="--login")
@@ -169,31 +170,56 @@ def _shared(root: Path) -> Path:
     return py
 
 
-def test_an_app_with_no_venv_of_its_own_runs_on_the_checkouts_shared_one(root):
+def test_an_app_with_no_venv_of_its_own_runs_on_the_checkouts_shared_one(root, monkeypatch):
     shared = _shared(root)
+    monkeypatch.setattr(paperpull, "runs_apps", lambda python: True)
     assert paperpull.interpreter(root / "chase") == shared
     assert paperpull.build_argv(root / "chase", "pilot", None, [])[0] == str(shared)
     assert paperpull.interpreter(root / "PG&E Statements") == \
         root / "PG&E Statements" / ".venv" / "Scripts" / "python.exe"
 
 
+def test_a_shared_environment_that_cannot_run_an_app_gives_way_to_this_python(root,
+                                                                               monkeypatch):
+    """The gui/.venv an older setup-all or run_gui made holds the panel's
+    packages alone. An app with no venv runs on the Python running this
+    when that one can, as it did before there was a shared one, and is
+    stopped only when neither can."""
+    shared = _shared(root)
+    this = Path(sys.executable)
+    monkeypatch.setattr(paperpull, "runs_apps", lambda python: python == this)
+    assert paperpull.interpreter(root / "chase") == this
+    monkeypatch.setattr(paperpull, "run", lambda app_dir, argv: 0)
+    assert paperpull.main(["--root", str(root), "chase", "verify"]) == 0
+    monkeypatch.setattr(paperpull, "runs_apps", lambda python: False)
+    assert paperpull.interpreter(root / "chase") == shared
+    with pytest.raises(SystemExit, match="chase is not set up yet"):
+        paperpull.main(["--root", str(root), "chase", "verify"])
+
+
+def _packages(folder: Path, names) -> Path:
+    for name in names:
+        (folder / name).mkdir(parents=True)
+        (folder / name / "__init__.py").write_text("", encoding="utf-8")
+    return folder
+
+
 def test_the_shared_environment_is_asked_whether_it_can_run_an_app(tmp_path, monkeypatch):
     """The gui/.venv every setup-all made before this one holds the panel's
     packages and none of an app's, so an app started on it would fail on
-    its first import. It is asked, by starting it, as a run would."""
+    its first import. It is asked, by starting it, as a run would, and in
+    its own folder, so packages beside whoever ran this do not answer."""
+    monkeypatch.setattr(paperpull, "_RUNS", {})
     venv = tmp_path / "gui" / ".venv"
     subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)],
                    check=True, capture_output=True)
     python = paperpull.venv_python(venv)
-    stubs = tmp_path / "stubs"
-    for name in paperpull.NEEDS:
-        (stubs / name).mkdir(parents=True)
-        (stubs / name / "__init__.py").write_text("", encoding="utf-8")
-    monkeypatch.setenv("PYTHONPATH", str(stubs))
+    monkeypatch.setenv("PYTHONPATH", str(_packages(tmp_path / "all", paperpull.NEEDS)))
     assert paperpull.runs_apps(python)
-    shutil.rmtree(stubs / "pypdf")
+    monkeypatch.setenv("PYTHONPATH", str(_packages(tmp_path / "no-pypdf", paperpull.NEEDS[:-1])))
     assert not paperpull.runs_apps(python)
     monkeypatch.delenv("PYTHONPATH")
+    monkeypatch.chdir(_packages(tmp_path / "here", paperpull.NEEDS))
     assert not paperpull.runs_apps(python)
     assert not paperpull.runs_apps(tmp_path / "nowhere" / "python.exe")
 
