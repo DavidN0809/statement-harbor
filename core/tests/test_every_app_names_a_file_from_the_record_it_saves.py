@@ -186,32 +186,46 @@ def test_a_pattern_with_the_number_names_each_file_as_rename_would(home, monkeyp
 CLAIM = "1234500AA0001"
 
 
-def eobs_taken(home):
+def eobs_taken(home, monkeypatch):
     """Two EOBs of one claim and one day, which want one name, listed by
-    Anthem's own code from the rows its site hands over and each saved
-    where its own download_one saves it."""
+    Anthem's own code from the rows its site hands over and taken by its
+    own process and download_one, with only the provider's PDFs stood in.
+    Each file's record, as written down."""
+    site = home.mod.site
+    page = SimpleNamespace(url="https://membersecure.anthem.com/member/eob")
+
+    def download_document(_page, doc_id, out_path):
+        Path(out_path).write_bytes(pdf_of(doc_id))
+        return True
+
+    monkeypatch.setattr(site, "ensure_statements", lambda *_a, **_kw: True)
+    monkeypatch.setattr(site, "download_document", download_document)
     app = home.build()
+    monkeypatch.setattr(app, "_on_its_site", lambda: page)
+    monkeypatch.setattr(app, "check_session", lambda *_a, **_kw: None)
     for seq in (0, 1):
         assert app._record_statement_doc({
             "title": "Medical Explanation of Benefits", "date": CARD_DAY,
             "account": "Jane Doe - Medical claim " + CLAIM, "href": "",
-            "doc_id": home.mod.site.make_doc_id("Medical", CLAIM, "EOB", seq)}) == 1
-    files = [census.downloaded(app, home.mod.Document.from_dict(rec),
-                               body=pdf_of(rec["document_id"]))
-             for rec in list(app.discovery.data.values())]
-    app.progress.save()
+            "doc_id": site.make_doc_id("Medical", CLAIM, "EOB", seq)}) == 1
     app.discovery.save()
-    return files
+    app.process([home.mod.Document.from_dict(rec) for rec in app.discovery.data.values()])
+    app.progress.save()
+    records = list(app.progress.data.values())
+    assert len(records) == 2 and all(r.get("downloaded_ok") for r in records), records
+    for rec in records:
+        assert marker(rec["document_id"]).encode() in Path(rec["pdf_path"]).read_bytes()
+    return records
 
 
 @pytest.mark.parametrize("pattern", [None, NUMBERED], ids=["default", "numbered"])
-def test_an_eob_is_named_as_rename_would_name_it(home, pattern):
+def test_an_eob_is_named_as_rename_would_name_it(home, monkeypatch, pattern):
     """The EOBs were named from the record they are written down by, and
     stay so."""
     if pattern:
         home.set_pattern(pattern)
-    first, second = eobs_taken(home)
-    assert second.name != first.name and not second.stem.endswith(" (2)"), second.name
+    names = [Path(r["pdf_path"]).name for r in eobs_taken(home, monkeypatch)]
+    assert len(set(names)) == 2 and not any(n.endswith(" (2).pdf") for n in names), names
     before = sorted(p.name for p in home.files().values())
     said = home.rename()
     assert NAMED_ALREADY in said, said[-1500:]
@@ -231,15 +245,31 @@ RECORDERS = {"self._record": 0, "self._record_state": 0, "self.download_one": 1,
              "self.progress.update": 1}
 
 
+# What a name or Rename's match of a row to its record is made from
+# (naming.fields_of, renaming._key_of_record). A record made from the one a
+# file was named from must not write another value over any of them.
+NAMING_FIELDS = {"date", "purchase_date", "title", "summary", "category", "document_type",
+                 "order_number", "document_id", "account", "total", "store_info",
+                 "purchase_type"}
+
+# A parameter of these is an app's own whole record, which every app
+# writes down whole (_record, _record_state).
+RECORD_CLASSES = {"Document", "Purchase"}
+
+
 def _built_from(node, name: str) -> bool:
     """The record handed over is the object itself, or a dict made from it
-    by dict(obj, ...) or {**obj, ...}."""
+    by dict(obj, ...) or {**obj, ...} that writes nothing over a field a
+    name is made from."""
     if isinstance(node, ast.Name):
         return node.id == name
     if isinstance(node, ast.Call) and ast.unparse(node.func) == "dict" and node.args:
-        return _built_from(node.args[0], name)
+        return (_built_from(node.args[0], name)
+                and not any(kw.arg in NAMING_FIELDS for kw in node.keywords))
     if isinstance(node, ast.Dict):
-        return any(k is None and _built_from(v, name) for k, v in zip(node.keys, node.values))
+        return (any(k is None and _built_from(v, name) for k, v in zip(node.keys, node.values))
+                and not any(isinstance(k, ast.Constant) and k.value in NAMING_FIELDS
+                            for k in node.keys))
     return False
 
 
@@ -280,14 +310,17 @@ def namings(path: Path):
 
 def written_down(holders, name: str) -> bool:
     """Whether the function writes down, or hands on to be written down,
-    the very record it names a file from. A parameter is its caller's to
-    write down, and the caller is held to this too. A function inside
-    another names from the enclosing one's record, as Amazon's target()
-    names each invoice of an order from the order its function writes
-    down."""
+    the very record it names a file from. A parameter counts only when it
+    is the app's own Document or Purchase, which its callers hold and every
+    app writes down whole, and never a row or a dict handed in. A function
+    inside another names from the enclosing one's record, as Amazon's
+    target() names each invoice of an order from the order its function
+    writes down."""
     for fn in reversed(holders):
-        if name in {a.arg for a in fn.args.args + fn.args.kwonlyargs}:
-            return True
+        params = {a.arg: a for a in fn.args.args + fn.args.kwonlyargs}
+        if name in params:
+            annotation = params[name].annotation
+            return annotation is not None and ast.unparse(annotation) in RECORD_CLASSES
         for node in ast.walk(fn):
             if isinstance(node, ast.Call):
                 at = RECORDERS.get(ast.unparse(node.func))
@@ -304,10 +337,61 @@ def test_there_are_namings_to_check():
     assert "target" in {fn for p, fn in found if p.parent.name == "amazon"}
 
 
+CANARY = '''
+class App:
+    def row_to_a_helper(self, rows):
+        for r in rows:
+            self.save_row(r)
+
+    def save_row(self, r: dict):
+        return build_pdf_filename("2026-01-01", "x", "", record=r)
+
+    def id_written_over(self, r):
+        record = {"title": r["label"], "document_id": r["doc_id"]}
+        name = build_pdf_filename("2026-01-01", "x", "", record=record)
+        self.progress.update(r["key"], dict(record, document_id="", pdf_path=name))
+
+    def put_aside_apart(self, r):
+        record = {"title": r["label"], "document_id": r["doc_id"]}
+        name = build_pdf_filename("2026-01-01", "x", "", record=record)
+        self.progress.update(r["key"], dict(record, pdf_path=name))
+        self.progress.update(r["key"], {"title": r["label"], "pdf_path": name})
+
+    def whole_record(self, doc: Document):
+        return build_pdf_filename(doc.date, doc.summary, "", record=doc)
+
+    def written_from_it(self, r):
+        record = {"title": r["label"], "document_id": r["doc_id"]}
+        name = build_pdf_filename("2026-01-01", "x", "", record=record)
+        self.progress.update(r["key"], dict(record, state="Completed", pdf_path=name))
+'''
+
+
+def test_the_census_tells_each_shape_apart(tmp_path):
+    """The census refuses a row handed to a helper, an id written over the
+    record a file was named from, and a file written down apart from it,
+    and passes an app's own Document and a record written from the one the
+    file was named from."""
+    source = tmp_path / "canary_docs.py"
+    source.write_text(CANARY, encoding="utf-8")
+    verdict = {}
+    for holders, _call, record in namings(source):
+        verdict[holders[-1].name] = (written_down(holders, record.id)
+                                     and not written_apart(holders, record.id))
+    assert verdict == {"save_row": False, "id_written_over": False,
+                       "put_aside_apart": False, "whole_record": True,
+                       "written_from_it": True}, verdict
+
+
 def test_every_app_names_a_file_from_the_record_it_writes_down():
     """A file named from one record and written down by another is offered
     a new name by Rename, and Anthem's lists named theirs from the row a
-    list gave and wrote down a dict made apart from it."""
+    list gave and wrote down a dict made apart from it.
+
+    What tells a second file of one name apart is not read here. The
+    rename census holds every app's download_one to it, and a later step
+    that renames a saved file, as Ally's name from a statement's contents,
+    is held by neither."""
     wrong = []
     for path in entries():
         for holders, call, record in namings(path):
