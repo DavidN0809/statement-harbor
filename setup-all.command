@@ -93,6 +93,7 @@ if [ -z "$failed" ]; then
     echo "or start the control panel with gui/run_gui.command"
 else
     echo "** Setup did not finish. Fix what is said above, then run this again."
+    echo "   If gui/.venv was made by an older Python, delete that folder first."
 fi
 if [ -n "$own" ]; then
     echo

@@ -80,6 +80,7 @@ if not defined CORE (
 echo.
 if defined FAILED (
   echo ** Setup did not finish. Fix what is said above, then run this again.
+  echo    If gui\.venv was made by an older Python, delete that folder first.
 ) else (
   echo All set. The control panel and !COUNT! apps share one environment, gui\.venv.
 )
