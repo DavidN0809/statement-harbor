@@ -456,6 +456,141 @@ def test_a_name_taken_while_a_ring_went_back_is_followed_by_the_ledgers(
     assert "another file has taken its name" in text, text
 
 
+def _alpha_and_beta(tmp_path):
+    """Two statements of one day, each with a record, that the app now names
+    the other way round."""
+    folder = tmp_path / "Statements"
+    folder.mkdir()
+    rows, records = [], {}
+    for name, summary in (("Alpha", "Beta"), ("Beta", "Alpha")):
+        path = folder / ("2026-09-05 Testco %s.pdf" % name)
+        path.write_bytes(b"%PDF-1.7 " + name.encode())
+        rows.append({NAME: path.name, PATH: str(path), "Document Date": "2026-09-05",
+                     "Document Summary": summary, "Document Title": "t", "Notes": "",
+                     "own": name})
+        records["key " + name] = {"pdf_path": str(path), "pdf_filename": path.name,
+                                  "own": name}
+    return folder, rows, records
+
+
+def _second_rename_finishes(folder, rows, records, monkeypatch):
+    """Rename again with nothing refused. The file left under a temporary
+    name takes its new name, and every row and record names its own file."""
+    monkeypatch.undo()
+    app = _App(folder, rows, progress=records)
+    said = []
+    result = renaming.run_for(app, apply_changes=True, say=said.append)
+    text = "\n".join(said)
+    assert result.renamed >= 1 and not result.failed, text
+    assert renaming.NOT_HELD not in text and "left alone" not in text, text
+    assert not list(folder.glob("*.renaming*")), sorted(p.name for p in folder.iterdir())
+    for r in rows:
+        assert Path(r[PATH]).name == r[NAME], r
+        assert Path(r[PATH]).read_bytes() == b"%PDF-1.7 " + r["own"].encode(), r
+    for rec in records.values():
+        assert Path(rec["pdf_path"]).name == rec["pdf_filename"], rec
+        assert Path(rec["pdf_path"]).read_bytes() == b"%PDF-1.7 " + rec["own"].encode(), rec
+    said.clear()
+    renaming.run_for(app, say=said.append)
+    assert said == ["Every file is already named the way this app names them."], said
+
+
+def test_a_file_a_refused_swap_left_aside_is_finished_by_the_next_rename(
+        tmp_path, _held_from, monkeypatch):
+    """The staged file of a swap was refused its new name, and the other
+    file its way back, so the staged file stayed under "....pdf.renaming"
+    with its row and record naming it there. The next Rename left that row
+    out as not a PDF the app holds, so the file stayed there for good, and
+    renaming it by hand left the index naming a file that was gone."""
+    folder, rows, records = _alpha_and_beta(tmp_path)
+    alpha = rows[0][PATH]
+    state = _held_from(10 ** 6)
+    real = Path.rename
+
+    def refuse_both(self, target):
+        if self.name.endswith(".renaming"):
+            state["held"].update({str(self).lower(), alpha.lower()})
+        return real(self, target)
+    monkeypatch.setattr(Path, "rename", refuse_both)
+    result = renaming.run_for(_App(folder, rows, progress=records), apply_changes=True,
+                              say=lambda *a: None)
+    assert len(result.stranded) == 1
+    assert rows[0][PATH].endswith(".pdf.renaming")
+    assert records["key Alpha"]["pdf_path"] == rows[0][PATH]
+    _second_rename_finishes(folder, rows, records, monkeypatch)
+
+
+def test_a_file_whose_name_was_taken_while_aside_is_finished_by_the_next_rename(
+        tmp_path, _held_from, monkeypatch):
+    """The swap went back, and before the staged file could follow, another
+    program saved a file under its name. Its row and record name it under
+    its temporary name, and the next Rename finishes it while the file that
+    came keeps its name."""
+    folder, rows, records = _alpha_and_beta(tmp_path)
+    alpha = Path(rows[0][PATH])
+    state = _held_from(10 ** 6)
+    real, moves_of_alpha = Path.rename, []
+
+    def newcomer(self, target):
+        if self.name.endswith(".renaming"):
+            state["held"].add(str(self).lower())
+        out = real(self, target)
+        if Path(self) == alpha:
+            moves_of_alpha.append(target)
+            if len(moves_of_alpha) == 2:      # Beta given its name back
+                alpha.write_bytes(b"%PDF-1.7 newcomer")
+        return out
+    monkeypatch.setattr(Path, "rename", newcomer)
+    renaming.run_for(_App(folder, rows, progress=records), apply_changes=True,
+                     say=lambda *a: None)
+    assert rows[0][PATH].endswith(".pdf.renaming")
+    _second_rename_finishes(folder, rows, records, monkeypatch)
+    assert alpha.read_bytes() == b"%PDF-1.7 newcomer"
+
+
+def test_only_a_rows_file_under_a_rename_temporary_name_in_a_filing_folder_is_held(
+        tmp_path, monkeypatch):
+    """A row naming a PDF that Rename left under its temporary name, ending
+    ".pdf.renaming" and perhaps a number, is a document the app holds,
+    whatever the row's status. The same name outside the folders the app
+    files in, reached by climbing out through "..", on a folder, or on a
+    file that was no PDF is not, and neither is a path with no row."""
+    filed, elsewhere = tmp_path / "Statements", tmp_path / "elsewhere"
+    filed.mkdir()
+    elsewhere.mkdir()
+    held = [row(filed, "A.pdf.renaming", order="A1"),
+            row(filed, "B.PDF.renaming2", order="A2",
+                **{"Processing Status": "Needs Manual Review"}),
+            row(filed, "C.pdf.renaming.renaming", order="A3")]
+    (filed / "D.pdf.renaming").mkdir()
+    not_held = [row(elsewhere, "E.pdf.renaming", order="A5"),
+                {PATH: str(filed / ".." / "elsewhere" / "E.pdf.renaming"),
+                 NAME: "E.pdf.renaming", "order": "A6"},
+                {PATH: str(filed / "D.pdf.renaming"), NAME: "D.pdf.renaming", "order": "A4"},
+                row(filed, "F.txt.renaming", order="A7"),
+                row(filed, "G.pdf.renamingx", order="A8"),
+                row(filed, "H.renaming", order="A9")]
+    changes = renaming.plan(held + not_held, by_order, folders=[filed])
+    assert [c.reason for c in changes] == [""] * len(held) + [renaming.NOT_HELD] * len(not_held)
+    for r in held:
+        assert renaming.held_row(r, [filed]) == Path(r[PATH])
+        assert renaming.held_document(r[PATH], [filed]) is None, "a path alone never holds one"
+    for r in not_held:
+        assert renaming.held_row(r, [filed]) is None, r[PATH]
+
+
+def test_a_link_under_a_rename_temporary_name_is_not_held(tmp_path):
+    filed = tmp_path / "Statements"
+    filed.mkdir()
+    target = row(filed, "held.pdf", order="A1")
+    link = filed / "linked.pdf.renaming"
+    try:
+        link.symlink_to(Path(target[PATH]))
+    except (OSError, NotImplementedError):
+        pytest.skip("this system does not let a test make a link")
+    assert renaming.held_row({PATH: str(link), NAME: link.name}, [filed]) is None
+
+
 def test_a_file_that_comes_while_a_rename_waits_is_not_written_over(
         tmp_path, monkeypatch):
     """A rename refused once waits and tries again. Where a rename takes

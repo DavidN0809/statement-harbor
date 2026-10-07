@@ -678,6 +678,14 @@ did not read.
   name while the record's list of the order's invoices kept the old one,
   so Download again took the renamed invoice for missing and saved it a
   second time. It is now found under its new name.
+- **The next Rename finishes a file left under its temporary name.** A
+  file of a swap that Rename could neither finish nor send back, with its
+  row in the index and its record naming it under a name ending
+  ".renaming", was left out of every later Rename as not a PDF the app
+  holds. It stayed there until it was renamed by hand, and then the index
+  named a file that was gone. Rename now takes such a file, in a folder
+  the app files documents in and never a link, as one of its own, and
+  gives it the name the app would give it today.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never

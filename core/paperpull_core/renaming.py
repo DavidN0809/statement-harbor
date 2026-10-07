@@ -117,14 +117,25 @@ def held_row(row: dict, folders, path_key: str = "PDF Full Path") -> Optional[Pa
     ".pdf.delivering", when the row says it was saved. Robinhood records a
     tax form so when moving it into place fails, for Rename to finish. It
     also leaves a form that failed its check so, when moving that one to
-    Manual Review fails, and that row says it needs review."""
+    Manual Review fails, and that row says it needs review.
+
+    It also holds a PDF Rename left under the temporary name it gives a file
+    trading names with others (apply), ending ".pdf.renaming" and perhaps a
+    number. Rename points a row there when the file's own name holds another
+    file by then, and the next Rename finishes it. Left out as not held, it
+    stayed there for good."""
     return _held_row(row, _real(folders), path_key)
 
 
 def _held_row(row: dict, real_folders: List[Path],
               path_key: str = "PDF Full Path") -> Optional[Path]:
     saved = (row.get("Processing Status") or "").strip().lower() == "completed"
-    return _held(row.get(path_key), real_folders, staged=saved)
+    return _held(row.get(path_key), real_folders, staged=saved, aside=True)
+
+
+# The temporary name apply gives a file trading names with others
+# (_rename_ring), once or, for a file put aside again, more than once.
+_ASIDE = re.compile(r"\.pdf(\.renaming\d*)+$")
 
 
 def _real(folders) -> List[Path]:
@@ -141,16 +152,19 @@ def _real(folders) -> List[Path]:
     return real
 
 
-def _held(text: str, real_folders: List[Path], staged: bool = False) -> Optional[Path]:
+def _held(text: str, real_folders: List[Path], staged: bool = False,
+          aside: bool = False) -> Optional[Path]:
     """held_document, with the folders already found where they really are,
-    and with `staged` a PDF under its staging name as well."""
+    with `staged` a PDF under its staging name as well, and with `aside` one
+    under Rename's temporary name."""
     text = (text or "").strip()
     if not text:
         return None
     ends = (".pdf", ".pdf.delivering") if staged else (".pdf",)
     try:
         path = Path(text).resolve()
-        held = (path.name.lower().endswith(ends) and path.is_file()
+        name = path.name.lower()
+        held = ((name.endswith(ends) or (aside and _ASIDE.search(name))) and path.is_file()
                 and not Path(text).is_symlink()
                 and not set(path.parents).isdisjoint(real_folders))
     except (OSError, RuntimeError, ValueError):
