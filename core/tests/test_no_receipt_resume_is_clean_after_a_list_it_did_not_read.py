@@ -143,6 +143,38 @@ def under_only_ifs(fn, target) -> bool:
     return visit(fn.body)
 
 
+SCOPE = ("year", "start_date", "end_date")
+
+
+def reads_the_scope(node, fn) -> bool:
+    """Whether this reads the run's scope flags, itself or through a name
+    Discover set from them, as Apple's `narrowed` was."""
+    def direct(n):
+        text = ast.unparse(n)
+        return any("args.%s" % s in text or "'%s'" % s in text for s in SCOPE)
+    if direct(node):
+        return True
+    names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+    return any(isinstance(s, ast.Assign) and direct(s.value)
+               and {t.id for t in s.targets if isinstance(t, ast.Name)} & names
+               for s in ast.walk(fn))
+
+
+def conditions_above(fn, target) -> list:
+    """The tests of the ifs that hold target."""
+    found = []
+
+    def visit(statements):
+        for stmt in statements:
+            if isinstance(stmt, ast.If) and target in ast.walk(stmt) \
+                    and target not in ast.walk(stmt.test):
+                found.append(stmt.test)
+                visit(stmt.body)
+                visit(stmt.orelse)
+    visit(fn.body)
+    return found
+
+
 def where_it_notes(path: Path) -> list:
     """What is wrong with where this app's Discover notes how it ended."""
     cls = app_class(ast.parse(path.read_text(encoding="utf-8-sig")))
@@ -165,6 +197,9 @@ def where_it_notes(path: Path) -> list:
     whole = whole[0]
     if not under_only_ifs(fn, whole):
         wrong.append("the list is noted whole inside a loop, a with, a try or a handler")
+    if any(reads_the_scope(t, fn) for t in conditions_above(fn, whole)):
+        wrong.append("the app decides itself that a scoped listing is not whole, "
+                     "which listing.read_whole decides from the run's scope")
     before = [s for s in ast.walk(fn) if isinstance(s, ast.stmt) and s is not fn
               and s.end_lineno < whole.lineno]
     after = [s for s in ast.walk(fn) if isinstance(s, ast.stmt) and s.lineno > whole.lineno]
@@ -239,6 +274,18 @@ class App:
     assert check(through) == []
     assert check(through.replace("        self.discovery.save()\n", "        return {}\n")) == [
         "the list is noted whole before it is saved"]
+    own_rule = ["the app decides itself that a scoped listing is not whole, "
+                "which listing.read_whole decides from the run's scope"]
+    assert check(good.replace("        if self._read_to_the_end:\n",
+                              "        if self._read_to_the_end and not self.args.year:\n")
+                 ) == own_rule
+    assert check(good.replace(
+        "        if self._read_to_the_end:\n",
+        "        narrowed = bool(getattr(self.args, 'year', None) or self.args.start_date)\n"
+        "        if not narrowed:\n")) == own_rule
+    assert check(good.replace("        if self._read_to_the_end:\n",
+                              "        if self._read_to_the_end:\n"
+                              "            pass\n        if not self.args.end_date:\n")) == own_rule
 
 
 # -- the browser that is not there -------------------------------------------------
@@ -363,6 +410,11 @@ class Home:
             self.note(whole)
         return purchase
 
+    def noted(self):
+        """What last-listing.json says, None when there is none."""
+        path = self.out / "last-listing.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
     def note(self, whole: bool):
         self.out.mkdir(parents=True, exist_ok=True)
         (self.out / "last-listing.json").write_text(
@@ -476,6 +528,68 @@ def test_resume_carries_on_once_the_list_comes_whole(home, monkeypatch):
     assert home.did == [LIST, [purchase.key]], home.did
     assert finished(result), said[-1500:]
     assert home.browser.asked == asked, "the purchases were handed over, not downloaded"
+
+
+# -- a run scoped to part of the history -----------------------------------------
+
+# A scope as the panel's Scope row passes it, to every run but Login.
+SCOPED = ("--year", "2026")
+
+
+def lists_whole_without_a_site(home, monkeypatch):
+    """A stand-in Discover that reaches the end of what it was asked for and
+    notes it the way the app's own Discover does, and purchases watched as
+    they are handed over rather than downloaded. Answers the app's own
+    Discover, to put back."""
+    own = home.mod.App.cmd_discover
+
+    def whole(app, *_a, **_kw):
+        home.did.append(LIST)
+        listing.started(app)
+        listing.read_whole(app)
+        return {}
+
+    def took(app, purchases, *_a, **_kw):
+        home.did.append([p.key for p in purchases])
+    monkeypatch.setattr(home.mod.App, "cmd_discover", whole)
+    monkeypatch.setattr(home.mod.App, "process_purchases", took)
+    return own
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_scoped_listing_leaves_a_list_that_stopped_unfinished(home, monkeypatch):
+    """An unscoped Run All stopped while it listed, and then a Resume scoped
+    to one year read that year to its end. The rest of the history is still
+    unread, so the next unscoped Resume reads the list again rather than
+    finish clean on what the year held."""
+    home.listed_before(done=True)
+    home.stopped_while_listing()
+    own = lists_whole_without_a_site(home, monkeypatch)
+    said, result, _ended = home.run(*RESUME, *SCOPED)
+    assert home.did[:1] == [LIST] and finished(result), (home.did, said[-1500:])
+    assert (home.noted() or {}).get("complete") is False, home.noted()
+    monkeypatch.setattr(home.mod.App, "cmd_discover", own)
+    home.did.clear()
+    said, result, _ended = home.run(*RESUME)
+    assert COMPLETE not in said, said[-1500:]
+    assert home.did[:1] == [LIST] and stopped(result), (home.did, said[-1500:])
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_scoped_listing_that_finishes_costs_no_second_reading(home, monkeypatch):
+    """The other side, someone who always sets a scope. After a whole
+    listing their scoped Run All reads its year to the end, and their scoped
+    Resume then carries on without reading the list again."""
+    home.listed_before(done=True)
+    own = lists_whole_without_a_site(home, monkeypatch)
+    said, result, _ended = home.run(*READS_THE_LIST["run-all"], *SCOPED)
+    assert finished(result), said[-1500:]
+    assert (home.noted() or {}).get("complete") is True, home.noted()
+    monkeypatch.setattr(home.mod.App, "cmd_discover", own)
+    home.did.clear()
+    said, result, _ended = home.run(*RESUME, *SCOPED)
+    assert home.did == [] and finished(result), (home.did, said[-1500:])
+    assert home.browser.asked == 0, "Resume reached for the browser"
 
 
 @pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)

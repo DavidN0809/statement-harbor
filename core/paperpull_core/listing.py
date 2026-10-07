@@ -32,6 +32,14 @@ them did by a mark of their own since Target's review of 0.41.0. The panel
 says to press Resume after any run that stopped, and a purchase list is a
 few pages where the receipts are a page each, so that Resume finishes the
 job. When the list does not come this time either, the run stops with it.
+
+A run scoped to part of the history, by --year, --start-date or --end-date
+as the panel's Scope row passes them to every run but Login, reads only
+that part. Its listing says nothing about the rest, so when it ends whole
+it leaves the note as it was before it began. An unscoped run that stopped
+stays stopped through any number of scoped ones, until a run reads the
+whole list, and someone who always sets a scope is never asked to read
+the list again for it.
 """
 from __future__ import annotations
 
@@ -53,25 +61,45 @@ OLD_MARK = ".discovery-unfinished"
 log = logging.getLogger(__name__)
 
 
-def _note(app, whole: bool) -> bool:
+def _write(app, note: dict) -> bool:
     # Never the reason a listing fails, whatever goes wrong here, as with the
     # journal. A note that cannot be written leaves the last one as it was,
     # which is no worse than before this existed.
     try:
-        atomic_write_json(app.paths.last_listing, {"complete": bool(whole), "at": now_iso()})
+        atomic_write_json(app.paths.last_listing, note)
     except Exception as e:
         log.info("could not note how the list was read: %s", e)
         return False
     return True
 
 
+def _note(app, whole: bool, **more) -> bool:
+    return _write(app, dict({"complete": bool(whole), "at": now_iso()}, **more))
+
+
 def _old_mark(app):
     return app.paths.last_listing.with_name(OLD_MARK)
 
 
+# The scope flags every app takes.
+SCOPE_FLAGS = ("year", "start_date", "end_date")
+
+
+def scoped(app) -> bool:
+    """Whether this run was asked for part of the history only."""
+    args = getattr(app, "args", None)
+    return any(getattr(args, flag, None) for flag in SCOPE_FLAGS)
+
+
 def started(app) -> None:
-    """A listing begins. Until read_whole() it is a listing that stopped."""
-    if _note(app, False):
+    """A listing begins. Until read_whole() it is a listing that stopped.
+    What the note said before is kept in it, for a scoped listing to put
+    back when it ends."""
+    try:
+        before = {COMPLETE: True, STOPPED: False}.get(last(app))
+    except Exception:
+        before = None
+    if _note(app, False, before=before):
         # The note says from here on what the old mark said, so the mark goes.
         try:
             _old_mark(app).unlink(missing_ok=True)
@@ -80,8 +108,26 @@ def started(app) -> None:
 
 
 def read_whole(app) -> None:
-    """The app has the whole list, everything the provider listed."""
-    _note(app, True)
+    """The app has the whole list, everything the provider listed, or for a
+    scoped run everything in its part of the history. That part says
+    nothing about the rest, so a scoped listing puts back what the note
+    said before it began, and no note when there was none."""
+    if not scoped(app):
+        _note(app, True)
+        return
+    try:
+        got = json.loads(app.paths.last_listing.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(got, dict) or "before" not in got:
+        return
+    if isinstance(got["before"], bool):
+        _note(app, got["before"])
+        return
+    try:
+        app.paths.last_listing.unlink(missing_ok=True)
+    except OSError as e:
+        log.info("could not take away the note of a scoped listing: %s", e)
 
 
 def last(app) -> str:

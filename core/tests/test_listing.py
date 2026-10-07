@@ -296,3 +296,88 @@ def test_the_old_mark_stays_when_the_note_cannot_be_written(tmp_path, monkeypatc
     monkeypatch.setattr(listing, "atomic_write_json", refuse)
     listing.started(app)
     assert mark.exists() and listing.last(app) == listing.STOPPED
+
+
+# -- a run scoped to part of the history ----------------------------------------------------
+
+def _run(app, scope=None, whole=True):
+    """One listing, scoped as asked (a flag and its value) or not, read to
+    its end or stopped on the way."""
+    flags = {"year": None, "start_date": None, "end_date": None}
+    if scope:
+        flags[scope[0]] = scope[1]
+    app.args = SimpleNamespace(**flags)
+    listing.started(app)
+    if whole:
+        listing.read_whole(app)
+
+
+SCOPES = [("year", 2026), ("start_date", "2026-01-01"), ("end_date", "2025-12-31")]
+
+
+@pytest.mark.parametrize("scope", SCOPES, ids=[s[0] for s in SCOPES])
+def test_a_scoped_listing_leaves_a_list_that_stopped_unfinished(tmp_path, scope):
+    """The rest of the history is still unread after a scoped listing, so
+    Resume still reads it."""
+    app = _app(tmp_path, known=["one"])
+    _run(app, whole=False)
+    _run(app, scope)
+    assert listing.last(app) == listing.STOPPED
+    _run(app, scope)
+    assert listing.last(app) == listing.STOPPED
+    _run(app)
+    assert listing.last(app) == listing.COMPLETE
+
+
+@pytest.mark.parametrize("scope", SCOPES, ids=[s[0] for s in SCOPES])
+def test_a_scoped_listing_leaves_a_whole_list_whole(tmp_path, scope):
+    """Someone who always sets a scope is never asked to read the list again."""
+    app = _app(tmp_path, known=["one"])
+    _run(app)
+    _run(app, scope)
+    assert listing.last(app) == listing.COMPLETE
+    assert listing.read_again_first(app) is False
+
+
+def test_a_scoped_listing_that_stops_is_a_listing_that_stopped(tmp_path):
+    app = _app(tmp_path, known=["one"])
+    _run(app)
+    _run(app, ("year", 2026), whole=False)
+    assert listing.last(app) == listing.STOPPED
+
+
+def test_a_scoped_listing_on_a_new_install_leaves_no_note(tmp_path):
+    """Nothing was noted before it, and its part says nothing about the
+    rest, so there is still nothing noted."""
+    app = _app(tmp_path, known=["one"])
+    _run(app, ("year", 2026))
+    assert listing.last(app) == "" and not app.paths.last_listing.exists()
+
+
+def test_a_scoped_listing_keeps_the_old_mark_s_word(tmp_path):
+    """An install whose listing stopped under a version from before the note.
+    A scoped listing ends noted as stopped, and the mark is gone."""
+    app = _app(tmp_path, known=["one"])
+    mark = _old_mark(app)
+    _run(app, ("year", 2026))
+    assert listing.last(app) == listing.STOPPED and not mark.exists()
+
+
+def test_a_scoped_end_with_no_start_noted_leaves_the_note_alone(tmp_path):
+    """A note from before a listing kept what it said before, which only
+    started() writes, so there is nothing to put back."""
+    app = _app(tmp_path, known=["one"])
+    app.paths.last_listing.parent.mkdir(parents=True)
+    app.paths.last_listing.write_text('{"complete": false, "at": "2026-01-20T10:00:00"}',
+                                      encoding="utf-8")
+    app.args = SimpleNamespace(year=2026, start_date=None, end_date=None)
+    listing.read_whole(app)
+    assert listing.last(app) == listing.STOPPED
+
+
+def test_an_app_without_its_arguments_reads_whole(tmp_path):
+    """As tests that build one part of an app make it."""
+    app = _app(tmp_path)
+    listing.started(app)
+    listing.read_whole(app)
+    assert listing.last(app) == listing.COMPLETE

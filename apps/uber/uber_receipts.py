@@ -447,13 +447,13 @@ class App:
             n_new[EATS] = self._discover_eats()
         self.discovery.save()
         unfinished = bool(self._stopped_sides or self._cut_short_sides)
-        narrowed = bool(getattr(self.args, "year", None) or self.args.start_date)
         # Only both lists read to their end let Resume carry on without
         # reading them again. A side that asked for a sign-in or was cut
         # short leaves the listing noted as one that stopped, and so does a
-        # run that read one side, or one year or stretch of a list, since
-        # the rest was not read.
-        if not unfinished and not narrowed and set(PURCHASE_TYPES) <= set(types):
+        # run that read one side, since the other was not read. A run for
+        # one year or stretch of a list read only that part, and
+        # listing.read_whole leaves the note as it was before that run.
+        if not unfinished and set(PURCHASE_TYPES) <= set(types):
             listing.read_whole(self)
 
         all_recs = [r for r in self.discovery.data.values() if isinstance(r, dict)]

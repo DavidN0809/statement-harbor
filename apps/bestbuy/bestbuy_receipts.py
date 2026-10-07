@@ -563,10 +563,9 @@ class App:
         if hist["last"]:
             # Only a walk to the history's end lets Resume carry on without
             # reading it again. A run for one year, or from a start date,
-            # reads only that part of the history, so it stays noted as a
-            # listing that stopped, for Resume.
-            if not (self.args.year or self.args.start_date):
-                listing.read_whole(self)
+            # reads only that part of the history, and listing.read_whole
+            # leaves the note as it was before that run for it.
+            listing.read_whole(self)
         elif hist["answered"]:
             self._history_cut_short = True
             year = hist.get("year")

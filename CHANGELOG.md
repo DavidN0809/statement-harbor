@@ -604,6 +604,23 @@ did not read.
   run before it says a prompt is showing, saying why in PaperPull's own
   words and writing the failure file. The scaffold capture ADP carried,
   which no run called, is gone.
+  with the reason it is safe. Besides the core's own, four remain on it,
+  ADP's press of the View statement that shows its identity check, M&T's
+  year headings in its statements frame, and two links PG&E makes itself to
+  save a PDF.
+- **A run scoped to part of the history no longer counts the whole list as
+  read.** A Discover, Pilot, Run All or Resume with a year or dates set,
+  as the panel's Scope row passes them, noted the list as read to its end
+  once its part was, in every app but Best Buy, Apple and Uber. So after
+  a run that stopped partway through the whole history, one scoped run
+  let the next unscoped Resume finish clean with the rest never read. A
+  scoped run that reaches the end of its part now leaves things as they
+  were before it, so a list that stopped stays unfinished until a run
+  reads all of it, and a list read whole stays whole. Best Buy, Apple and
+  Uber, which treated every scoped run as unfinished and so read the list
+  again on each Resume after one, now do the same, so a scope kept set
+  never costs a second reading. A scoped run that stops is still a run
+  that stopped.
 
 ## [0.44.0] - 2026-10-07
 
