@@ -481,19 +481,23 @@ def test_a_tab_that_closes_before_it_is_looked_at_is_said_so(monkeypatch):
 TOKEN = "Q7X4417"
 
 
-def test_a_captures_trace_holds_no_address_and_no_label(browser, monkeypatch, tmp_path):
-    """The click here asks the vendor for JSON, moves the tab to a viewer
-    whose address carries a token, and reveals a Download control that
-    does nothing. No PDF arrives. What the trace says about all of it is
-    fixed words, statuses and counts, never an address, a token or a
-    control's own label."""
+# What the press does once the vendor answered, by how the viewer is shown.
+# Its own address carries a token either way, and its Download does nothing.
+IN_PLACE = ("history.pushState({}, '', '/viewer?token=%(t)s');"
+            " const d = document.createElement('div'); d.setAttribute('role', 'dialog');"
+            " d.innerHTML = '<p>Statement %(t)s</p><button>Download</button>';"
+            " document.body.append(d);")
+LOADED = "location.href = '/viewer?token=%(t)s';"
+
+
+def _capture_on_the_vendor(browser, monkeypatch, tmp_path, then):
     for name in ("CLICK_WAIT_S", "SECOND_STEP_WAIT_S", "LAST_WAIT_S"):
         monkeypatch.setattr(site, name, 1)
     browser.pages[("ebank.hepsiian.com", "/list")] = """<html><body><main>
       <a href="#" onclick="event.preventDefault();
          fetch('/api/statement?docId=%(t)s').then(r => r.json()).then(() => {
-           location.href = '/viewer?token=%(t)s'; });">04/30/24</a>
-    </main></body></html>""" % {"t": TOKEN}
+           %(then)s });">04/30/24</a>
+    </main></body></html>""" % {"t": TOKEN, "then": then % {"t": TOKEN}}
     browser.pages[("ebank.hepsiian.com", "/api/statement")] = (
         "application/json", '{"state": "queued"}')
     browser.pages[("ebank.hepsiian.com", "/viewer")] = (
@@ -506,9 +510,10 @@ def test_a_captures_trace_holds_no_address_and_no_label(browser, monkeypatch, tm
     el = tab.get_by_role("link", name="04/30/24")
     assert site._catch_pdf(tab, el, "04/30/24", tmp_path / "x.pdf", trace,
                            dl_dir=downloads) is False
-    notes = [t.get("note") for t in trace]
-    for step in ("clicked", "the tab moved", "after the click", "second step clicked"):
-        assert step in notes, step
+    return trace
+
+
+def _holds_no_address_and_no_label(trace):
     assert {"status": 200, "type": "json", "on": "ebank.hepsiian.com"} in trace
     text = json.dumps(trace)
     for leak in (TOKEN, "04/30/24", "Download", "/api/", "/viewer", "https:", "token"):
@@ -516,6 +521,35 @@ def test_a_captures_trace_holds_no_address_and_no_label(browser, monkeypatch, tm
     assert {t["control_kind"] for t in trace if "control_kind" in t} <= {
         "a link named by its date", "a download step", "another document control"}
     assert {t["on"] for t in trace if "on" in t} == {"ebank.hepsiian.com"}
+
+
+def test_a_captures_trace_holds_no_address_and_no_label(browser, monkeypatch, tmp_path):
+    """The click here asks the vendor for JSON, moves the tab's address to
+    a viewer whose address carries a token, and opens a dialog with a
+    Download control that does nothing. No PDF arrives. What the trace
+    says about all of it is fixed words, statuses and counts, never an
+    address, a token or a control's own label."""
+    trace = _capture_on_the_vendor(browser, monkeypatch, tmp_path, IN_PLACE)
+    notes = [t.get("note") for t in trace]
+    for step in ("clicked", "the tab moved", "after the click",
+                 "the revealed control sits where the press put it", "second step clicked"):
+        assert step in notes, step
+    _holds_no_address_and_no_label(trace)
+
+
+def test_a_download_on_a_page_loaded_since_the_press_is_not_pressed(browser, monkeypatch, tmp_path):
+    """The same, with the viewer loaded as a page of its own. Its Download
+    is on a page the press was not made on, so nothing ties it to this
+    statement, and it is not pressed. The trace says so in fixed words."""
+    trace = _capture_on_the_vendor(browser, monkeypatch, tmp_path, LOADED)
+    notes = [t.get("note") for t in trace]
+    for step in ("clicked", "the tab moved", "after the click"):
+        assert step in notes, step
+    assert "second step clicked" not in notes, notes
+    refused = [t for t in trace if t.get("note") == "a revealed control is not where the press "
+                                                    "put it, so it was not pressed"]
+    assert refused and refused[0]["where"] == ["the page was loaded anew"], trace
+    _holds_no_address_and_no_label(trace)
 
 
 # -- the orchestrator ---------------------------------------------------------

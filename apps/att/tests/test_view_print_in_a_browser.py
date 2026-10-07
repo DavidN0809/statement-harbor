@@ -75,9 +75,11 @@ def test_the_menu_entry_is_still_found_by_its_words(page):
     """The menu under Download PDF is made of plain elements, found by text.
     get_by_text read the old pattern too, so this pins that the escaped
     one still matches there."""
-    page.set_content("<body><div class='menu'><div>Regular PDF</div>"
-                     "<div>View/print PDF</div></div></body>")
-    el, label = site._menu_entry(page, site._VIEW_PRINT_RE, wait_ms=0)
+    page.set_content("<body><button id='get'>Download PDF</button></body>")
+    place = site._place_of(page, page.locator("#get"))
+    page.evaluate("() => document.body.insertAdjacentHTML('beforeend', \"<div class='menu'>"
+                  "<div>Regular PDF</div><div>View/print PDF</div></div>\")")
+    el, label = site._menu_entry(page, site._VIEW_PRINT_RE, place, wait_ms=0)
     assert label == "View/print PDF"
 
 

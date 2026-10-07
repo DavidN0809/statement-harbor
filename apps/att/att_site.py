@@ -133,6 +133,9 @@ from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
 from paperpull_core.capture import take_new_tab as _core_take_new_tab
 from paperpull_core.capture import fetch_as_b64 as _fetch_as_b64
 from paperpull_core.controls import control_texts as _control_texts
+from paperpull_core import controls as _controls
+from paperpull_core.controls import element_of as _element_of
+from paperpull_core.controls import place_of as _place_of
 from paperpull_core.controls import second_step as _core_second_step
 from paperpull_core.controls import controls_named as _controls_named
 from paperpull_core.controls import escape_for_locator
@@ -1720,10 +1723,22 @@ def _pdf_texts(page) -> list:
         return []
 
 
-def _menu_entry(page, pat, wait_ms: int = 4000):
+# Where a menu entry sits that says it is not this press's menu. The control
+# pressed left the page, or the page was loaded anew, or neither could be told.
+_NOT_THIS_PRESS = frozenset((_controls.LEFT_THE_PAGE, _controls.LOADED_ANEW, _controls.NOT_READ))
+
+
+def _menu_entry(page, pat, place, wait_ms: int = 4000, trace: Optional[list] = None):
     """A visible element whose whole text matches `pat`, found by text so
     the element's kind does not matter, waited for up to `wait_ms` since a
-    menu opens a moment after the click. Guard checked. None if absent."""
+    menu opens a moment after the click. Guard checked. None if absent.
+
+    `place` is where the press that opened the menu was made
+    (controls.place_of). An entry is taken only while the control pressed
+    is still on the page it was pressed on, since a page drawn anew may
+    show another bill. Where in the page AT&T draws the menu itself was
+    never recorded, so where the entry sits goes in the trace and is not
+    required yet, and a trace from a tester can settle it."""
     deadline = wait_ms
     while True:
         try:
@@ -1735,7 +1750,15 @@ def _menu_entry(page, pat, wait_ms: int = 4000):
                 except Exception:
                     continue
                 if pat.match(text) and is_safe_control(text) and el.is_visible():
-                    return el, text
+                    entry = _element_of(el)
+                    where = _controls.where_it_sits(place, entry)
+                    if trace is not None:
+                        trace.append({"note": "where the menu entry sits", "where": where})
+                    if where in _NOT_THIS_PRESS:
+                        log.info("a menu entry is not on the page the press was made on, "
+                                 "so it is not pressed")
+                        return None, ""
+                    return entry, text
         except Exception:
             pass
         if deadline <= 0:
@@ -1744,11 +1767,12 @@ def _menu_entry(page, pat, wait_ms: int = 4000):
         deadline -= 500
 
 
-def _second_step(page, appeared: set):
+def _second_step(page, appeared: set, place, trace: Optional[list] = None):
     """A control the click revealed whose text says it finishes a download,
-    once it has passed the guard, or None. The choosing is the core's, the
-    words this provider uses and the guard are this app's."""
-    return _core_second_step(page, appeared, _SECOND_STEP_RE, is_safe_control)
+    once it has passed the guard and sits where the press at `place` put
+    it, or None. The choosing is the core's, the words this provider uses
+    and the guard are this app's."""
+    return _core_second_step(page, appeared, _SECOND_STEP_RE, is_safe_control, place, trace)
 
 
 def _take_viewer(page, out_path: Path, trace: Optional[list]) -> bool:
@@ -1870,6 +1894,10 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             el.scroll_into_view_if_needed(timeout=4000)
         except Exception:
             pass
+        # Where the press is made, read just before it, so a control the
+        # press reveals is taken only where the press put it
+        # (controls.second_step).
+        place = _place_of(page, el)
         # Playwright's own press, and through the page only when nothing
         # covered the control, its press never reached the page and nothing
         # it should bring came. What cannot be told stops the run, and the
@@ -1932,13 +1960,13 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 pressed.append(_PRESS_UNSURE)
         # The menu under "Download PDF" holds "Regular PDF", which saves
         # the file, and "View/print PDF", which opens a tab. Found by text.
-        step, step_label = (None, "") if unsure_press else _menu_entry(page, _REGULAR_PDF_RE)
+        step, step_label = (None, "") if unsure_press else _menu_entry(page, _REGULAR_PDF_RE, place, trace=trace)
         if step is None and not unsure_press:
-            step, step_label = _second_step(page, appeared)
+            step, step_label = _second_step(page, appeared, place, trace)
         # Not when View/print PDF is the control just pressed, which its
         # words would find again and press a second time.
         if step is None and not unsure_press and not _VIEW_PRINT_RE.match(label or ""):
-            step, step_label = _menu_entry(page, _VIEW_PRINT_RE, wait_ms=1000)
+            step, step_label = _menu_entry(page, _VIEW_PRINT_RE, place, wait_ms=1000, trace=trace)
         if step is None and not unsure_press and trace is not None:
             trace.append({"note": "no menu entry found after the click",
                           "pdf_texts_now": [{**x, "text": redact(x["text"])} for x in _pdf_texts(page)]})

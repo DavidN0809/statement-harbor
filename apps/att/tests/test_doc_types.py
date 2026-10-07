@@ -9,6 +9,8 @@ import inspect
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds AT&T's AppSpec
@@ -351,6 +353,16 @@ def test_a_pdf_in_a_new_tab_is_read_only_from_a_blob_or_an_att_host(tmp_path):
 
 # -- round six, from the round-five trace ------------------------------------
 
+class _Placed:
+    """Stands in for where the press on Download PDF was made, every entry
+    sitting `where` against it."""
+    def __init__(self, where=None):
+        self._where = where or site._controls.BESIDE_THE_CONTROL
+
+    def where(self, step):
+        return self._where
+
+
 class _Ctl:
     def __init__(self, text, visible=True): self._text, self._visible = text, visible
     def inner_text(self, timeout=0): return self._text
@@ -383,9 +395,10 @@ def test_the_control_the_click_revealed_is_the_second_step_and_pay_never_is():
     after = site._control_texts(_AfterClick(["Download PDF", "See bill history", "Full bill", "Pay now", "Cancel"]))
     appeared = after - before
     assert appeared == {"Full bill", "Pay now", "Cancel"}
-    step, label = site._second_step(_AfterClick(sorted(appeared)), appeared)
+    step, label = site._second_step(_AfterClick(sorted(appeared)), appeared, _Placed())
     assert label == "Full bill"
-    assert site._second_step(_AfterClick(["Pay now", "Cancel"]), {"Pay now", "Cancel"}) == (None, "")
+    assert site._second_step(_AfterClick(["Pay now", "Cancel"]), {"Pay now", "Cancel"},
+                             _Placed()) == (None, "")
     for t in ("Download", "Save as PDF", "Bill PDF", "View/print PDF"):
         assert site._SECOND_STEP_RE.match(t) and site.is_safe_control(t), t
     for t in ("Pay now", "Make a payment", "Cancel", "Enroll in AutoPay"):
@@ -457,11 +470,34 @@ class _MenuPage:
 
 def test_the_regular_pdf_entry_is_found_by_text_once_the_menu_opens():
     page = _MenuPage(open_after=2)
-    el, label = site._menu_entry(page, site._REGULAR_PDF_RE, wait_ms=3000)
+    el, label = site._menu_entry(page, site._REGULAR_PDF_RE, _Placed(), wait_ms=3000)
     assert el is not None and label == "Regular PDF"
     assert page.waited == 2
-    el, label = site._menu_entry(_MenuPage(open_after=99), site._REGULAR_PDF_RE, wait_ms=1000)
+    el, label = site._menu_entry(_MenuPage(open_after=99), site._REGULAR_PDF_RE, _Placed(), wait_ms=1000)
     assert el is None and label == ""
+
+
+@pytest.mark.parametrize("where", ["the pressed control left the page", "the page was loaded anew",
+                                   "it could not be read"])
+def test_a_menu_entry_once_the_pressed_control_is_gone_is_not_taken(where):
+    """The page was drawn anew after the press on Download PDF went through,
+    or loaded anew, so a Regular PDF showing now may be another bill's."""
+    trace = []
+    el, label = site._menu_entry(_MenuPage(open_after=0), site._REGULAR_PDF_RE, _Placed(where),
+                                 wait_ms=0, trace=trace)
+    assert (el, label) == (None, "")
+    assert trace == [{"note": "where the menu entry sits", "where": where}]
+
+
+def test_where_the_menu_entry_sits_goes_in_the_trace_and_is_not_yet_required():
+    """Where AT&T draws the menu was never recorded, so an entry elsewhere on
+    the page is still taken while Download PDF is on the page, and the
+    trace says where it sat."""
+    trace = []
+    el, label = site._menu_entry(_MenuPage(open_after=0), site._REGULAR_PDF_RE,
+                                 _Placed("elsewhere on the page"), wait_ms=0, trace=trace)
+    assert label == "Regular PDF"
+    assert trace == [{"note": "where the menu entry sits", "where": "elsewhere on the page"}]
 
 
 def test_the_menu_entries_pass_the_guard_and_the_accessibility_one_is_not_preferred():

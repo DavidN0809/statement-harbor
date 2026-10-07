@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from paperpull_core import controls  # noqa: E402
 from paperpull_core.controls import control_texts, second_step  # noqa: E402
 
 PATTERN = re.compile(r"^\s*(download|download\s+pdf|regular\s+pdf|itemized\s+pdf|save)\s*$", re.I)
@@ -58,6 +59,20 @@ def allow_all(_name):
     return True
 
 
+class Here:
+    """Stands in for the place a press was made. Every control sits where
+    the press put it, unless `words` says where one of them sits."""
+
+    def __init__(self, words=None):
+        self.words = words or {}
+
+    def where(self, step):
+        return self.words.get(step.inner_text(), controls.OPENED_BY_THE_PRESS)
+
+
+HERE = Here()
+
+
 # -- control_texts -------------------------------------------------------------
 
 def test_it_gathers_every_role_and_tidies_the_words():
@@ -84,7 +99,7 @@ def test_a_control_that_will_not_answer_does_not_stop_the_rest():
 
 def test_it_finds_the_control_that_finishes_the_download():
     page = FakePage({"button": ["Download PDF"]})
-    loc, text = second_step(page, {"Download PDF"}, PATTERN, allow_all)
+    loc, text = second_step(page, {"Download PDF"}, PATTERN, allow_all, HERE)
     assert text == "Download PDF" and loc is not None
 
 
@@ -92,30 +107,72 @@ def test_the_plain_choice_is_preferred_over_the_other_one():
     """AT&T's menu offers Regular and Itemized. The bill is the regular
     one, and picking by chance would fetch a different document."""
     page = FakePage({"button": ["Regular PDF", "Itemized PDF"]})
-    _loc, text = second_step(page, {"Itemized PDF", "Regular PDF"}, PATTERN, allow_all)
+    _loc, text = second_step(page, {"Itemized PDF", "Regular PDF"}, PATTERN, allow_all, HERE)
     assert text == "Regular PDF"
 
 
 def test_words_that_do_not_finish_a_download_are_ignored():
     page = FakePage({"button": ["Cancel", "Close"]})
-    assert second_step(page, {"Cancel", "Close"}, PATTERN, allow_all) == (None, "")
+    assert second_step(page, {"Cancel", "Close"}, PATTERN, allow_all, HERE) == (None, "")
 
 
 def test_the_app_guard_still_has_the_last_say():
     """It matches the pattern and is on the page, and the app still refuses
     it. The guard is not advisory."""
     page = FakePage({"button": ["Download"]})
-    assert second_step(page, {"Download"}, PATTERN, lambda _n: False) == (None, "")
+    assert second_step(page, {"Download"}, PATTERN, lambda _n: False, HERE) == (None, "")
 
 
 def test_something_that_is_not_visible_is_not_chosen():
     page = FakePage({"button": ["Download"]}, visible=False)
-    assert second_step(page, {"Download"}, PATTERN, allow_all) == (None, "")
+    assert second_step(page, {"Download"}, PATTERN, allow_all, HERE) == (None, "")
 
 
 def test_nothing_appeared_at_all():
     page = FakePage({"button": ["Download"]})
-    assert second_step(page, set(), PATTERN, allow_all) == (None, "")
+    assert second_step(page, set(), PATTERN, allow_all, HERE) == (None, "")
+
+
+# -- where it sits ----------------------------------------------------------------
+
+def test_a_control_elsewhere_on_the_page_is_not_chosen_and_the_trace_says_so():
+    page = FakePage({"button": ["Download PDF"]})
+    trace = []
+    elsewhere = Here({"Download PDF": controls.ELSEWHERE})
+    assert second_step(page, {"Download PDF"}, PATTERN, allow_all, elsewhere, trace) == (None, "")
+    assert trace == [{"note": "a revealed control is not where the press put it, so it was not pressed",
+                      "where": [controls.ELSEWHERE]}]
+
+
+def test_the_plain_choice_elsewhere_leaves_nothing_chosen_not_the_other_one():
+    """Regular PDF is the bill. When it is not where the press put it, the
+    press's own Itemized PDF is a different document, and is not taken in
+    its place."""
+    page = FakePage({"button": ["Regular PDF", "Itemized PDF"]})
+    regular_elsewhere = Here({"Regular PDF": controls.ELSEWHERE})
+    assert second_step(page, {"Itemized PDF", "Regular PDF"}, PATTERN, allow_all,
+                       regular_elsewhere) == (None, "")
+
+
+def test_two_where_the_press_put_it_leave_nothing_chosen():
+    page = FakePage({"button": ["Download PDF", "Download PDF"]})
+    trace = []
+    assert second_step(page, {"Download PDF"}, PATTERN, allow_all, HERE, trace) == (None, "")
+    assert trace[-1]["where"] == [controls.SEVERAL]
+
+
+def test_one_where_the_press_put_it_is_chosen_with_its_place_in_the_trace():
+    page = FakePage({"button": ["Download PDF"]})
+    trace = []
+    loc, text = second_step(page, {"Download PDF"}, PATTERN, allow_all, HERE, trace)
+    assert text == "Download PDF"
+    assert trace == [{"note": "the revealed control sits where the press put it",
+                      "where": controls.OPENED_BY_THE_PRESS}]
+
+
+def test_no_place_read_before_the_press_leaves_nothing_chosen():
+    page = FakePage({"button": ["Download PDF"]})
+    assert second_step(page, {"Download PDF"}, PATTERN, allow_all, None) == (None, "")
 
 
 # -- a survey that could not read everything ------------------------------------
@@ -146,4 +203,4 @@ def test_nothing_is_chosen_from_a_survey_that_was_not_whole():
     page = FakePage({"button": ["Download PDF"]})
     appeared = control_texts(Grumpy({"button": ["Download PDF"]})) - control_texts(FakePage({}))
     assert appeared == {"Download PDF"}
-    assert second_step(page, appeared, PATTERN, allow_all) == (None, "")
+    assert second_step(page, appeared, PATTERN, allow_all, HERE) == (None, "")

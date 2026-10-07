@@ -22,7 +22,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "core"))
 
-from paperpull_core.controls import second_step  # noqa: E402
+from paperpull_core.controls import place_of, second_step  # noqa: E402
 
 VOCABULARY = re.compile(
     r"^\s*(download|download\s+pdf|save\s+(as\s+)?pdf|pdf|"
@@ -54,7 +54,16 @@ def page(browser):
 def menu(entry: str, role: str = "") -> str:
     tag = "a href='#'" if role == "link" else "div role='menuitem'" if role == "menuitem" else "button"
     close = tag.split()[0]
-    return "<body><div role='menu'><%s>%s</%s></div></body>" % (tag, entry, close)
+    return "<div role='menu'><%s>%s</%s></div>" % (tag, entry, close)
+
+
+def revealed(page, entry: str, role: str = ""):
+    """A page whose Download control, pressed, shows a menu holding
+    `entry`, and where that press was made (controls.place_of)."""
+    page.set_content("<body><button id='get'>Download</button></body>")
+    place = place_of(page, page.locator("#get"))
+    page.evaluate("(html) => document.body.insertAdjacentHTML('beforeend', html)", menu(entry, role))
+    return place
 
 
 def everyone(text):
@@ -62,36 +71,36 @@ def everyone(text):
 
 
 def test_a_revealed_control_with_a_slash_in_its_name_is_found(page):
-    page.set_content(menu("View/print PDF"))
-    loc, text = second_step(page, {"View/print PDF"}, VOCABULARY, everyone)
+    place = revealed(page, "View/print PDF")
+    loc, text = second_step(page, {"View/print PDF"}, VOCABULARY, everyone, place)
     assert text == "View/print PDF", "the entry was never found"
     assert loc.inner_text() == "View/print PDF"
 
 
 @pytest.mark.parametrize("role", ["", "link", "menuitem"])
 def test_each_kind_of_control_it_tries_is_found(page, role):
-    page.set_content(menu("View / Print PDF", role))
-    loc, text = second_step(page, {"View / Print PDF"}, VOCABULARY, everyone)
+    place = revealed(page, "View / Print PDF", role)
+    loc, text = second_step(page, {"View / Print PDF"}, VOCABULARY, everyone, place)
     assert loc is not None and loc.inner_text() == "View / Print PDF"
 
 
 def test_a_name_with_no_slash_is_found_as_before(page):
-    page.set_content(menu("Regular PDF"))
-    loc, text = second_step(page, {"Regular PDF"}, VOCABULARY, everyone)
+    place = revealed(page, "Regular PDF")
+    loc, text = second_step(page, {"Regular PDF"}, VOCABULARY, everyone, place)
     assert text == "Regular PDF" and loc.inner_text() == "Regular PDF"
 
 
 def test_the_whole_name_must_match(page):
     """Escaping the slash must not loosen the match. A longer control that
     merely contains the words is not the one that was revealed."""
-    page.set_content(menu("View/print PDF of every bill"))
-    loc, text = second_step(page, {"View/print PDF"}, VOCABULARY, everyone)
+    place = revealed(page, "View/print PDF of every bill")
+    loc, text = second_step(page, {"View/print PDF"}, VOCABULARY, everyone, place)
     assert loc is None and text == ""
 
 
 def test_the_guard_still_has_the_last_word(page):
-    page.set_content(menu("View/print PDF"))
-    loc, text = second_step(page, {"View/print PDF"}, VOCABULARY, lambda t: False)
+    place = revealed(page, "View/print PDF")
+    loc, text = second_step(page, {"View/print PDF"}, VOCABULARY, lambda t: False, place)
     assert loc is None and text == ""
 
 
@@ -137,8 +146,8 @@ def test_this_asks_every_app_that_hands_the_core_its_words():
 @pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
 def test_each_app_presses_a_revealed_view_print_pdf(app, page):
     site = site_of(app)
-    page.set_content(menu("View/print PDF"))
-    loc, text = site._second_step(page, {"View/print PDF"})
+    place = revealed(page, "View/print PDF")
+    loc, text = site._second_step(page, {"View/print PDF"}, place)
     assert text == "View/print PDF", \
         "%s's second step could not find a revealed View/print PDF" % app.name
     assert loc.inner_text() == "View/print PDF"

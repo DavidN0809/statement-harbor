@@ -436,9 +436,10 @@ def escape_for_locator(text: str) -> str:
     return re.escape(text).replace("/", "\\/")
 
 
-def second_step(page, appeared: set, pattern: Pattern, is_safe_control):
+def second_step(page, appeared: set, pattern: Pattern, is_safe_control, place,
+                trace: Optional[list] = None):
     """A control the click revealed whose text says it finishes a download,
-    as (locator, text), or (None, "").
+    as (element, text), or (None, "").
 
     Several providers answer a Download button with a small menu, so the
     document arrives only after a second click. The ones that read like the
@@ -449,6 +450,17 @@ def second_step(page, appeared: set, pattern: Pattern, is_safe_control):
     Nothing is picked from what appeared when a survey behind it could not
     read every control. A control already on the page could be in it, or
     the plain choice could be missing from it.
+
+    And nothing is picked that is not where the press put it, by `place`,
+    read with place_of just before the press. A list drawn anew after a
+    press that went through, or a panel opened for another row, shows a
+    Download of another document, and its PDF would be saved under this
+    one's name. The first choice in that order that shows at all decides.
+    When none of it sits where the press put it, nothing is picked, not
+    even a lesser choice that does, since the page did something besides
+    the press. When more than one does, which document each is for cannot
+    be told, and nothing is picked either. `trace`, when given, gets a note
+    of where it sat, in fixed words only.
     """
     if not getattr(appeared, "complete", True):
         log.info("a survey of the controls was not whole, so no second step is taken")
@@ -456,16 +468,170 @@ def second_step(page, appeared: set, pattern: Pattern, is_safe_control):
     ranked = sorted(appeared,
                     key=lambda t: (0 if re.search(r"regular|standard|full|^download", t, re.I) else 1, t))
     for text in ranked:
-        if pattern.match(text) and is_safe_control(text):
-            for role in ("button", "link", "menuitem"):
-                try:
-                    loc = page.get_by_role(role, name=re.compile(
-                        "^" + escape_for_locator(text) + "$", re.I))
-                    if loc.count() and loc.first.is_visible():
-                        return loc.first, text
-                except Exception:
-                    continue
+        if not (pattern.match(text) and is_safe_control(text)):
+            continue
+        shown = []
+        for role in ("button", "link", "menuitem"):
+            try:
+                loc = page.get_by_role(role, name=re.compile(
+                    "^" + escape_for_locator(text) + "$", re.I))
+                for i in range(min(loc.count(), 8)):
+                    if loc.nth(i).is_visible():
+                        shown.append(loc.nth(i))
+            except Exception:
+                continue
+        if not shown:
+            continue
+        found, tied = [], []
+        for candidate in shown:
+            element = element_of(candidate)
+            word = where_it_sits(place, element)
+            found.append(word)
+            if word in TIED:
+                tied.append((element, word))
+        if len(tied) == 1:
+            if trace is not None:
+                trace.append({"note": "the revealed control sits where the press put it",
+                              "where": tied[0][1]})
+            return tied[0][0], text
+        log.info("a revealed control is not where the press put it, so no second step is taken")
+        if trace is not None:
+            trace.append({"note": "a revealed control is not where the press put it, "
+                                  "so it was not pressed",
+                          "where": [SEVERAL] if tied else sorted(set(found))})
+        return None, ""
     return None, ""
+
+
+# -- where a revealed control sits ---------------------------------------------
+#
+# What the press put on the page is told from what was already there by a
+# look taken just before it. Only handles into the page are kept, never a
+# word the page wrote, so nothing of the page leaves it, and the elements
+# are held weakly, so a list drawn anew is not kept alive by a run going
+# through hundreds of documents.
+
+# What a press opens over the page or beside its control, a dialog, a modal
+# region, a menu, a list of choices or a popover.
+OPENED_CSS = ("dialog, [role=dialog], [role=alertdialog], [aria-modal=true], "
+              "[role=menu], [role=listbox], [popover]")
+
+# Everything that can be pressed, by its element or its role, the kinds
+# control_texts reads and a few more, since counting one too many only
+# refuses more.
+PRESSABLE_CSS = ("a[href], button, input[type=button], input[type=submit], input[type=image], "
+                 "summary, select, [role=button], [role=link], [role=menuitem], [role=tab], "
+                 "[role=option], [role=checkbox], [role=radio]")
+
+# A row of a list or a table, which holds one document.
+ROW_CSS = "tr, [role=row], li, [role=listitem], article, [role=article]"
+
+# Where a revealed control sits, in the words a trace may carry.
+OPENED_BY_THE_PRESS = "in what the press opened"
+BESIDE_THE_CONTROL = "beside the pressed control"
+TIED = frozenset((OPENED_BY_THE_PRESS, BESIDE_THE_CONTROL))
+ELSEWHERE = "elsewhere on the page"
+LEFT_THE_PAGE = "the pressed control left the page"
+LOADED_ANEW = "the page was loaded anew"
+NOT_READ = "it could not be read"
+SEVERAL = "more than one sits where the press put it"
+WHERE_WORDS = TIED | {ELSEWHERE, LEFT_THE_PAGE, LOADED_ANEW, NOT_READ}
+
+# Read just before the press. The containers already open then, and for
+# every element around the control, how many other things that can be
+# pressed it held. A control inside the pressed one, or around it, is the
+# pressed one.
+_PLACE_JS = r"""(el) => {
+  const shown = (e) => typeof e.checkVisibility === 'function'
+      ? e.checkVisibility({visibilityProperty: true, checkVisibilityCSS: true})
+      : e.getClientRects().length > 0;
+  const others = [...document.querySelectorAll(%s)].filter(
+      (c) => c !== el && !el.contains(c) && !c.contains(el) && shown(c));
+  const around = [];
+  for (let a = el.parentElement; a; a = a.parentElement) {
+    around.push({node: new WeakRef(a), held: others.filter((c) => a.contains(c)).length});
+  }
+  const opened = [...document.querySelectorAll(%s)].filter(shown).map((e) => new WeakRef(e));
+  return {el: new WeakRef(el), row: el.closest(%s) ? new WeakRef(el.closest(%s)) : null,
+          around, opened};
+}""" % (repr(PRESSABLE_CSS), repr(OPENED_CSS), repr(ROW_CSS), repr(ROW_CSS))
+
+# Where the revealed control `step` sits, read once the press is over.
+#   In what the press opened, a dialog, menu or popover not open before the
+#   press.
+#   Beside the pressed control, inside the smallest element holding both,
+#   which held nothing else to press before the press, is neither the
+#   body nor the page, and is not wider than the pressed control's own row.
+# Either way the pressed control is still on the page.
+_WHERE_JS = r"""(step, place) => {
+  const el = place.el.deref();
+  if (!el || !el.isConnected) return %s;
+  const opened = place.opened.map((r) => r.deref());
+  for (let a = step; a; a = a.parentElement) {
+    if (a.matches(%s) && !opened.includes(a)) return %s;
+  }
+  let both = el.parentElement;
+  while (both && !both.contains(step)) both = both.parentElement;
+  if (!both || both === document.body || both === document.documentElement) return %s;
+  const row = place.row ? place.row.deref() : null;
+  if (row && !row.contains(both)) return %s;
+  const was = place.around.find((x) => x.node.deref() === both);
+  return was && was.held === 0 ? %s : %s;
+}""" % (repr(LEFT_THE_PAGE), repr(OPENED_CSS), repr(OPENED_BY_THE_PRESS), repr(ELSEWHERE),
+        repr(ELSEWHERE), repr(BESIDE_THE_CONTROL), repr(ELSEWHERE))
+
+
+class Place:
+    """Where a press was made, read by place_of just before it. It holds a
+    handle into the page and nothing the page wrote."""
+
+    def __init__(self, handle):
+        self.handle = handle
+
+    def where(self, step) -> str:
+        """Where the element `step` sits against this press, in WHERE_WORDS.
+        A page loaded since the press cannot be asked about the place, which
+        was in the page before it."""
+        try:
+            word = step.evaluate(_WHERE_JS, self.handle)
+        except Exception as e:
+            return LOADED_ANEW if "context" in str(e).lower() else NOT_READ
+        return word if word in WHERE_WORDS else NOT_READ
+
+
+def element_of(found):
+    """The one element a locator finds now, as an element handle, so what
+    is judged is what gets pressed. A Locator finds it again each time it
+    is used, and an element handle stays the element it is."""
+    find = getattr(found, "element_handle", None)
+    if not callable(find):
+        return found
+    try:
+        return find(timeout=3000)
+    except Exception:
+        return None
+
+
+def place_of(page, el) -> Optional[Place]:
+    """Where `el` is about to be pressed, to be read just before the press
+    and handed to second_step or where_it_sits once it is over. None when
+    it could not be read, and then nothing the press reveals is taken."""
+    handle = element_of(el)
+    if handle is None:
+        return None
+    try:
+        return Place(page.evaluate_handle(_PLACE_JS, handle))
+    except Exception as e:
+        log.info("where the press is made could not be read (%s)", type(e).__name__)
+        return None
+
+
+def where_it_sits(place: Optional[Place], step) -> str:
+    """Where the revealed control `step`, an element handle, sits against
+    the press at `place`, in WHERE_WORDS. NOT_READ when either is missing."""
+    if place is None or step is None:
+        return NOT_READ
+    return place.where(step)
 
 
 def controls_named(page, name_re: Pattern, roles=("button", "link")):

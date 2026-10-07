@@ -182,6 +182,7 @@ from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
 from paperpull_core.capture import take_new_tab as _core_take_new_tab
 from paperpull_core.capture import take_same_tab as _core_take_same_tab
 from paperpull_core.controls import control_texts as _control_texts
+from paperpull_core.controls import place_of as _place_of
 from paperpull_core.controls import second_step as _core_second_step
 from paperpull_core.controls import controls_named as _controls_named
 from paperpull_core.controls import escape_for_locator
@@ -1847,11 +1848,12 @@ def _fixed_word(text: str) -> str:
     return t.lower() if _SECOND_STEP_RE.fullmatch(t) else ""
 
 
-def _second_step(page, appeared: set):
+def _second_step(page, appeared: set, place, trace: Optional[list] = None):
     """A control the click revealed whose text says it finishes a download,
-    once it has passed the guard, or None. The choosing is the core's, the
-    words this provider uses and the guard are this app's."""
-    return _core_second_step(page, appeared, _SECOND_STEP_RE, is_safe_control)
+    once it has passed the guard and sits where the press at `place` put
+    it, or None. The choosing is the core's, the words this provider uses
+    and the guard are this app's."""
+    return _core_second_step(page, appeared, _SECOND_STEP_RE, is_safe_control, place, trace)
 
 
 # RECORDED (#36, 0.38.0). Pressing a document's link makes the page POST to
@@ -2062,6 +2064,10 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             el.scroll_into_view_if_needed(timeout=4000)
         except Exception:
             pass
+        # Where the press is made, read just before it, so a control the
+        # press reveals is taken only where the press put it
+        # (controls.second_step).
+        place = _place_of(page, el)
         # Playwright's own press, and through the page only when nothing
         # covered the control, its press never reached the page and nothing
         # it should bring came. What cannot be told stops the run, and the
@@ -2110,7 +2116,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                           "appeared": len(appeared),
                           "finishing_words": sorted({_fixed_word(t) for t in appeared} - {""})[:10],
                           "new_tabs": len([p for p in ctx.pages if p not in before])})
-        step, step_label = (None, "") if unsure_press else _second_step(page, appeared)
+        step, step_label = (None, "") if unsure_press else _second_step(page, appeared, place, trace)
         if step is not None:
             try:
                 step.click(timeout=8000)

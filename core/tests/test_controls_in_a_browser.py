@@ -83,16 +83,17 @@ def test_a_control_already_on_the_page_never_looks_revealed(page, monkeypatch):
     """The page's own Download PDF was there before the click. Its read
     timed out in the survey taken before, so the difference took it for
     what the click revealed, and the second step pressed it."""
-    from paperpull_core.controls import control_texts, second_step
+    from paperpull_core.controls import control_texts, place_of, second_step
     from paperpull_core.testkit import stall_reads
     page.set_content("<button data-guid='own'>Download PDF</button><a href='#'>Statements</a>")
     with monkeypatch.context() as m:
         stall_reads(m, {"own"}, locator=("inner_text",))
         before = control_texts(page)
+    place = place_of(page, page.locator("a"))
     page.evaluate("document.body.insertAdjacentHTML('beforeend', '<button>Close</button>')")
     appeared = control_texts(page) - before
     assert "Download PDF" not in appeared, appeared
-    assert second_step(page, appeared, SECOND, _allow) == (None, "")
+    assert second_step(page, appeared, SECOND, _allow, place) == (None, "")
 
 
 def test_the_plain_choice_that_appeared_is_never_left_out(page, monkeypatch):
@@ -100,14 +101,16 @@ def test_the_plain_choice_that_appeared_is_never_left_out(page, monkeypatch):
     regular one. Regular PDF's read timed out in the survey taken after,
     so only Itemized PDF appeared, and that different document was
     pressed."""
-    from paperpull_core.controls import control_texts, second_step
+    from paperpull_core.controls import control_texts, place_of, second_step
     from paperpull_core.testkit import stall_reads
     page.set_content("<a href='#'>Statements</a>")
     before = control_texts(page)
-    page.evaluate("document.body.insertAdjacentHTML('beforeend', "
-                  "\"<button data-guid='regular'>Regular PDF</button><button>Itemized PDF</button>\")")
+    place = place_of(page, page.locator("a"))
+    page.evaluate("document.body.insertAdjacentHTML('beforeend', \"<div role='menu'>"
+                  "<button data-guid='regular'>Regular PDF</button><button>Itemized PDF</button>"
+                  "</div>\")")
     stall_reads(monkeypatch, {"regular"}, locator=("inner_text",))
     appeared = control_texts(page) - before
     assert appeared == {"Regular PDF", "Itemized PDF"}, appeared
-    _loc, text = second_step(page, appeared, SECOND, _allow)
+    _loc, text = second_step(page, appeared, SECOND, _allow, place)
     assert text == "Regular PDF"

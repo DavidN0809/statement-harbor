@@ -271,6 +271,22 @@ did not read.
   were whole.
 
 ### Fixed
+- **A control a press reveals is pressed only where that press put it.**
+  When pressing a document's own control brought nothing, American
+  Family, Apple Card, AT&T, E*TRADE, Golden 1, Nelnet, Newrez, SBA, SMUD,
+  State Farm, Verizon Mobile and Wells Fargo pressed a control the press
+  had newly shown whose words finish a download, such as Download PDF or
+  Save PDF, wherever on the page it was. A list drawn anew after the
+  press, or a panel opened for another row, could show another document's
+  Download, and its PDF would have been saved under this document's name.
+  Now such a control is pressed only inside a dialog or menu the press
+  opened, or beside the pressed control in a part of the page that held
+  nothing else to press, and only while the pressed control is still on
+  the page it was pressed on. Otherwise nothing more is pressed, the
+  document is left for the next run, and download-attempt.json says where
+  the control sat. AT&T's Regular PDF menu is still taken wherever AT&T
+  draws it, since that was never recorded, but only while Download PDF is
+  on the page, and the trace now says where it sat.
 - **A run whose documents page would not open no longer finishes clean.**
   In twenty document apps, when Discover could not open the documents
   page, even after checking the session, it said so and returned. Pilot
