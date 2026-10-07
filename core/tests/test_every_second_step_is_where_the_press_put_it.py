@@ -383,8 +383,7 @@ def site_of(app: str):
         sys.path.pop(0)
 
 
-# ADP's capture is never called by a run and is being taken out.
-APPS = sorted({app for app, fn, _, _ in CENSUS if fn == "_catch_pdf"} - {"adp"})
+APPS = sorted({app for app, fn, _, _ in CENSUS if fn == "_catch_pdf"})
 
 
 class _Handler(BaseHTTPRequestHandler):
