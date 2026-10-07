@@ -22,8 +22,9 @@ Concretely, and stated as what the code actually does:
   the blocklist (`FORBIDDEN_CONTROL_RE`) first, and the click is skipped if
   anything about it reads like a payment or settings control. It is clicked
   only when nothing covers it, inside the frame the list sits in or over that
-  frame on the page, and the run stops instead when something does. No year
-  section is clicked twice.
+  frame on the page, and the run stops instead when something does. A year
+  section already clicked is not clicked again, the same element or one the
+  page draws anew with the same id and words.
 - **Only pages served by M&T are touched.** This attaches to your ordinary
   browser, so every frame is host-checked before it is read or clicked. Other
   tabs you have open are ignored entirely.

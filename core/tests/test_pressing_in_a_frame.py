@@ -550,24 +550,65 @@ def test_a_cover_put_over_the_frame_once_the_control_heard_its_press_does_not_st
     assert said(page.main_frame) == ["under-down"]
 
 
-def test_a_click_the_control_did_not_get_is_not_taken_for_its_press(browser, site):
-    """The browser's own click lands beside the control in its frame, and
-    raises the box under the frame over it. Only a click through the
-    control counts as its press being heard, so the box over the frame
-    stops the run."""
-    elsewhere = '<span id="elsewhere" onclick="%s">Other</span>' % RAISE
-    main, frames = framed(site, main_extra=UNDER, style="; position: relative; z-index: 1")
-    frames["inner"] = frames["inner"].replace("</button>", "</button>" + elsewhere)
+@pytest.mark.parametrize("how", ["display: none", "transform: rotate(2deg)"])
+def test_a_frame_hidden_or_turned_as_it_is_pressed_is_still_read(browser, site, how):
+    """As the pointer comes, the page puts a box over the frame and hides
+    the frame or turns it, and the box takes the press. The frames are read
+    again where the look found them, by their ids, so the run stops."""
+    change = ('parent.document.getElementById("late").style.visibility = "visible";'
+              ' parent.document.getElementById("f").style.cssText += "; %s"' % how)
+    show_and_change = SHOW_LATE.replace(
+        '%s.getElementById("late").style.visibility = "visible"', change)
+    main, frames = framed(site, main_extra=LATE_IN_PAGE, inner_extra=show_and_change)
+    page = opened(browser, site, main, **frames)
+    frame = page.frame(name="f")
+    with pytest.raises(pressing.Covered) as stopped:
+        press(page, frame)
+    assert stopped.value.facts["after_the_press"] is True
+    assert said(frame) == []
+    assert "late-down" in said(page.main_frame)
+
+
+def test_a_click_on_the_control_away_from_the_point_is_not_taken_for_its_press(browser, site):
+    """A click through the control, as a person's would be, lands away from
+    the point to be pressed, and raises the box under the frame over it.
+    Only a click at the point counts as the press heard, so the box over
+    the frame stops the run."""
+    main, frames = framed(site, main_extra=UNDER, style="; position: relative; z-index: 1",
+                          onclick="; " + RAISE)
     page = opened(browser, site, main, **frames)
     frame = page.frame(name="f")
     seen = pressing.look(page, frame.locator("#go"), "button", frame=frame)
     assert seen["state"] == "inside"
-    box = frame.locator("#elsewhere").bounding_box()
-    page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    box = frame.locator("#go").bounding_box()
+    page.mouse.click(box["x"] + box["width"] - 8, box["y"] + box["height"] / 2)
+    assert said(frame) == ["go"]
     with pytest.raises(pressing.Covered) as stopped:
         pressing.after(page, seen, "the heading of the year 2024", WORDS, frame=frame)
     assert stopped.value.facts["over_the_frame"] is True
-    assert said(frame) == []
+
+
+def test_a_click_at_the_point_the_control_did_not_get_is_not_taken_for_its_press(browser, site):
+    """The browser's own click comes at the point, but a shade of the
+    frame's own comes over the control as the pointer comes and takes it,
+    and raises the box under the frame over the frame. Only a click through
+    the control counts as its press being heard, so the box over the frame
+    stops the run."""
+    shade = ('<div id="late" style="position: fixed; left: 0; top: 0; width: 100vw; '
+             'height: 100vh; z-index: 9; visibility: hidden" onclick="said(\'shade\'); %s">'
+             '</div>' % RAISE)
+    main, frames = framed(site, main_extra=UNDER, style="; position: relative; z-index: 1",
+                          inner_extra=shade + SHOW_LATE % "document")
+    page = opened(browser, site, main, **frames)
+    frame = page.frame(name="f")
+    seen = pressing.look(page, frame.locator("#go"), "button", frame=frame)
+    assert seen["state"] == "inside"
+    on_page = seen["frame_points"][-1]
+    page.mouse.click(on_page["x"], on_page["y"])
+    assert said(frame) == ["shade"]
+    with pytest.raises(pressing.Covered) as stopped:
+        pressing.after(page, seen, "the heading of the year 2024", WORDS, frame=frame)
+    assert stopped.value.facts["over_the_frame"] is True
 
 
 def test_the_page_s_own_frame_is_read_as_the_page(browser, site):

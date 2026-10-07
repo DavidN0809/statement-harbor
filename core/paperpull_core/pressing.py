@@ -60,12 +60,12 @@ document around it at the point to be pressed, and that document's frame
 in its own, up to the page's main frame, as Playwright checks a frame
 before its own press. Anything on top of a frame covers the control inside
 it. Right after the press, unless the control heard the browser's own click
-of it, anything on top of a frame there stops the run, since Playwright
-watches for its press only in the control's own document. A frame that
-cannot be placed on the page, or one drawn at another size than its own
-window, stops the run unread. In a frame drawn by a process of its own the
-point read is the one Playwright's press lands on, which is off the middle
-by the frame's border and padding.
+at the point pressed, anything on top of a frame there stops the run, since
+Playwright watches for its press only in the control's own document. A
+frame that cannot be placed on the page, or one drawn at another size than
+its own window, stops the run unread. In a frame drawn by a process of its
+own, or a frame inside one, the point read is the one Playwright's press
+lands on, which is off the middle by the frame's border and padding.
 
 What covered a control is said only through the word list in
 paperpull_core.words, never as the page wrote it.
@@ -335,10 +335,11 @@ LOOK_JS = r"""(args) => {
   const target = (el.matches('input, textarea, select') || el.isContentEditable) ? el
     : (el.closest('button, [role=button], a, [role=link]') || el);
 
-  // In a frame drawn by a process of its own, Playwright carries its point
-  // across from where the frame's element begins, its border included,
-  // rather than from its window, so its press lands args.shift away from the
-  // middle. That is the point read, and it has to fall on the control.
+  // In a frame drawn by a process of its own, or a frame inside one,
+  // Playwright carries its point across from where that frame's element
+  // begins, its border included, rather than from its window, so its press
+  // lands args.shift away from the middle. That is the point read, and it
+  // has to fall on the control.
   if (args.shift) {
     point = {x: point.x + args.shift.x, y: point.y + args.shift.y};
     where.point = point;
@@ -369,15 +370,18 @@ LOOK_JS = r"""(args) => {
     globalThis.__paperpullBefore = {x: point.x, y: point.y, frames: frames, control: target};
     // For a control in a frame, an ear in this world at the frame's window,
     // ahead of the page's own listeners, for a click the browser itself sends
-    // along a path through the control or a label of its own (HEARD_JS). It
-    // takes itself away once args.ear milliseconds have passed, or when a
-    // control is listened for again.
+    // at the point to be pressed, along a path through the control or a label
+    // of its own (HEARD_JS). A click anywhere else, the person's say, is not
+    // the press. It takes itself away once args.ear milliseconds have passed,
+    // or when a control is listened for again.
     if (args.ear) {
       if (typeof globalThis.__paperpullDeaf === 'function') globalThis.__paperpullDeaf();
       globalThis.__paperpullHeard = false;
       const own = new Set([target, ...(target.labels || [])]);
+      const at = {x: point.x, y: point.y};
       const ear = (e) => {
         if (!e.isTrusted) return;
+        if (Math.abs(e.clientX - at.x) > 2 || Math.abs(e.clientY - at.y) > 2) return;
         let path = [];
         try { path = e.composedPath(); } catch (x) {}
         if (path.some((n) => own.has(n))) globalThis.__paperpullHeard = true;
@@ -795,11 +799,12 @@ def _look_in_frame(page, locator, css: str, labels: bool, frame) -> dict:
     "frame_points", for after().
 
     The point is where Playwright's press will land. In a frame drawn by a
-    process of its own Playwright carries its point across from where the
-    frame's element begins rather than its window, so the press lands off
-    the middle by the frame's border and padding, and that point is the one
-    read, in the frame and in each frame around it. An ear for the press is
-    set on the control, for after()."""
+    process of its own, or a frame inside one, Playwright carries its point
+    across from where that frame's element begins rather than its window,
+    so the press lands off the middle by the frame's border and padding,
+    and that point is the one read, in the frame and in each frame around
+    it. An ear for the press is set on the control, and the ids of the
+    frames found go back as "frame_ids", both for after()."""
     opened: list = []
     try:
         try:
@@ -849,23 +854,49 @@ def _look_in_frame(page, locator, css: str, labels: bool, frame) -> dict:
             if on.get("state") != "inside":
                 return dict(on, over_the_frame=True)
             points.append(at)
-        return dict(seen, frame_points=points)
+        return dict(seen, frame_points=points,
+                    frame_ids=[[level.id, level.owner, level.own] for level in levels])
     finally:
         _detach(opened)
 
 
+def _levels_again(page, frame, ids, opened: list) -> Optional[list]:
+    """The frames _look_in_frame found, from the page's main frame down to
+    `frame`, reached again by the ids it kept ("frame_ids"), so that a
+    frame hidden or turned since the look is still read where it was. None
+    when the frames on the way are no longer the ones the look found."""
+    chain = []
+    f = frame
+    while f is not None:
+        chain.append(f)
+        f = f.parent_frame
+    chain.reverse()
+    if not isinstance(ids, list) or len(ids) != len(chain) or chain[0] != page.main_frame:
+        return None
+    levels = []
+    for f, (frame_id, owner, own) in zip(chain, ids):
+        if not levels or own:
+            session = page.context.new_cdp_session(f if levels else page)
+            opened.append(session)
+        else:
+            session = levels[-1].session
+        levels.append(_Level(f, session, {"frame": {"id": frame_id}}, owner, own))
+    return levels
+
+
 def _after_in_frame(page, seen: dict, frame) -> Optional[dict]:
     """after() for a control inside a frame. When the control heard the
-    browser's own click of the press, the press was the control's, and
-    nothing that came over it afterwards, a loading cover say, took it.
+    browser's own click at the point pressed, the press was the control's,
+    and nothing that came over it afterwards, a loading cover say, took it.
     Otherwise what the point now shows in the control's own frame is read
     as for one in the page's main frame, and then in each frame around it,
-    where anything on top of the frame stops the run. A cover as AFTER_JS
-    or FRAME_AFTER_JS says it, or None."""
+    where anything on top of the frame stops the run. The frames are those
+    the look found, by their ids, wherever they are drawn now. A cover as
+    AFTER_JS or FRAME_AFTER_JS says it, or None."""
     opened: list = []
     try:
         try:
-            levels = _levels(page, frame, opened)
+            levels = _levels_again(page, frame, seen.get("frame_ids"), opened)
         except Exception:
             levels = None
         if not levels:
@@ -979,7 +1010,7 @@ def covering_lines(what: str, cover: dict) -> list:
 # look. "frame" is a frame that could not be found or placed on the page,
 # "frame scaled" one drawn at another size than its own window, and "off the
 # control" a press Playwright would land beside the control, in a frame drawn
-# by a process of its own.
+# by a process of its own or a frame inside one.
 _WHY = frozenset(("selector", "several", "none", "no box", "not read", "unknown state",
                   "outside the window", "nothing at the point", "frame", "frame scaled",
                   "off the control"))
@@ -1073,10 +1104,11 @@ def after(page, seen: dict, what: str, words, step: str = "press a control",
     on top there stops the run.
 
     For a control inside `frame`, nothing stops when the control heard the
-    browser's own click of the press. Otherwise the point is read in that
-    frame the same way, and then in each frame around it, where anything at
-    all on top of the frame stops the run (_after_in_frame), since
-    Playwright watches for its press only in the control's own document."""
+    browser's own click at the point pressed. Otherwise the point is read
+    in that frame the same way, and then in each frame around it, where
+    anything at all on top of the frame stops the run (_after_in_frame),
+    since Playwright watches for its press only in the control's own
+    document."""
     point = seen.get("point") if isinstance(seen, dict) else None
     if not isinstance(point, dict):
         return
