@@ -10,20 +10,28 @@ packaged app with nothing after it, because older shortcuts to the panel's
 old launcher land on it, and otherwise runs the terminal command. Its exit
 code is the command's, where every run used to report success.
 
-setup-all.bat says all is set when every setup worked, and names the one
-that did not, where every run since 0.19.0 reported a problem.
+setup-all builds one environment for a whole checkout, gui/.venv, which
+is the control panel's own, and makes no venv for any app (#65). It says
+all is set when that worked, and names the step that did not, where every
+run since 0.19.0 reported a problem. In a checkout, login and review_names
+run an app on its own .venv when it has one, and otherwise on gui/.venv
+once that can import what an app needs, and they ask for setup-all until
+it can.
 
 The batch files run under cmd, on Windows only. The .command runs under
 bash, Git's own on Windows, so the Windows test runner covers both. No
 test here links to a real Python folder. A stand-in Python is a copy of
 the interpreter's own files, pointed at its library by PYTHONHOME, so
-nothing that cleans up a test folder can reach a real install.
+nothing that cleans up a test folder can reach a real install. Where a
+test needs a Python that sees none of the packages of the one running the
+tests, it makes a venv with no pip, which on Windows holds copies.
 
 Every shell script the repository ships is also read by bash -n, which
 runs none of it, since setup-all.command did not parse for a month and
 nothing asked. A Mac runs a .command with /bin/bash, which is 3.2, so on
 a Mac that bash reads them as well, and CI does this on macOS and Linux.
 """
+import importlib.util
 import os
 import re
 import shutil
@@ -159,49 +167,150 @@ def test_paperpull_bat_in_a_checkout_is_only_the_terminal_command(tmp_path):
     assert r.returncode == 3
 
 
-# -- setup-all.bat -------------------------------------------------------------
+# -- setup-all -----------------------------------------------------------------
 
-# pip in the stand-in venvs. It fails the requirements of the folder named in
-# FAKE_PIP_FAILS_IN and does nothing else, so nothing is ever installed.
+# pip in the stand-in venv. It writes down what it was asked, fails when the
+# word in FAKE_PIP_FAILS is among its arguments, and installs nothing.
 FAKE_PIP = ("import os, sys\n"
-            "failing = os.path.basename(os.getcwd()) == os.environ.get('FAKE_PIP_FAILS_IN')\n"
-            "sys.exit(1 if failing and '-r' in sys.argv else 0)\n")
+            "with open(os.environ['FAKE_PIP_LOG'], 'a', encoding='utf-8') as log:\n"
+            "    log.write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "sys.exit(1 if os.environ.get('FAKE_PIP_FAILS') in sys.argv else 0)\n")
+
+# Every requirements file of the checkout setup-all is tried on, the panel's
+# first and then the apps' in the order a folder listing gives them.
+SETUP_ALL_REQUIREMENTS = ["gui/requirements.txt", "apps/demo/requirements.txt",
+                          "apps/kept/requirements.txt"]
 
 
-def _setup_all_checkout(tmp_path: Path) -> tuple:
-    """setup-all.bat beside one app and the GUI, each with a venv already
-    there, so it makes none, and a pip that is FAKE_PIP."""
+def _setup_all_checkout(tmp_path: Path, script: str) -> Path:
+    """setup-all beside the GUI and two apps, kept, which has a venv of its
+    own, and demo, which has none."""
     checkout = tmp_path / "checkout"
-    for folder in ("apps/demo", "gui"):
+    for folder in ("apps/demo", "apps/kept", "gui"):
         (checkout / folder).mkdir(parents=True)
         (checkout / folder / "requirements.txt").write_text("pypdf\n", encoding="utf-8")
-        env = _stand_in_python(checkout / folder / ".venv" / "Scripts")
+    kept = checkout / "apps" / "kept" / ".venv" / ("Scripts/python.exe" if script.endswith(".bat")
+                                                   else "bin/python")
+    kept.parent.mkdir(parents=True)
+    kept.write_text("#!/bin/sh\necho KEPT VENV RAN\n", encoding="utf-8", newline="\n")
+    kept.chmod(0o755)
     (checkout / "core").mkdir()
     (checkout / "core" / "pyproject.toml").write_text("", encoding="utf-8")
-    shutil.copy2(REPO / "setup-all.bat", checkout)
+    shutil.copy2(REPO / script, checkout)
+    return checkout
+
+
+def _pip_calls(log: Path) -> list:
+    """Each call written down, its words joined by spaces, with / for \\."""
+    if not log.is_file():
+        return []
+    return [line.replace("\\", "/").replace('"', "")
+            for line in log.read_text(encoding="utf-8").splitlines()]
+
+
+def _says_one_environment(r, checkout: Path, calls: list, venv_folder: str) -> None:
+    """What both setup-alls are held to. One pip call reads every
+    requirements file, the core goes in from the checkout, no app gets a
+    venv, and the app that has one of its own is named and left alone."""
+    said = r.stdout + r.stderr
+    assert "All set. The control panel and 2 apps share one environment, %s." % venv_folder \
+        in r.stdout, said
+    asked = [c.split() for c in calls if "-r" in c.split()]
+    assert len(asked) == 1, calls
+    words = asked[0]
+    assert [words[i + 1] for i, w in enumerate(words[:-1]) if w == "-r"] \
+        == SETUP_ALL_REQUIREMENTS, calls
+    assert any(c.endswith("-e ./core") for c in calls), calls
+    assert not (checkout / "apps" / "demo" / ".venv").exists(), "setup-all made a venv for an app"
+    assert "keep the .venv of their own" in r.stdout and " kept" in r.stdout, said
+    assert "KEPT VENV RAN" not in said
+
+
+@windows_only
+def test_setup_all_bat_builds_one_environment_and_names_a_step_that_failed(tmp_path):
+    """It used to make a venv in every app folder, about 400 MB each,
+    though every app asks for the same few packages (#65). From 0.19.0
+    every run also listed playwright-chromium among the setups that had
+    problems, since the script checked for a browser download it no longer
+    made."""
+    checkout = _setup_all_checkout(tmp_path, "setup-all.bat")
+    env = _stand_in_python(checkout / "gui" / ".venv" / "Scripts")
     pip = tmp_path / "fake" / "pip"
     pip.mkdir(parents=True)
     (pip / "__init__.py").write_text("", encoding="utf-8")
     (pip / "__main__.py").write_text(FAKE_PIP, encoding="utf-8")
-    env.update(PYTHONPATH=str(tmp_path / "fake"), PYTHONNOUSERSITE="1", PIP_NO_INDEX="1")
+    log = tmp_path / "pip.log"
+    env.update(PYTHONPATH=str(tmp_path / "fake"), PYTHONNOUSERSITE="1", PIP_NO_INDEX="1",
+               FAKE_PIP_LOG=str(log))
     # The script stops when it finds no Python on PATH, so one is there.
     env["PATH"] = str(checkout / "gui" / ".venv" / "Scripts") + os.pathsep + env.get("PATH", "")
-    return checkout, env
 
-
-@windows_only
-def test_setup_all_bat_says_all_set_when_nothing_failed_and_names_what_did(tmp_path):
-    """From 0.19.0 every run listed playwright-chromium among the setups
-    that had problems and asked for another run, since the script still
-    checked for a browser download it no longer made."""
-    checkout, env = _setup_all_checkout(tmp_path)
     r = _cmd(checkout / "setup-all.bat", env=env)
-    assert "All set - 1 apps + the GUI are ready." in r.stdout, r.stdout + r.stderr
-    assert "problems" not in r.stdout
+    _says_one_environment(r, checkout, _pip_calls(log), "gui\\.venv")
+    assert "failed" not in r.stdout
 
-    env["FAKE_PIP_FAILS_IN"] = "demo"
+    log.unlink()
+    env["FAKE_PIP_FAILS"] = "-r"
     r = _cmd(checkout / "setup-all.bat", env=env)
-    assert "Some setups had problems: demo(deps)" in r.stdout, r.stdout + r.stderr
+    assert "Installing the requirements failed" in r.stdout, r.stdout + r.stderr
+    assert "Setup did not finish" in r.stdout and "All set" not in r.stdout
+
+
+# python3 for setup-all.command. Its venv is a folder whose python writes
+# down what it was asked and fails as FAKE_PIP does.
+FAKE_PYTHON3 = """#!/bin/sh
+if [ "$1" = "--version" ]; then echo "Python 3.12.0"; exit 0; fi
+if [ "$1" = "-m" ] && [ "$2" = "venv" ]; then
+    echo "venv $3" >> "$FAKE_PIP_LOG"
+    mkdir -p "$3/bin"
+    cp "$FAKE_VENV_PYTHON" "$3/bin/python"
+    chmod +x "$3/bin/python"
+    exit 0
+fi
+exit 1
+"""
+FAKE_VENV_PYTHON = """#!/bin/sh
+echo "$*" >> "$FAKE_PIP_LOG"
+for word in "$@"; do
+    if [ "$word" = "${FAKE_PIP_FAILS:-}" ]; then exit 1; fi
+done
+exit 0
+"""
+
+
+def test_setup_all_command_builds_one_environment_and_names_a_step_that_failed(tmp_path):
+    bash = _bash()
+    if not bash:
+        pytest.skip("no bash to run a .command with")
+    checkout = _setup_all_checkout(tmp_path, "setup-all.command")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    for name, text in (("python3", FAKE_PYTHON3), ("venv-python", FAKE_VENV_PYTHON)):
+        (tools / name).write_text(text, encoding="utf-8", newline="\n")
+        (tools / name).chmod(0o755)
+    log = tmp_path / "pip.log"
+    env = dict(os.environ, FAKE_PIP_LOG=log.as_posix(),
+               FAKE_VENV_PYTHON=(tools / "venv-python").as_posix(),
+               PATH=str(tools) + os.pathsep + os.environ.get("PATH", ""))
+
+    def run():
+        return subprocess.run([bash, (checkout / "setup-all.command").as_posix()],
+                              capture_output=True, text=True, env=env, cwd=str(checkout))
+
+    r = run()
+    calls = _pip_calls(log)
+    _says_one_environment(r, checkout, calls, "gui/.venv")
+    assert [c for c in calls if c.startswith("venv ")] == ["venv gui/.venv"], calls
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    log.unlink()
+    env["FAKE_PIP_FAILS"] = "-r"
+    r = run()
+    assert "Installing the requirements failed" in r.stdout, r.stdout + r.stderr
+    assert "Setup did not finish" in r.stdout and "All set" not in r.stdout
+    assert r.returncode == 1
+    assert [c for c in _pip_calls(log) if c.startswith("venv ")] == [], \
+        "the environment already there is used again"
 
 
 # -- review_names.command ------------------------------------------------------
@@ -261,6 +370,231 @@ def test_review_names_command_says_what_to_do_when_the_app_is_not_found(tmp_path
     assert "was not found in Applications" in r.stdout, r.stdout + r.stderr
     assert "paperpull lowes review-names" in r.stdout
     assert r.returncode == 1
+
+
+# -- a checkout's shared environment, from each launcher (#65) -----------------
+
+# What a launcher checks the shared environment can import before it runs an
+# app on it.
+NEEDS = ("paperpull_core", "playwright", "pypdf")
+
+# The app's own script, replaced by one that also says which Python ran it.
+FAKE_APP_SAYS_WHERE = ("import sys\nprint('APP GOT', sys.argv[1:])\n"
+                       "print('RAN ON', sys.executable)\nsys.exit(4)\n")
+
+# Every kind of launcher that runs an app, as (app, launcher, its script, its
+# flag). PG&E's login.bat chooses its Python before its banner, the rest
+# after it.
+LAUNCHED = [pytest.param(app, launcher, script, flag,
+                         marks=[windows_only] if launcher.endswith(".bat") else [],
+                         id="%s/%s" % (app, launcher))
+            for app, launcher, script, flag in (
+                (APP, "login.bat", SCRIPT, "--open-browser"),
+                (APP, "review_names.bat", SCRIPT, "--review-names"),
+                ("pge", "login.bat", "pge_docs.py", "--open-browser"),
+                (APP, "login.command", SCRIPT, "--open-browser"),
+                (APP, "review_names.command", SCRIPT, "--review-names"),
+                ("pge", "login.command", "pge_docs.py", "--open-browser"))]
+
+
+def _venv(folder: Path) -> None:
+    """A real venv with no pip in it, whose Python sees none of the
+    packages of the Python that made it, as gui/.venv did before setup-all
+    filled it. On Windows it also gets the bin/python a .command looks for,
+    which hands over to the venv's own."""
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(folder)],
+                   check=True, capture_output=True)
+    if WINDOWS:
+        (folder / "bin").mkdir()
+        (folder / "bin" / "python").write_text(
+            '#!/bin/sh\nexec "%s" "$@"\n' % (folder / "Scripts" / "python.exe").as_posix(),
+            encoding="utf-8", newline="\n")
+
+
+def _checkout_with(tmp_path: Path, app: str, launcher: str, script: str,
+                   shared: bool = True, own: bool = False) -> Path:
+    """An app in a checkout's layout, with its launcher, its setup file and
+    FAKE_APP_SAYS_WHERE for its script, setup-all two folders up, and
+    gui/.venv and a venv of the app's own when asked for. Returns the
+    app's folder."""
+    checkout = tmp_path / "checkout"
+    folder = checkout / "apps" / app
+    folder.mkdir(parents=True)
+    suffix = Path(launcher).suffix
+    for name in (launcher, "setup" + suffix):
+        shutil.copy2(REPO / "apps" / app / name, folder)
+    (folder / script).write_text(FAKE_APP_SAYS_WHERE, encoding="utf-8")
+    shutil.copy2(REPO / ("setup-all" + suffix), checkout)
+    if shared:
+        _venv(checkout / "gui" / ".venv")
+    if own:
+        _venv(folder / ".venv")
+    return folder
+
+
+def _stubs(tmp_path: Path, names=NEEDS) -> Path:
+    """A folder holding an empty package for each of names."""
+    stubs = tmp_path / "stubs"
+    for name in names:
+        (stubs / name).mkdir(parents=True)
+        (stubs / name / "__init__.py").write_text("", encoding="utf-8")
+    return stubs
+
+
+def _launch(tmp_path: Path, launcher: Path, stubs, *args):
+    """Run a launcher as a double-click does, where a venv can import
+    nothing but what is in stubs."""
+    env = dict(os.environ, HOME=(tmp_path / "home").as_posix())
+    for name in ("PYTHONHOME", "PYTHONPATH"):
+        env.pop(name, None)
+    if stubs is not None:
+        env["PYTHONPATH"] = str(stubs)
+    if launcher.suffix == ".bat":
+        return _cmd(launcher, *args, env=env)
+    bash = _bash()
+    if not bash:
+        pytest.skip("no bash to run a .command with")
+    return subprocess.run([bash, launcher.as_posix(), *args], capture_output=True, text=True,
+                          env=env, cwd=str(launcher.parent))
+
+
+def _ran_in(out: str):
+    """The venv whose Python ran FAKE_APP_SAYS_WHERE, or None."""
+    m = re.search(r"^RAN ON (.+)$", out, re.M)
+    return str(Path(m.group(1).strip()).parents[1]) if m else None
+
+
+@pytest.mark.parametrize("app,launcher,script,flag", LAUNCHED)
+def test_a_launcher_in_a_checkout_runs_on_the_shared_environment(app, launcher, script, flag,
+                                                                 tmp_path):
+    """An app with no venv of its own runs on gui/.venv, which setup-all
+    builds once for all of them, where each used to need one of its own of
+    about 400 MB (#65). The account named after it still reaches the app."""
+    folder = _checkout_with(tmp_path, app, launcher, script)
+    stubs = _stubs(tmp_path)
+    r = _launch(tmp_path, folder / launcher, stubs)
+    said = r.stdout + r.stderr
+    assert "APP GOT ['%s']" % flag in r.stdout, said
+    assert os.path.samefile(_ran_in(r.stdout), folder.parents[1] / "gui" / ".venv"), said
+
+    r = _launch(tmp_path, folder / launcher, stubs, "spouse")
+    assert "APP GOT ['%s', '--config', 'config.spouse.json']" % flag in r.stdout, \
+        r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("app,launcher,script,flag", LAUNCHED)
+def test_a_launcher_keeps_an_apps_own_environment(app, launcher, script, flag, tmp_path):
+    """An app set up on its own, before setup-all built one environment or
+    since by its own setup file, keeps running on its own venv."""
+    folder = _checkout_with(tmp_path, app, launcher, script, own=True)
+    r = _launch(tmp_path, folder / launcher, _stubs(tmp_path))
+    said = r.stdout + r.stderr
+    assert "APP GOT ['%s']" % flag in r.stdout, said
+    assert os.path.samefile(_ran_in(r.stdout), folder / ".venv"), said
+
+
+@pytest.mark.parametrize("app,launcher,script,flag", LAUNCHED)
+def test_a_launcher_asks_for_setup_all_until_the_shared_environment_can_run_an_app(
+        app, launcher, script, flag, tmp_path):
+    """gui/.venv as every setup-all made it before this one, with the
+    panel's packages and none of an app's, would start an app only for it
+    to fail on an import. Missing one package is enough to ask, and so is
+    having no gui/.venv at all."""
+    folder = _checkout_with(tmp_path, app, launcher, script)
+    asked = "Run setup-all%s in the PaperPull folder first." % Path(launcher).suffix
+    for stubs in (_stubs(tmp_path, NEEDS[:-1]), None, "no gui/.venv"):
+        if stubs == "no gui/.venv":
+            shutil.rmtree(folder.parents[1] / "gui")
+            stubs = _stubs(tmp_path / "all", NEEDS)
+        r = _launch(tmp_path, folder / launcher, stubs)
+        assert asked in r.stdout, r.stdout + r.stderr
+        assert "APP GOT" not in r.stdout
+        assert r.returncode == 1
+
+
+@pytest.mark.parametrize("launcher", [pytest.param("login.bat", marks=windows_only),
+                                      "login.command"])
+def test_login_outside_a_checkout_asks_for_its_own_setup(launcher, tmp_path):
+    """A folder the panel made from a checkout, somewhere else, has its own
+    setup file and nothing two folders up, so that is the one it names."""
+    folder = tmp_path / "Lowe's Receipts"
+    folder.mkdir()
+    for name in (launcher, "setup" + Path(launcher).suffix):
+        shutil.copy2(REPO / "apps" / APP / name, folder)
+    (folder / SCRIPT).write_text(FAKE_APP_SAYS_WHERE, encoding="utf-8")
+    r = _launch(tmp_path, folder / launcher, _stubs(tmp_path))
+    own = "setup.bat" if launcher.endswith(".bat") else "./setup.command"
+    assert "This app is not set up yet - run %s first." % own in r.stdout, r.stdout + r.stderr
+    assert "APP GOT" not in r.stdout
+    assert r.returncode == 1
+
+
+def _block(lines: list, first: str, last: str) -> list:
+    start = lines.index(first)
+    return lines[start:lines.index(last, start) + 1]
+
+
+def test_every_batch_launcher_chooses_its_python_as_the_tested_ones_do():
+    """Every login.bat and review_names.bat, in every app, tries the app's
+    own venv first, then the shared one with the check the tests above
+    run, says what to set up when neither will do, and runs the app only
+    on the Python it chose. The files were changed by a script, and this
+    is what holds each of them to the ones that run."""
+    tested = (REPO / "apps" / APP / "login.bat").read_text(encoding="utf-8").splitlines()
+    shared = _block(tested, 'set "PY=..\\..\\gui\\.venv\\Scripts\\python.exe"',
+                    "if not errorlevel 1 goto run")
+    refusal = _block(tested, ":notsetup", "exit /b 1")
+    assert len(shared) == 4 and len(refusal) == 9, (shared, refusal)
+    launchers = sorted((REPO / "apps").glob("*/login.bat")) + \
+        sorted((REPO / "apps").glob("*/review_names.bat"))
+    assert len(launchers) > 70, len(launchers)
+    wrong = []
+    for f in launchers:
+        lines = f.read_text(encoding="utf-8").splitlines()
+        name = "%s/%s" % (f.parent.name, f.name)
+        try:
+            own = lines.index('set "PY=.venv\\Scripts\\python.exe"')
+            at = lines.index(shared[0])
+            stop = lines.index(refusal[0])
+            run = lines.index(":run")
+        except ValueError as e:
+            wrong.append("%s lacks %s" % (name, e))
+            continue
+        runs = [i for i, line in enumerate(lines) if re.search(r"\S+\.py\b", line)
+                and not line.lower().startswith(("rem", "echo"))]
+        if (lines[own + 1] != 'if exist "%PY%" goto run' or not own < at < stop < run
+                or lines[at:at + len(shared)] != shared
+                or lines[stop:stop + len(refusal)] != refusal
+                or len(runs) != 1 or runs[0] <= run or not lines[runs[0]].startswith('"%PY%" ')):
+            wrong.append(name)
+    assert not wrong, "these choose their Python another way, " + ", ".join(wrong)
+
+
+def test_every_mac_launcher_is_what_the_generator_writes(tmp_path):
+    """The .command files are written from the .bat files by
+    tools/make_unix_launchers.py. One edited by hand, or a change to the
+    generator never run, leaves a Mac launcher doing what its .bat does
+    not, and only the few tested above run on Windows."""
+    spec = importlib.util.spec_from_file_location(
+        "make_unix_launchers", REPO / "tools" / "make_unix_launchers.py")
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+    differ, made = [], 0
+    for app in sorted(p for p in (REPO / "apps").iterdir() if p.is_dir()):
+        copy = tmp_path / app.name
+        copy.mkdir()
+        for bat in app.glob("*.bat"):
+            shutil.copy2(bat, copy)
+        written = {f.name: f for f in gen.build(copy)}
+        made += len(written)
+        shipped = {f.name for f in app.glob("*.command")}
+        for name in sorted(shipped | set(written)):
+            if name not in written or name not in shipped \
+                    or (app / name).read_bytes() != written[name].read_bytes():
+                differ.append("%s/%s" % (app.name, name))
+    assert made > 130, made
+    assert not differ, ("these differ from what tools/make_unix_launchers.py writes, "
+                        + ", ".join(differ))
 
 
 # -- every shell script parses -------------------------------------------------

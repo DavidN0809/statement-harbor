@@ -289,6 +289,22 @@ did not read.
   reached stops the listing, where it used to end it as though the list
   were whole.
 
+### Changed
+- **A checkout is set up as one environment, not one in every app folder
+  (#65).** setup-all made a venv in each of the 62 app folders, about 400
+  MB apiece on a Mac and well over 20 GB in all, though every app asks for
+  the same few packages. It now builds one, `gui/.venv`, the control
+  panel's own, with every app's requirements read in one pip call and the
+  shared core. The panel, `paperpull`, and each app's login and
+  review_names files run an app on its own `.venv` when it has one, and
+  otherwise on `gui/.venv` once that can import what an app needs. Until
+  it can, they say to run setup-all, where the panel used to send each
+  provider to a setup of its own. An app that already has a `.venv` keeps
+  running on it, and setup-all names those apps, so an older checkout gets
+  the space back by running setup-all again and then deleting each app's
+  `.venv`. An app's own setup file still gives it a venv of its own. Asked
+  for by appchamp.
+
 ### Fixed
 - **A control a press reveals is pressed only where that press put it.**
   When pressing a document's own control brought nothing, American
@@ -308,6 +324,13 @@ did not read.
   on the page, and the trace now says where it sat. Once the Download PDF
   pressed has left the page, AT&T presses nothing more for that bill,
   where it used to press whatever View/print PDF was showing then.
+- **`paperpull list` in the installed app no longer marks every app as
+  needing setup.** It marked each app with no `.venv` of its own, which in
+  the installed app, whose one Python carries everything, was all of them.
+  It now marks only an app that nothing can run.
+- **The Mac sign-in and setup files print & and > as their Windows twins
+  do.** Nine of them showed the caret Windows needs before those
+  characters, as in "Statements ^& Activity".
 - **A run whose documents page would not open no longer finishes clean.**
   In twenty document apps, when Discover could not open the documents
   page, even after checking the session, it said so and returned. Pilot

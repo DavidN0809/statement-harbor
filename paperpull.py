@@ -3,7 +3,7 @@
     python paperpull.py <app> <command> [--account NAME] [args for the app]
     python paperpull.py list
 
-    python paperpull.py pge setup          make the app's environment
+    python paperpull.py pge setup          give the app an environment of its own
     python paperpull.py pge login          open the sign-in browser
     python paperpull.py pge pilot          download the newest few
     python paperpull.py pge all --yes      download everything in scope
@@ -27,6 +27,7 @@ folder the control panel was pointed at, then apps/ beside this file.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -154,19 +155,57 @@ def find_app(root: Path, wanted: str) -> Path:
 
 # -- how to run it -------------------------------------------------------------
 
-def interpreter(app_dir: Path) -> Path:
-    """The app's own venv when it has one, otherwise the Python running this,
-    which in the packaged app is the one that carries every dependency."""
+# The one environment setup-all builds for a whole checkout (#65), which is
+# the control panel's own. An app with a .venv of its own still runs on that.
+SHARED_VENV = HERE / "gui" / ".venv"
+
+# What every app imports. A Python other than an app's own venv has to have
+# them before an app is run on it. The shared core brings pypdf with it.
+NEEDS = ("paperpull_core", "playwright", "pypdf")
+
+
+def venv_python(venv: Path) -> Path | None:
+    """The interpreter inside a venv, on either layout, or None."""
     for rel in ("Scripts/python.exe", "bin/python", "bin/python3"):
-        cand = app_dir / ".venv" / rel
+        cand = venv / rel
         if cand.exists():
             return cand
-    return Path(sys.executable)
+    return None
 
 
-def has_core() -> bool:
-    import importlib.util
-    return importlib.util.find_spec("paperpull_core") is not None
+def interpreter(app_dir: Path) -> Path:
+    """The app's own venv when it has one, otherwise the checkout's shared
+    one when setup-all has made it, otherwise the Python running this,
+    which in the packaged app is the one that carries every dependency."""
+    return (venv_python(app_dir / ".venv") or venv_python(SHARED_VENV)
+            or Path(sys.executable))
+
+
+def runs_apps(python: Path) -> bool:
+    """Whether python can import what every app needs. The Python running
+    this is asked directly. Any other is started and asked, since the
+    gui/.venv every setup-all made before this one holds only the panel's
+    own packages."""
+    if python == Path(sys.executable):
+        return all(importlib.util.find_spec(name) for name in NEEDS)
+    probe = ("import importlib.util as u, sys; "
+             "sys.exit(not all(map(u.find_spec, %r)))" % (list(NEEDS),))
+    try:
+        return subprocess.call([str(python), "-c", probe], env=app_env(),
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
+    except OSError:
+        return False
+
+
+def not_set_up(app_dir: Path, wanted: str) -> str:
+    """What to run when an app has no venv of its own and nothing here can
+    run it."""
+    alone = "python paperpull.py %s setup" % wanted
+    script = "setup-all.bat" if os.name == "nt" else "setup-all.command"
+    if (HERE / script).is_file():
+        return ("%s is not set up yet. Run %s in %s, which sets up every app at "
+                "once, or %s to set up this one alone." % (app_dir.name, script, HERE, alone))
+    return "%s is not set up yet. Run %s" % (app_dir.name, alone)
 
 
 def login_flag(script: Path) -> str:
@@ -230,15 +269,20 @@ def core_source() -> list[str]:
 
 
 def setup(app_dir: Path) -> int:
-    """What setup.bat does. A venv, the app's requirements, the shared core.
-    No browser download, that is offered at sign-in if none is found."""
-    venv_py = interpreter(app_dir)
-    if venv_py == Path(sys.executable):
+    """What setup.bat does. A venv of the app's own, the app's requirements,
+    the shared core, all in it and never in the shared environment, which
+    is setup-all's to build. No browser download, that is offered at
+    sign-in if none is found."""
+    venv_py = venv_python(app_dir / ".venv")
+    if venv_py is None:
         print("Creating .venv in %s" % app_dir.name)
         rc = subprocess.call([sys.executable, "-m", "venv", str(app_dir / ".venv")])
         if rc:
             return rc
-        venv_py = interpreter(app_dir)
+        venv_py = venv_python(app_dir / ".venv")
+        if venv_py is None:
+            print("Setup FAILED, the new .venv in %s has no Python in it" % app_dir.name)
+            return 1
     else:
         print("Reusing .venv in %s" % app_dir.name)
     steps = [
@@ -296,9 +340,15 @@ def main(argv: list[str] | None = None) -> int:
             print("No apps under %s" % root)
             return 1
         print("apps under %s\n" % root)
+        ready = {}
         for d in apps:
-            venv = "" if interpreter(d) != Path(sys.executable) else "   (no .venv, run setup)"
-            print("  %-36s %-14s %s%s" % (d.name, _slug(d), provider_name(d), venv))
+            note = ""
+            if venv_python(d / ".venv") is None:
+                py = interpreter(d)
+                if py not in ready:
+                    ready[py] = runs_apps(py)
+                note = "" if ready[py] else "   (not set up yet)"
+            print("  %-36s %-14s %s%s" % (d.name, _slug(d), provider_name(d), note))
         return 0
 
     if not args.command:
@@ -309,10 +359,8 @@ def main(argv: list[str] | None = None) -> int:
         return setup(app_dir)
     if args.command == "add-account":
         return add_account(app_dir, extra)
-    if interpreter(app_dir) == Path(sys.executable) and not has_core():
-        raise SystemExit(
-            "%s has no .venv and this Python does not have paperpull_core. "
-            "Run: python paperpull.py %s setup" % (app_dir.name, args.app))
+    if venv_python(app_dir / ".venv") is None and not runs_apps(interpreter(app_dir)):
+        raise SystemExit(not_set_up(app_dir, args.app))
     argv_out = build_argv(app_dir, args.command, args.account, extra)
     print("$ " + " ".join(argv_out[1:]) + "   (in %s)" % app_dir.name, flush=True)
     return run(app_dir, argv_out)

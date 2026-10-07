@@ -12,8 +12,12 @@ commands the `.bat` files do, nothing from the page is passed to a shell.
 run_gui.bat
 ```
 
-That creates a small venv (FastAPI + uvicorn), starts the server, and opens
-<http://127.0.0.1:8765>. It listens on localhost only.
+That starts the server and opens <http://127.0.0.1:8765>. It listens on
+localhost only. It runs on `gui/.venv`, the one environment setup-all builds
+for the panel and every app, so in a checkout run `setup-all.bat` (or
+`./setup-all.command`) once first. Without it, run_gui makes a small venv
+with the panel's own packages, and the panel asks for setup-all before it
+runs an app.
 
 Needs **Python 3.11+**, the same floor as the rest of PaperPull.
 
@@ -71,7 +75,9 @@ run_gui.bat
 
 It finds any subfolder containing an entry script (`*_receipts.py` /
 `*_docs.py`), so it works with either the `apps/<slug>` layout or the original
-`Provider Name/` folders. Each app runs with its own `.venv` if present.
+`Provider Name/` folders. Each app runs on its own `.venv` if it has one, and
+otherwise on the panel's own Python, which setup-all gives what every app
+needs.
 
 ## Actions
 
@@ -152,5 +158,5 @@ build takes seconds. Only archives with PDFs on disk are offered.
   2FA yourself. That's by design, the tools never touch your password.
 - If a run hits a mid-run "please sign in again" prompt (e.g. an expired
   session), it can't answer from here, it will end. Just Login again and Resume.
-- One app needs its `.venv` set up (run its `setup.bat` once) before the panel
-  can run it; the UI warns when a venv is missing.
+- In a checkout, setup-all has to have run once before the panel can run an
+  app. The UI says so until it has.

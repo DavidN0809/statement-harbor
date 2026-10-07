@@ -56,8 +56,9 @@ type that provider cannot produce.
 
 ## Installing
 
-Each app's `setup.bat` installs this into that app's own venv. From a repo
-checkout:
+In a repo checkout, setup-all installs this, editable, into `gui/.venv`, the
+one environment the panel and every app share. An app's own `setup.bat`
+installs it into that app's own venv the same way.
 
 ```bat
 .venv\Scripts\pip install -e ..\..\core

@@ -245,8 +245,12 @@ def test_a_packaged_install_is_not_told_to_run_setup(settings, tmp_path, monkeyp
     settings.parent.mkdir(parents=True)
     settings.write_text(json.dumps({"apps_root": str(root)}), encoding="utf-8")
     monkeypatch.setattr(app_module, "_is_packaged", lambda: False)
+    monkeypatch.setattr(app_module, "_runs_apps", lambda: False)
     checkout = app_module.discover_apps()
     assert all(a["needs_setup"] for a in checkout.values())
+    monkeypatch.setattr(app_module, "_runs_apps", lambda: True)
+    assert not any(a["needs_setup"] for a in app_module.discover_apps().values()), \
+        "a checkout whose panel setup-all has set up runs them on it"
     monkeypatch.setattr(app_module, "_is_packaged", lambda: True)
     packaged = app_module.discover_apps()
     assert not any(a["needs_setup"] for a in packaged.values())

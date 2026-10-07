@@ -17,14 +17,22 @@ echo 'q to stop. Each name you type renames its PDF, and the spreadsheets'
 echo 'follow.'
 echo
 
-# This folder's own Python when ./setup.command made one. A folder the
-# PaperPull app made has no setup.command, and runs on the app's own Python.
+# This folder's own Python when ./setup.command made one. Otherwise, in a
+# checkout, the one setup-all.command made for every app in gui/.venv. A
+# folder the PaperPull app made has no setup.command, and runs on the app's
+# own Python.
 PY=.venv/bin/python
-if [ ! -x "$PY" ]; then
-    if [ -f setup.command ]; then
-        echo "This app is not set up yet - run ./setup.command first."
+if [ ! -x "$PY" ] && [ -f setup.command ]; then
+    PY=../../gui/.venv/bin/python
+    if [ ! -x "$PY" ] || ! "$PY" -c 'import importlib.util as u, sys; sys.exit(not all(map(u.find_spec, ["paperpull_core", "playwright", "pypdf"])))' >/dev/null 2>&1; then
+        if [ -f ../../setup-all.command ]; then
+            echo "This app is not set up yet. Run setup-all.command in the PaperPull folder first."
+        else
+            echo "This app is not set up yet - run ./setup.command first."
+        fi
         exit 1
     fi
+elif [ ! -x "$PY" ]; then
     PY=""
     for APP in /Applications/PaperPull.app "$HOME/Applications/PaperPull.app"; do
         if [ -x "$APP/Contents/Resources/python/bin/python3" ]; then

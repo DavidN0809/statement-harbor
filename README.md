@@ -293,7 +293,8 @@ says on its face that it is invented.
 
 ![Quick start](docs/quickstart.gif)
 
-**One-shot setup**, a venv for every app and the GUI, each app with the shared core.
+**One-shot setup**, one Python environment that the control panel and every
+app share, with the shared core in it.
 
 ```bat
 setup-all.bat        REM Windows
@@ -330,7 +331,7 @@ Linux, or `python paperpull.py` anywhere. In the installed Mac app it is
 installed Windows app it is `paperpull.bat` in the folder PaperPull was
 installed to, `%LOCALAPPDATA%\PaperPull` unless you chose another. Both work
 on the same installs the panel does. It finds the app by folder name,
-slug or provider, runs it under its own environment, and passes anything else
+slug or provider, runs it on the right Python, and passes anything else
 straight through, so `paperpull chase all --year 2025 --account spouse` works.
 The commands are `setup`, `login`, `discover`, `pilot`, `all`, `resume`,
 `verify`, `diagnose` and `dry-run`. The panel offers the six of those a
@@ -340,8 +341,13 @@ and a **Download again** box under it that adds `--redownload` to one Pilot
 or Run All scoped to a year or to both ends of a range, after asking.
 
 Each app also has its own README with provider-specific details and quirks.
-(Prefer to set apps up one at a time? `paperpull <app> setup`, or the app's
-own `setup.bat` / `setup.command`.)
+
+The one environment setup-all builds is `gui/.venv`. An app can still have an
+environment of its own, made by `paperpull <app> setup` or the app's own
+`setup.bat` / `setup.command`, and an app with one runs on it. setup-all
+used to make one in every app folder, about 400 MB each. To free that space
+in an older checkout, run setup-all again, then delete the `.venv` folder
+inside each app folder.
 
 ## Knowing when to run it again
 
@@ -512,7 +518,7 @@ flavors, and everything else is the same `paperpull` command on either:
 | Task | Windows | macOS / Linux |
 |------|---------|---------------|
 | One-shot setup | `setup-all.bat` | `./setup-all.command` |
-| Set up one app | `setup.bat` | `./setup.command` |
+| Set up one app on its own | `setup.bat` | `./setup.command` |
 | Sign in | `login.bat` | `./login.command` |
 | Fix unsure receipt names | `review_names.bat` | `./review_names.command` |
 | Test run | `paperpull amex pilot` | `./paperpull amex pilot` |
@@ -557,8 +563,7 @@ chmod +x setup-all.command apps/*/*.command gui/*.command
   machine with an Intel or AMD processor (see [SERVER.md](SERVER.md))
 - For the Windows installer or the macOS `.dmg`, nothing else. They carry
   their own Python.
-- For a checkout, Python 3.11+ and Playwright (installed per app by the
-  setup script)
+- For a checkout, Python 3.11+ and Playwright (installed by setup-all)
 - A Chromium-family browser for the few providers that need a real one
   (Chrome, Edge, Brave, Vivaldi or Opera). Safari and Firefox cannot be
   driven this way.

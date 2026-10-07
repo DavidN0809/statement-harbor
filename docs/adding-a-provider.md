@@ -189,7 +189,9 @@ until the guard is in the path.
 
 ### 7. Test it
 
-From the app folder, with its venv active:
+From the app folder, with the environment setup-all built active, which is
+`..\..\gui\.venv\Scripts\activate` (or `source ../../gui/.venv/bin/activate`
+on macOS).
 
 ```
 python <slug>_docs.py --discover     # lists what it found

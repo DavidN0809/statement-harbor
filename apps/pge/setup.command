@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-echo "=== PG^&E Documents setup ==="
+echo "=== PG&E Documents setup ==="
 
 PY3="$(command -v python3 || true)"
 if [ -z "$PY3" ]; then
@@ -30,4 +30,4 @@ fi
 # the download then, when somebody is present to agree to it.
 
 echo
-echo "Setup complete. Next step: ./login.command and sign in to PG^&E Documents."
+echo "Setup complete. Next step: ./login.command and sign in to PG&E Documents."

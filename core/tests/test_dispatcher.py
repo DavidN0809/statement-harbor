@@ -5,6 +5,7 @@ the right folder, the right interpreter and the right flag, and get out of
 the way. These pin each of those, and that the panel and the terminal offer
 the same commands, since the point of #23 was to stop having two answers.
 """
+import os
 import re
 import shutil
 import subprocess
@@ -36,7 +37,11 @@ def _app(root: Path, slug: str, provider: str, folder: str | None = None,
 
 
 @pytest.fixture
-def root(tmp_path):
+def root(tmp_path, monkeypatch):
+    # Where the checkout's shared environment would be, made only by a test
+    # that wants one, so the gui/.venv of the checkout running these tests,
+    # or its absence on CI, never decides what they see.
+    monkeypatch.setattr(paperpull, "SHARED_VENV", tmp_path / "gui" / ".venv")
     _app(tmp_path, "pge", "PG&E", folder="PG&E Statements", venv=True)
     _app(tmp_path, "chase", "Chase")
     _app(tmp_path, "target", "Target", login_flag="--login")
@@ -112,7 +117,7 @@ def test_main_runs_in_the_apps_folder_and_returns_its_exit_code(root, monkeypatc
         return 7
 
     monkeypatch.setattr(paperpull, "run", fake_run)
-    monkeypatch.setattr(paperpull, "has_core", lambda: True)
+    monkeypatch.setattr(paperpull, "runs_apps", lambda python: True)
     rc = paperpull.main(["--root", str(root), "chase", "resume", "--max-docs", "3"])
     assert rc == 7
     assert seen["cwd"] == root / "chase"
@@ -143,16 +148,83 @@ def test_an_app_writes_utf8_wherever_its_output_goes(root, tmp_path, monkeypatch
     assert out.read_bytes().decode("utf-8").strip() == "割绳子"
 
 
-def test_no_venv_and_no_core_stops_with_the_setup_command(root, monkeypatch):
-    monkeypatch.setattr(paperpull, "has_core", lambda: False)
-    with pytest.raises(SystemExit, match="paperpull.py chase setup"):
+def test_no_venv_and_nothing_that_can_run_it_stops_naming_setup_all(root, monkeypatch):
+    """Since #65 a checkout is set up all at once, by setup-all, into one
+    environment every app shares. Setting up one app alone still works.
+    An app with a venv of its own is never stopped."""
+    monkeypatch.setattr(paperpull, "runs_apps", lambda python: False)
+    script = "setup-all.bat" if os.name == "nt" else "setup-all.command"
+    with pytest.raises(SystemExit, match=r"chase is not set up yet\. Run %s in .*, or "
+                       r"python paperpull\.py chase setup" % re.escape(script)):
         paperpull.main(["--root", str(root), "chase", "verify"])
+    monkeypatch.setattr(paperpull, "run", lambda app_dir, argv: 0)
+    assert paperpull.main(["--root", str(root), "pge", "verify"]) == 0
+
+
+def _shared(root: Path) -> Path:
+    """The checkout's shared environment, where paperpull.SHARED_VENV is."""
+    py = root / "gui" / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    py.parent.mkdir(parents=True)
+    py.write_bytes(b"")
+    return py
+
+
+def test_an_app_with_no_venv_of_its_own_runs_on_the_checkouts_shared_one(root):
+    shared = _shared(root)
+    assert paperpull.interpreter(root / "chase") == shared
+    assert paperpull.build_argv(root / "chase", "pilot", None, [])[0] == str(shared)
+    assert paperpull.interpreter(root / "PG&E Statements") == \
+        root / "PG&E Statements" / ".venv" / "Scripts" / "python.exe"
+
+
+def test_the_shared_environment_is_asked_whether_it_can_run_an_app(tmp_path, monkeypatch):
+    """The gui/.venv every setup-all made before this one holds the panel's
+    packages and none of an app's, so an app started on it would fail on
+    its first import. It is asked, by starting it, as a run would."""
+    venv = tmp_path / "gui" / ".venv"
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)],
+                   check=True, capture_output=True)
+    python = paperpull.venv_python(venv)
+    stubs = tmp_path / "stubs"
+    for name in paperpull.NEEDS:
+        (stubs / name).mkdir(parents=True)
+        (stubs / name / "__init__.py").write_text("", encoding="utf-8")
+    monkeypatch.setenv("PYTHONPATH", str(stubs))
+    assert paperpull.runs_apps(python)
+    shutil.rmtree(stubs / "pypdf")
+    assert not paperpull.runs_apps(python)
+    monkeypatch.delenv("PYTHONPATH")
+    assert not paperpull.runs_apps(python)
+    assert not paperpull.runs_apps(tmp_path / "nowhere" / "python.exe")
+
+
+def test_list_marks_only_an_app_nothing_here_can_run(root, monkeypatch, capsys):
+    """It used to mark every app with no venv, which in the packaged app,
+    whose apps never have one, was all of them."""
+    for answer in (False, True):
+        monkeypatch.setattr(paperpull, "runs_apps", lambda python: answer)
+        assert paperpull.main(["--root", str(root), "list"]) == 0
+        marked = {line.split()[0] for line in capsys.readouterr().out.splitlines()
+                  if "(not set up yet)" in line}
+        assert marked == ({"chase", "target"} if not answer else set()), marked
+
+
+def _calls_that_make_venvs(calls: list, fail_at=None):
+    """subprocess.call, which writes each argv down and, asked to make a
+    venv, puts a Python in it, failing the call numbered fail_at."""
+    def call(argv, **kw):
+        calls.append(argv)
+        if argv[1:3] == ["-m", "venv"]:
+            py = Path(argv[3]) / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            py.parent.mkdir(parents=True, exist_ok=True)
+            py.write_bytes(b"")
+        return 1 if len(calls) == fail_at else 0
+    return call
 
 
 def test_setup_makes_a_venv_installs_requirements_then_the_core(root, monkeypatch):
     calls = []
-    monkeypatch.setattr(paperpull.subprocess, "call",
-                        lambda argv, **kw: (calls.append(argv), 0)[1])
+    monkeypatch.setattr(paperpull.subprocess, "call", _calls_that_make_venvs(calls))
     monkeypatch.setattr(paperpull, "core_source", lambda: ["-e", "CORE"])
     (root / "chase" / "requirements.txt").write_text("playwright\n", encoding="utf-8")
     assert paperpull.main(["--root", str(root), "chase", "setup"]) == 0
@@ -161,14 +233,32 @@ def test_setup_makes_a_venv_installs_requirements_then_the_core(root, monkeypatc
     assert any("requirements.txt" in " ".join(c) for c in calls)
 
 
+def test_setup_gives_an_app_its_own_venv_even_beside_the_shared_one(root, monkeypatch):
+    """setup is for one app on its own, and installs nothing into the
+    environment every other app runs on."""
+    shared = _shared(root)
+    calls = []
+    monkeypatch.setattr(paperpull.subprocess, "call", _calls_that_make_venvs(calls))
+    monkeypatch.setattr(paperpull, "core_source", lambda: ["-e", "CORE"])
+    (root / "chase" / "requirements.txt").write_text("playwright\n", encoding="utf-8")
+    assert paperpull.main(["--root", str(root), "chase", "setup"]) == 0
+    own = paperpull.venv_python(root / "chase" / ".venv")
+    assert calls[0][1:3] == ["-m", "venv"]
+    assert [c[0] for c in calls[1:]] == [str(own)] * 3, calls
+    assert str(shared) not in str(calls)
+
+
+def test_setup_stops_when_the_venv_it_made_holds_no_python(root, monkeypatch):
+    """It used to go on and install everything into the Python running it."""
+    calls = []
+    monkeypatch.setattr(paperpull.subprocess, "call", lambda argv, **kw: calls.append(argv) or 0)
+    assert paperpull.main(["--root", str(root), "chase", "setup"]) == 1
+    assert len(calls) == 1
+
+
 def test_setup_stops_at_the_first_failed_step(root, monkeypatch):
     calls = []
-
-    def fail_second(argv, **kw):
-        calls.append(argv)
-        return 0 if len(calls) < 2 else 1
-
-    monkeypatch.setattr(paperpull.subprocess, "call", fail_second)
+    monkeypatch.setattr(paperpull.subprocess, "call", _calls_that_make_venvs(calls, fail_at=2))
     monkeypatch.setattr(paperpull, "core_source", lambda: ["-e", "CORE"])
     assert paperpull.main(["--root", str(root), "chase", "setup"]) == 1
     assert len(calls) == 2

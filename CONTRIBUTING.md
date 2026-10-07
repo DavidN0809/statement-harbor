@@ -154,16 +154,16 @@ That is the whole setup. To check it, `git remote -v` should list `origin`
 Before changing anything, make sure the code runs on your machine as it is.
 Then when something breaks later you know it was your change.
 
-Each provider app has its own small Python environment. Set one up for the
-app you care about, using the folder name under `apps/`. Chase as the
-example:
+Every provider app runs on one shared Python environment, `gui/.venv`, which
+also runs the control panel. Build it once, from the repository folder.
 
 ```bash
-python paperpull.py chase setup
+setup-all.bat
 ```
 
-On macOS use `python3` wherever this page says `python`. This creates
-`apps/chase/.venv` and installs what the app needs. It takes a minute.
+On macOS it is `./setup-all.command`, and use `python3` wherever this page
+says `python`. It installs what every app needs, the same few packages for
+all of them, and the shared core. It takes a few minutes the first time.
 
 Every app reads its settings from a `config.json` beside it, which is yours
 and never goes to GitHub. Make it from the example that does ship:
@@ -255,20 +255,20 @@ the `.md` file you are reading.
 ### 4. Run the tests
 
 Every app has tests in its `tests/` folder, and there are repo-wide tests
-that every app must pass. Run both. From inside the app's folder, using the
-environment you set up:
+that every app must pass. Run both, on the environment setup-all built. From
+inside the app's folder.
 
 ```bash
 cd apps/chase
-.venv\Scripts\python -m pytest tests
+..\..\gui\.venv\Scripts\python -m pytest tests
 cd ../..
 ```
 
-On macOS the middle line is `.venv/bin/python -m pytest tests`. Then the
-repo-wide ones, from the repository folder, using any app's environment:
+On macOS the middle line is `../../gui/.venv/bin/python -m pytest tests`.
+Then the repo-wide ones, from the repository folder.
 
 ```bash
-apps\chase\.venv\Scripts\python -m pytest core\tests
+gui\.venv\Scripts\python -m pytest core\tests
 ```
 
 Green means every line ends in `passed`. A failure prints the test's name

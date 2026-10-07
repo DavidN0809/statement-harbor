@@ -67,9 +67,10 @@ def test_stream_carries_current_counts_and_keeps_exit_code(tmp_path, monkeypatch
 def test_an_app_that_is_not_set_up_is_told_so_and_never_started(tmp_path,
                                                                 monkeypatch):
     """A checkout install with no venv used to run under the panel's own
-    interpreter, which has fastapi and nothing else, and died on
+    interpreter, which had fastapi and nothing else, and died on
     `No module named 'paperpull_core'`. That is a true sentence about the
-    wrong interpreter and it tells a tester nothing."""
+    wrong interpreter and it tells a tester nothing. It still is, until
+    setup-all has given that interpreter what an app needs."""
     started = []
     monkeypatch.setattr(app, "discover_apps", lambda: {"example": {"dir": str(tmp_path)}})
     monkeypatch.setattr(app, "_build_cmd", lambda *args: ["synthetic-command"])
@@ -77,6 +78,7 @@ def test_an_app_that_is_not_set_up_is_told_so_and_never_started(tmp_path,
                         lambda *a, **k: started.append(a) or (_ for _ in ()).throw(
                             AssertionError("should never have started")))
     monkeypatch.setattr(app, "_is_packaged", lambda: False)
+    monkeypatch.setattr(app, "_runs_apps", lambda: False)
 
     async def consume():
         return "".join([part async for part in
@@ -103,10 +105,57 @@ def test_an_install_that_is_set_up_is_not_blocked(tmp_path, monkeypatch):
     assert app.setup_needed({"dir": str(tmp_path)}) == ""
 
 
-def test_the_message_names_the_folder_to_open(tmp_path, monkeypatch):
+def test_the_message_names_setup_all_and_the_folder_it_is_in(tmp_path, monkeypatch):
+    """setup-all builds the one environment every provider shares (#65),
+    where the message used to send each provider to a setup of its own."""
     monkeypatch.setattr(app, "_is_packaged", lambda: False)
+    monkeypatch.setattr(app, "_runs_apps", lambda: False)
     said = app.setup_needed({"dir": str(tmp_path)})
-    assert str(tmp_path) in said
+    assert "  1. Open  %s\n" % app.HERE.parent in said
+    assert "setup-all.%s" % ("bat" if sys.platform == "win32" else "command") in said
+
+
+def test_an_app_with_no_venv_runs_once_setup_all_has_filled_the_panels_own(tmp_path,
+                                                                           monkeypatch):
+    """In a checkout an app with no venv of its own runs on the panel's
+    interpreter, gui/.venv, which setup-all builds for every app."""
+    monkeypatch.setattr(app, "_is_packaged", lambda: False)
+    monkeypatch.setattr(app, "_runs_apps", lambda: True)
+    assert app.setup_needed({"dir": str(tmp_path)}) == ""
+    assert app._python_for(tmp_path) == sys.executable
+
+
+def test_whether_the_panels_interpreter_can_run_an_app_is_asked_of_a_new_process(
+        tmp_path, monkeypatch):
+    """The naming page puts the core on the panel's own path, so the panel
+    could import it while no app run started by the panel could. A package
+    only on the panel's path does not count, and one on the path every run
+    inherits does."""
+    folder = tmp_path / "only-here"
+    (folder / "pp_only_on_this_path").mkdir(parents=True)
+    (folder / "pp_only_on_this_path" / "__init__.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(app, "APP_NEEDS", ("pp_only_on_this_path",))
+    monkeypatch.setattr(app, "_RUNS_APPS", {})
+    monkeypatch.syspath_prepend(str(folder))
+    import importlib.util
+    assert importlib.util.find_spec("pp_only_on_this_path") is not None
+    assert app._runs_apps() is False
+    monkeypatch.setenv("PYTHONPATH", str(folder))
+    assert app._runs_apps() is True
+
+
+def test_the_answer_is_asked_again_only_once_the_packages_change(monkeypatch):
+    """A page lists every app, and setup-all can finish while it is open."""
+    asked, stamp = [], [1]
+    monkeypatch.setattr(app, "_RUNS_APPS", {})
+    monkeypatch.setattr(app, "_packages_stamp", lambda: stamp[0])
+    monkeypatch.setattr(app.subprocess, "run",
+                        lambda *a, **k: asked.append(a) or app.subprocess.CompletedProcess(a, 0))
+    assert app._runs_apps() and app._runs_apps()
+    assert len(asked) == 1
+    stamp[0] = 2
+    assert app._runs_apps()
+    assert len(asked) == 2
 
 
 def test_a_wrong_document_needs_attention_on_its_own():

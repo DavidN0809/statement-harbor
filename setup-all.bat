@@ -3,8 +3,8 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 echo ============================================================
 echo  PaperPull - one-shot setup
-echo  Creates a virtual environment for every app, with the
-echo  shared core installed in it, and one for the GUI.
+echo  Builds one Python environment, gui\.venv, that the control
+echo  panel and every app share, with the shared core in it.
 echo  This can take a few minutes the first time.
 echo ============================================================
 echo.
@@ -19,55 +19,75 @@ if not defined PYEXE (
   pause & exit /b 1
 )
 
-set "FAILED="
+rem --- what every app needs, for one pip call ---
+rem Every app asks for the same few packages, so one environment holds them
+rem all, where a venv in each app folder took about 400 MB apiece. An app
+rem that already has a .venv of its own keeps running on it, and this leaves
+rem it alone.
+set "REQS=-r gui\requirements.txt"
+set "OWN="
 set /a COUNT=0
-
-rem --- each app ---
 for /d %%A in (apps\*) do (
   if exist "%%A\requirements.txt" (
-    echo === %%~nxA ===
-    pushd "%%A"
-    if exist ".venv\Scripts\python.exe" (
-      echo    reusing existing .venv
-    ) else (
-      %PYEXE% -m venv .venv || set "FAILED=!FAILED! %%~nxA(venv)"
-    )
-    .venv\Scripts\python.exe -m pip install -q --upgrade pip
-    .venv\Scripts\python.exe -m pip install -q -r requirements.txt || set "FAILED=!FAILED! %%~nxA(deps)"
-
-    rem  The shared core. Every app imports paperpull_core, so without this
-    rem  step each one dies at startup with ModuleNotFoundError. A repo
-    rem  checkout installs it from source; a standalone copy ships a wheel.
-    if exist "..\..\core\pyproject.toml" (
-      .venv\Scripts\python.exe -m pip install -q -e "..\..\core" || set "FAILED=!FAILED! %%~nxA(core)"
-    ) else (
-      for %%W in ("core\paperpull_core-*.whl") do (
-        .venv\Scripts\python.exe -m pip install -q "%%W" || set "FAILED=!FAILED! %%~nxA(core)"
-      )
-    )
-    popd
+    set "REQS=!REQS! -r %%A\requirements.txt"
     set /a COUNT+=1
+    if exist "%%A\.venv\Scripts\python.exe" set "OWN=!OWN! %%~nxA"
   )
 )
 
-rem --- the GUI ---
-echo === gui ===
-pushd gui
-if exist ".venv\Scripts\python.exe" (
-  echo    reusing existing .venv
+rem --- the one environment, the panel's own ---
+set "FAILED="
+set "PY=gui\.venv\Scripts\python.exe"
+if exist "%PY%" (
+  echo Reusing gui\.venv
 ) else (
-  %PYEXE% -m venv .venv || set "FAILED=!FAILED! gui(venv)"
+  echo Creating gui\.venv
+  %PYEXE% -m venv gui\.venv || set "FAILED=1"
 )
-.venv\Scripts\python.exe -m pip install -q --upgrade pip
-.venv\Scripts\python.exe -m pip install -q -r requirements.txt || set "FAILED=!FAILED! gui(deps)"
-popd
+if not exist "%PY%" set "FAILED=1"
+if defined FAILED (
+  echo ** Creating gui\.venv failed, see the message above.
+  goto done
+)
+"%PY%" -m pip install -q --upgrade pip
+echo Installing what the panel and !COUNT! apps need
+"%PY%" -m pip install -q !REQS! || (
+  echo ** Installing the requirements failed, see pip's message above.
+  set "FAILED=1"
+)
 
+rem  The shared core. Every app imports paperpull_core, so without this
+rem  step each one dies at startup with ModuleNotFoundError. A repo
+rem  checkout installs it from source, a copy shipped without the source
+rem  carries a wheel.
+set "CORE="
+if exist "core\pyproject.toml" (
+  set "CORE=-e .\core"
+) else (
+  for %%W in ("core\paperpull_core-*.whl") do set "CORE=%%W"
+)
+if not defined CORE (
+  echo ** Neither core\pyproject.toml nor a core wheel is here, so the core cannot be installed.
+  set "FAILED=1"
+  goto done
+)
+"%PY%" -m pip install -q !CORE! || (
+  echo ** Installing the shared core failed, see pip's message above.
+  set "FAILED=1"
+)
+
+:done
 echo.
 if defined FAILED (
-  echo ** Some setups had problems:!FAILED!
-  echo    Re-run this, or run that app's own setup.bat to see the error.
+  echo ** Setup did not finish. Fix what is said above, then run this again.
 ) else (
-  echo All set - !COUNT! apps + the GUI are ready.
+  echo All set. The control panel and !COUNT! apps share one environment, gui\.venv.
+)
+if defined OWN (
+  echo.
+  echo These apps keep the .venv of their own that they already have, and run
+  echo on it. Delete one to have that app use gui\.venv and free its space.
+  echo  !OWN!
 )
 echo.
 echo Next:

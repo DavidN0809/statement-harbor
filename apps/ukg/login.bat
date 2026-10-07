@@ -19,6 +19,26 @@ echo.
 echo If the window opens somewhere unexpected, set "base_url" in config.json
 echo to the address you see in your browser once signed in.
 echo.
-.venv\Scripts\python.exe ukg_docs.py --open-browser %CFG%
+rem This app's own Python when setup.bat made one. Otherwise, in a
+rem checkout, the one setup-all.bat made for every app in gui\.venv, once
+rem it holds what an app needs.
+set "PY=.venv\Scripts\python.exe"
+if exist "%PY%" goto run
+set "PY=..\..\gui\.venv\Scripts\python.exe"
+if not exist "%PY%" goto notsetup
+"%PY%" -c "import importlib.util as u, sys; sys.exit(not all(map(u.find_spec, ['paperpull_core', 'playwright', 'pypdf'])))" >nul 2>&1
+if not errorlevel 1 goto run
+:notsetup
+if exist "..\..\setup-all.bat" (
+  echo This app is not set up yet. Run setup-all.bat in the PaperPull folder first.
+) else (
+  echo This app is not set up yet - run setup.bat first.
+)
+echo.
+pause
+exit /b 1
+
+:run
+"%PY%" ukg_docs.py --open-browser %CFG%
 echo.
 pause

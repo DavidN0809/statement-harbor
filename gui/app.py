@@ -29,6 +29,7 @@ from datetime import date, datetime
 import re
 import shutil
 import subprocess
+import sysconfig
 import time
 from typing import Optional
 import sys
@@ -563,22 +564,69 @@ def _venv_python(app_dir: Path):
 def _python_for(app_dir: Path) -> str:
     """The interpreter to run one app with.
 
-    Falling back to this program's own is right for the packaged build,
-    whose single bundled interpreter carries the shared core and every
-    app's dependencies. In a checkout it is a trap: the panel's venv has
-    fastapi and nothing else, so an app that has not been set up ran
-    under it and died on `No module named 'paperpull_core'`, a sentence
-    about the wrong interpreter that tells a tester nothing. The run
-    endpoint refuses that case before it gets here."""
+    The app's own venv when it has one, otherwise this program's own. In
+    the packaged build that is the single bundled interpreter, which
+    carries the shared core and every app's dependencies. In a checkout it
+    is gui/.venv, the one environment setup-all builds for every app
+    (#65). Before setup-all has filled it, it holds the panel's packages
+    and none of an app's, and an app run under it died on `No module
+    named 'paperpull_core'`, a sentence about the wrong interpreter that
+    tells a tester nothing. The run endpoint refuses that case before it
+    gets here (setup_needed)."""
     venv = _venv_python(app_dir)
     return str(venv) if venv else sys.executable
+
+
+# What every app imports. In a checkout the panel's own interpreter runs
+# an app with no venv of its own, so it has to have these, which setup-all
+# gives it. The shared core brings pypdf with it.
+APP_NEEDS = ("paperpull_core", "playwright", "pypdf")
+
+# {(interpreter, PYTHONPATH, when its packages folder last changed): answer}
+_RUNS_APPS: dict = {}
+
+
+def _packages_stamp():
+    """When this interpreter's packages folder last changed, which every pip
+    install and uninstall does, or None."""
+    try:
+        return Path(sysconfig.get_paths()["purelib"]).stat().st_mtime_ns
+    except (OSError, KeyError):
+        return None
+
+
+def _runs_apps() -> bool:
+    """Whether this program's own interpreter can run an app, asked of a
+    new process of it, as a run starts one.
+
+    Asking this process would be wrong both ways. The naming page puts the
+    core on the panel's own path, which no run inherits, and a core that
+    setup-all installs while the panel is open reaches only a process
+    started after it. The answer is kept until the packages folder
+    changes, so a page that lists every app starts one process, not one
+    for each."""
+    key = (sys.executable, os.environ.get("PYTHONPATH", ""), _packages_stamp())
+    if key not in _RUNS_APPS:
+        probe = ("import importlib.util as u, sys; "
+                 "sys.exit(not all(map(u.find_spec, %r)))" % (list(APP_NEEDS),))
+        try:
+            ok = subprocess.run([sys.executable, "-c", probe], cwd=str(HERE),
+                                stdin=subprocess.DEVNULL, capture_output=True,
+                                timeout=120).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            ok = False
+        _RUNS_APPS.clear()
+        _RUNS_APPS[key] = ok
+    return _RUNS_APPS[key]
 
 
 def setup_needed(meta: dict) -> str:
     """Why this app cannot be run yet, or "".
 
     Only ever true in a checkout, apart from the sample archive. The
-    packaged build has no venv anywhere and does not need one."""
+    packaged build has no venv anywhere and does not need one, and in a
+    checkout an app with no venv of its own runs on the panel's, once
+    setup-all has given it what an app needs."""
     if _SAMPLE is not None:
         return ("This is the sample archive, so there is nothing to sign in "
                 "to and nothing to download.\n\n"
@@ -589,17 +637,16 @@ def setup_needed(meta: dict) -> str:
                 "and press Login. Your own browser opens on that provider's "
                 "sign-in page. Nothing is downloaded until you have signed "
                 "in there yourself, and PaperPull never sees what you type.")
-    if _is_packaged() or _venv_python(Path(meta["dir"])) is not None:
+    if _is_packaged() or _venv_python(Path(meta["dir"])) is not None or _runs_apps():
         return ""
-    script = "setup.command" if sys.platform != "win32" else "setup.bat"
+    script = "setup-all.command" if sys.platform != "win32" else "setup-all.bat"
     return ("This provider is not set up yet, so there is nothing to run "
             "it with.\n\n"
             "  1. Open  %s\n"
             "  2. Double-click  %s  and let it finish\n"
             "  3. Come back here and RELOAD this page\n\n"
-            "Step 3 is not optional. Reloading is what puts the shared "
-            "code into the new folder. Without it the buttons will fail "
-            "on an import error." % (meta["dir"], script))
+            "setup-all sets up every provider at once, in one environment "
+            "they all share, so it is needed only once." % (HERE.parent, script))
 
 
 def _login_flag(script: Path) -> str:
@@ -638,12 +685,14 @@ def discover_apps():
             "login_flag": _login_flag(script),
             "accounts": _accounts(d),
             "has_venv": _venv_python(d) is not None,
-            # Only a checkout is ever told to run setup. The packaged app
-            # has no per-app venv and needs none, the interpreter it falls
-            # back to carries everything, and nothing in the sample is ever
-            # run, so there it is advice about a problem that cannot arise.
+            # Only a checkout is ever told to run setup, and only until
+            # setup-all has given the panel's own interpreter what an app
+            # needs. The packaged app has no per-app venv and needs none,
+            # the interpreter it falls back to carries everything, and
+            # nothing in the sample is ever run, so there it is advice
+            # about a problem that cannot arise.
             "needs_setup": (_SAMPLE is None and _venv_python(d) is None
-                            and not _is_packaged()),
+                            and not _is_packaged() and not _runs_apps()),
         }
     return apps
 
@@ -3132,7 +3181,7 @@ function onApp() {
   for (const a of m.accounts) accSel.append(new Option(a, a));
   const warn = $('venvwarn');
   if (m.needs_setup) { warn.style.display='block';
-    warn.textContent = '⚠ No .venv in this app yet. Run setup.bat there first, or output may show import errors.'; }
+    warn.textContent = '⚠ This provider is not set up yet. Run setup-all in the PaperPull folder, then reload this page.'; }
   else warn.style.display='none';
 }
 function setStatus(cls, text) { $('dot').className = 'dot ' + cls; $('statustext').textContent = text; }

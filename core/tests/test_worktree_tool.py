@@ -146,6 +146,17 @@ def test_a_worktree_with_uncommitted_work_is_left_alone(world):
     assert tree.exists() and wt.is_link(tree / "gui" / ".venv")
 
 
+def test_a_checkout_whose_apps_have_no_environment_links_the_shared_one_alone(tmp_path):
+    """Since #65 setup-all builds gui/.venv and no app gets one, and a new
+    worktree links just that."""
+    (tmp_path / "gui" / ".venv").mkdir(parents=True)
+    (tmp_path / "apps" / "alpha").mkdir(parents=True)
+    (tmp_path / "apps" / "notes.txt").write_text("", encoding="utf-8")
+    assert wt.venvs_of(tmp_path) == [Path("gui") / ".venv"]
+    (tmp_path / "apps" / "alpha" / ".venv").mkdir()
+    assert wt.venvs_of(tmp_path) == [Path("gui") / ".venv", Path("apps") / "alpha" / ".venv"]
+
+
 def test_a_real_folder_is_never_unlinked(tmp_path):
     real = tmp_path / ".venv"
     real.mkdir()

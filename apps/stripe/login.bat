@@ -16,6 +16,26 @@ echo.
 echo READ-ONLY: this tool only downloads your invoice and tax form PDFs. It NEVER
 echo pays out, refunds, charges, creates anything, or changes any setting.
 echo.
-.venv\Scripts\python.exe stripe_docs.py --open-browser %CFG%
+rem This app's own Python when setup.bat made one. Otherwise, in a
+rem checkout, the one setup-all.bat made for every app in gui\.venv, once
+rem it holds what an app needs.
+set "PY=.venv\Scripts\python.exe"
+if exist "%PY%" goto run
+set "PY=..\..\gui\.venv\Scripts\python.exe"
+if not exist "%PY%" goto notsetup
+"%PY%" -c "import importlib.util as u, sys; sys.exit(not all(map(u.find_spec, ['paperpull_core', 'playwright', 'pypdf'])))" >nul 2>&1
+if not errorlevel 1 goto run
+:notsetup
+if exist "..\..\setup-all.bat" (
+  echo This app is not set up yet. Run setup-all.bat in the PaperPull folder first.
+) else (
+  echo This app is not set up yet - run setup.bat first.
+)
+echo.
+pause
+exit /b 1
+
+:run
+"%PY%" stripe_docs.py --open-browser %CFG%
 echo.
 pause

@@ -15,6 +15,26 @@ echo      tab and sign in there too. It is a separate sign-in.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN, do not close it.
 echo   4. Then run the pilot, paperpull apple pilot
 echo.
-.venv\Scripts\python.exe apple_receipts.py --open-browser %CFG%
+rem This app's own Python when setup.bat made one. Otherwise, in a
+rem checkout, the one setup-all.bat made for every app in gui\.venv, once
+rem it holds what an app needs.
+set "PY=.venv\Scripts\python.exe"
+if exist "%PY%" goto run
+set "PY=..\..\gui\.venv\Scripts\python.exe"
+if not exist "%PY%" goto notsetup
+"%PY%" -c "import importlib.util as u, sys; sys.exit(not all(map(u.find_spec, ['paperpull_core', 'playwright', 'pypdf'])))" >nul 2>&1
+if not errorlevel 1 goto run
+:notsetup
+if exist "..\..\setup-all.bat" (
+  echo This app is not set up yet. Run setup-all.bat in the PaperPull folder first.
+) else (
+  echo This app is not set up yet - run setup.bat first.
+)
+echo.
+pause
+exit /b 1
+
+:run
+"%PY%" apple_receipts.py --open-browser %CFG%
 echo.
 pause
