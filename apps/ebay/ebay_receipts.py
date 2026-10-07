@@ -23,6 +23,7 @@ from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import not_shown
 from paperpull_core import renaming
+from paperpull_core import saved_copy
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import report_run_result
@@ -844,6 +845,10 @@ class App:
         if extra:
             rec.update(extra)
         not_shown.let_go_on_save(self, purchase, state, rec)
+        # A receipt saved before keeps its record while a Download again
+        # saves no copy of its own (paperpull_core.saved_copy).
+        if saved_copy.holds(self, purchase.key, rec):
+            return
         self.progress.update(purchase.key, rec)  # atomic save on every update
         self.discovery.update(purchase.key, {"state": state.value})
 

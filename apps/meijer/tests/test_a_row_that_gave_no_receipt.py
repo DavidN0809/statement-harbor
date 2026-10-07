@@ -288,7 +288,8 @@ def test_a_receipt_saved_before_is_never_said_to_have_dropped_off(tmp_path, monk
     whose receipt was saved. Its row has gone from the list, which says
     nothing about the receipt saved, so the purchase is not written down as
     no longer listed and no rows go into the CSVs, and the rows it has stay
-    as they are (review)."""
+    as they are (review). Its record keeps the saved receipt's state, and
+    its notes say the attempt failed (paperpull_core.saved_copy)."""
     drops_off(monkeypatch)
     app = runs(_app(tmp_path))
     app.args.redownload = True
@@ -304,7 +305,8 @@ def test_a_receipt_saved_before_is_never_said_to_have_dropped_off(tmp_path, monk
 
     app.process_purchases([p])
     rec = app.progress.get(p.key)
-    assert rec["state"] == "Failed" and rec["downloaded_ok"] is True, rec
+    assert rec["state"] == "Completed" and rec["downloaded_ok"] is True, rec
+    assert "Failed" in rec["notes"], rec
     assert not rec.get(mr.UNLISTED_ROWS)
     assert (app.order_csv.read_all(), app.index_csv.read_all()) == before
     app.args.redownload = False

@@ -394,6 +394,28 @@ did not read.
   at most thirty times and no further once a press draws nothing new. A
   row counts only once its download icon is drawn, where one in the
   page's text that was not drawn used to count. Contributed by tylerverry.
+- **A receipt already saved keeps its record when Download again saves
+  nothing.** Download again takes every purchase in scope again, the ones
+  saved before included. In every receipt app, an attempt that ended with
+  no copy of its own rewrote the saved receipt's record, at a page that
+  would not open or was not the purchase's, with no receipt on the page, a
+  control it could not read or an error, or with a copy that failed its
+  check and was put aside in Manual Review. The record then named no file,
+  or the copy put aside, with the attempt's summary and a state of Needs
+  Manual Review, No Receipt Available or Failed, and after a wrong page
+  that page's own total and items. Nothing was fetched again because of
+  it. But the Pilot report listed the receipt as needing attention, the
+  File names page's preview showed the copy put aside or left the receipt
+  out, Rename named the saved file for the failed attempt, after a wrong
+  page for another purchase, and Review Names no longer took the record
+  for the saved file's. Apple's and Uber's next Discover also read the
+  purchase from the site again, as one not yet settled. Now an attempt
+  changes nothing in a saved receipt's record until it has saved a copy
+  of its own, and the record's notes say how it ended. Target also took
+  the saved mark off an order when a Download again could not save every
+  one of its invoices, so every later run walked it again. It now stays
+  saved, the invoices that attempt did save are remembered so none is
+  saved twice, and a Download again of the same dates fetches the rest.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never
