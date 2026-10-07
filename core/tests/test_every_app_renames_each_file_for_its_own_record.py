@@ -981,6 +981,255 @@ def test_an_id_a_later_listing_gives_never_moves_a_file_its_download_told_apart(
     assert sorted(p.name for p in home.files().values()) == before
 
 
+# A File names pattern naming each file for the provider's id.
+NUMBERED = "{date:yyyy-mm-dd} {provider} {summary} {number}"
+
+
+@pytest.mark.parametrize("home", RELISTS, ids=[d.name for d in RELISTS], indirect=True)
+def test_an_id_a_later_listing_gives_never_renames_a_file_named_for_its_id(home):
+    """Under a pattern with {number}, each file is named for the id its
+    record held when it was saved. A later listing that gives each document
+    another id writes those over the ones in discovery, and Rename read the
+    newer ones, so the Rename after that Discover offered to rename every
+    file. Schwab says its ids are not stable from one listing to the next."""
+    home.set_pattern(NUMBERED)
+    app = home.build()
+    lists = listing(app, relists_with_a_new_id(home.app))
+    pair = two_documents(home, with_ids=True)
+    for doc in pair:
+        assert lists(doc.to_dict()) == 1, "the app's own listing kept no record"
+    listed = [home.mod.Document.from_dict(app.discovery.get(doc.key)) for doc in pair]
+    for doc in listed:
+        assert doc.document_id in downloaded(app, doc).name
+    saved(app)
+
+    app = home.build()
+    lists = listing(app, relists_with_a_new_id(home.app))
+    for doc, new in zip(listed, ("DOC8888", "DOC9999")):
+        lists(dict(doc.to_dict(), document_id=new))
+        assert app.discovery.get(doc.key)["document_id"] == new, (
+            "the later listing wrote no new id, so this shows nothing")
+    saved(app)
+
+    before = sorted(p.name for p in home.files().values())
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
+    assert sorted(p.name for p in home.files().values()) == before
+
+
+@pytest.mark.parametrize("home", RELISTS, ids=[d.name for d in RELISTS], indirect=True)
+def test_a_summary_learned_later_reaches_the_file_while_its_id_stays_as_saved(home):
+    """Only which document a file holds is read as it was saved. A summary
+    discovery holds now, as an app writes one it has learned to read better
+    (Vanguard does on every listing), still names the file."""
+    home.set_pattern(NUMBERED)
+    app = home.build()
+    lists = listing(app, relists_with_a_new_id(home.app))
+    pair = two_documents(home, with_ids=True)
+    for doc in pair:
+        lists(doc.to_dict())
+    listed = [home.mod.Document.from_dict(app.discovery.get(doc.key)) for doc in pair]
+    for doc in listed:
+        downloaded(app, doc)
+    saved(app)
+
+    app = home.build()
+    lists = listing(app, relists_with_a_new_id(home.app))
+    for doc, new in zip(listed, ("DOC8888", "DOC9999")):
+        lists(dict(doc.to_dict(), document_id=new))
+        app.discovery.update(doc.key, {"summary": "Quarterly Statement"}, save=False)
+    saved(app)
+
+    said = home.rename("--apply")
+    assert RENAMED_BOTH in said, said[-1500:]
+    for doc in listed:
+        name = home.files()[body_of(doc.account)].name
+        assert "Quarterly Statement" in name and doc.document_id in name, (
+            "%s named the file of %s %r\n%s" % (home.app.name, doc.document_id, name,
+                                               said[-1500:]))
+
+
+@pytest.mark.parametrize("home", RELISTS, ids=[d.name for d in RELISTS], indirect=True)
+def test_a_file_saved_with_no_id_takes_none_a_later_listing_gives(home):
+    """A document listed with no id was saved under a name with none, and
+    its download told it apart by none. A later listing that gives it one
+    writes it into discovery, and an id that is not stable would rename the
+    file again after every Discover, so it keeps the name it was saved by."""
+    home.set_pattern(NUMBERED)
+    app = home.build()
+    lists = listing(app, relists_with_a_new_id(home.app))
+    pair = two_documents(home)
+    for doc in pair:
+        lists(doc.to_dict())
+    listed = [home.mod.Document.from_dict(app.discovery.get(doc.key)) for doc in pair]
+    for doc in listed:
+        assert not doc.document_id
+        downloaded(app, doc)
+    saved(app)
+
+    app = home.build()
+    lists = listing(app, relists_with_a_new_id(home.app))
+    for doc, new in zip(listed, ("DOC8888", "DOC9999")):
+        lists(dict(doc.to_dict(), document_id=new))
+        assert app.discovery.get(doc.key)["document_id"] == new, (
+            "the later listing wrote no id, so this shows nothing")
+    saved(app)
+
+    before = sorted(p.name for p in home.files().values())
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
+    assert sorted(p.name for p in home.files().values()) == before
+
+
+# -- a later listing, through Capital One's and Schwab's own Discover ---------------
+#
+# Each app's own Discover, Run and download run here. Only what the provider
+# answers is stood in, the list it gives and a PDF for an id. These two find
+# a document again by its place among those of one type, title, date and
+# account, since their ids are opaque (Schwab's README says not stable), and
+# a document's file holds whichever document stood in its place when it was
+# downloaded. Vanguard's code writes an id over the old one too, but its
+# listing hands the statement's id over as statement_id, which its record
+# never reads, so no Vanguard record holds an id to write over.
+
+PAGE = SimpleNamespace(url="about:blank")
+STATEMENT = "Monthly Statement"
+
+
+def pdf_of(document_id: str) -> bytes:
+    """A PDF that opens, with a page, carrying which document it is."""
+    import io
+
+    from pypdf import PdfWriter
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.add_metadata({"/Subject": "document %s" % document_id})
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue().ljust(4000, b" ")
+
+
+def whose(body: bytes) -> str:
+    """The id of the document whose PDF this is."""
+    return body.split(b"(document ", 1)[1].split(b")", 1)[0].decode()
+
+
+class CapitalOne:
+    """What Capital One answers, a bank account's statements of one day."""
+
+    def __init__(self, site, monkeypatch):
+        self.ids = []
+        monkeypatch.setattr(site, "ensure_documents", lambda page: True)
+        monkeypatch.setattr(site, "_fetch_json", self._json)
+        monkeypatch.setattr(site, "fetch_pdf",
+                            lambda page, doc_type, ref, rec: (200, pdf_of(rec["document_id"])))
+        self.site = site
+
+    def _json(self, page, url, headers, body=None):
+        listed = []
+        if url == self.site.API["search"]:
+            listed = [{"documentId": i, "documentType": self.site.TYPE_BANK_STATEMENT,
+                       "documentCategory": "STATEMENT", "documentName": STATEMENT,
+                       "documentDate": DATE, "description": "360 Checking...1111",
+                       "account": {"accountReferenceId": "REF1111"}} for i in self.ids]
+        return {"status": 200, "body": {"documents": listed}}
+
+
+class Schwab:
+    """What Schwab answers, a brokerage account's statements of one day."""
+
+    def __init__(self, site, monkeypatch):
+        self.ids = []
+        monkeypatch.setattr(site, "ensure_statements", lambda page: True)
+        monkeypatch.setattr(site, "_gateway_call", self._call)
+        monkeypatch.setattr(site, "fetch_pdf", lambda page, doc: (200, pdf_of(doc["documentId"])))
+        self.site = site
+
+    def _call(self, page, url, headers, post_body=None):
+        if url == self.site.API["accounts"]:
+            body = {"accountSelectorData": {"brokerageAccountList": {"brokerageAccounts": [
+                {"id": "11111111", "nickName": "Brokerage"}]}}}
+        else:
+            body = {"documents": [
+                {"documentId": i, "documentName": STATEMENT, "type": self.site.TYPE_STATEMENTS,
+                 "onDemandDocumentType": self.site.TYPE_STATEMENTS,
+                 "date": "%s/%s/%s" % (DATE[5:7], DATE[8:], DATE[:4]),
+                 "accountDisplayName": "1111-1111"} for i in self.ids]}
+        return {"status": 200, "body": body}
+
+
+PROVIDERS = {"capitalone": CapitalOne, "schwab": Schwab}
+LISTED = [REPO / "apps" / name for name in PROVIDERS]
+
+
+def test_capital_one_and_schwab_are_among_the_apps_writing_a_new_id_over_an_old_one():
+    assert set(LISTED) <= set(RELISTS), RELISTS
+
+
+def run_all(home: Home, answers, ids) -> dict:
+    """The app's own Discover and then its own downloads, while the provider
+    lists these ids in this order, and every file by whose PDF it holds."""
+    answers.ids = list(ids)
+    app = home.build()
+    app.page = lambda: PAGE
+    app._on_its_site = lambda: PAGE
+    app.check_session = lambda *_a, **_kw: None
+    app.cmd_discover(quiet=True)
+    app.process(app._select(limit=0))
+    saved(app)
+    return {whose(p.read_bytes()): p.name for p in home.out.rglob("*.pdf")}
+
+
+def ids_now(home: Home) -> dict:
+    """Each saved document's id as its download had it, with the one
+    discovery holds for it now."""
+    app = home.build()
+    return {rec["document_id"]: app.discovery.get(key)["document_id"]
+            for key, rec in app.progress.data.items() if isinstance(rec, dict)}
+
+
+@pytest.mark.parametrize("home", LISTED, ids=list(PROVIDERS), indirect=True)
+def test_a_later_listing_never_names_a_file_for_another_id(home, monkeypatch):
+    """Two statements of one day, one title and one account, each named for
+    the id it was saved under. Before each document was taken by its own id,
+    a listing in the other order wrote each record's id over with the other
+    statement's, and Rename offered to name each file for the statement it
+    does not hold. Such an archive is written here by hand, since a listing
+    no longer leaves one. Listed again with new ids, Rename offered to
+    rename every file. With ids that do not last, a third statement listed
+    beside the two is left for a person rather than taken, so the files are
+    still the two."""
+    answers = PROVIDERS[home.app.name](home.mod.site, monkeypatch)
+    home.set_pattern(NUMBERED)
+    files = run_all(home, answers, ["ST0001", "ST0002"])
+    assert sorted(files) == ["ST0001", "ST0002"]
+    for document_id, name in files.items():
+        assert document_id in name, name
+
+    app = home.build()
+    first, second = (key for key, rec in app.progress.data.items()
+                     if isinstance(rec, dict) and rec.get("document_id") in ("ST0001", "ST0002"))
+    swapped = {first: app.progress.data[second]["document_id"],
+               second: app.progress.data[first]["document_id"]}
+    for key, document_id in swapped.items():
+        app.discovery.update(key, {"document_id": document_id}, save=False)
+    app.discovery.save()
+    assert ids_now(home) == {"ST0001": "ST0002", "ST0002": "ST0001"}, (
+        "the archive written by hand holds no other id, so this shows nothing")
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
+
+    files = run_all(home, answers, ["ST0003", "ST0004", "ST0005"])
+    assert sorted(files) == ["ST0001", "ST0002"], files
+    for document_id, name in files.items():
+        assert document_id in name, name
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
+    said = home.rename("--apply")
+    assert {whose(p.read_bytes()): p.name for p in home.out.rglob("*.pdf")} == files, (
+        said[-1500:])
+
+
 # -- PayPal's business statements, told apart by their first days -------------------
 
 PAYPAL = REPO / "apps" / "paypal"

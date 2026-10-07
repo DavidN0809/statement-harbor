@@ -656,6 +656,12 @@ def told_apart_by(record) -> str:
     return str(record.get("document_id") or "")[-6:]
 
 
+# The fields that say which document a file holds, the ones a pattern's
+# {number} is made of. Rename reads them as they were written down when the
+# file was saved (run_for).
+_AS_SAVED = ("order_number", "document_id")
+
+
 def run_for(app, apply_changes: bool = False, say=print,
             told_apart: Optional[Callable[[dict], str]] = None,
             told_apart_before: Iterable[Callable[[dict], str]] = ()) -> Result:
@@ -676,6 +682,11 @@ def run_for(app, apply_changes: bool = False, say=print,
     its files apart by, so a file whose name only an earlier one can be
     read from, as the old copy Download again leaves, keeps its ending in
     the words of `told_apart` (_Known.told_apart_in_its_name).
+
+    Which document a file holds, its order number or the provider's id, is
+    read as it was written down when the file was saved, and so is what
+    tells it apart. An id a listing gives a document only after its file was
+    saved never reaches that file's name.
     """
     # Every app holds its index as self.index_csv, and a receipt app holds
     # the order history as self.order_csv as well. That is the same in all
@@ -720,6 +731,15 @@ def run_for(app, apply_changes: bool = False, say=print,
         record = current.record_for(row)
         if record is None:
             return ""          # whose file it is cannot be told, so it keeps its name
+        # Which document the file holds, as it was when the file was saved.
+        # Capital One and Schwab write the id a later listing gives over the
+        # one in discovery. Schwab says its ids are not stable from one
+        # listing to the next, so a {number} pattern could rename every file
+        # after a Discover, and two statements of one day, one title and one
+        # account take each other's ids when the list comes back in another
+        # order, so a file was named for the statement it does not hold.
+        saved = current.record_for(row, saved=True) or {}
+        record = dict(record, **{k: saved.get(k, "") for k in _AS_SAVED})
         summary = (record.get("summary") or "").strip() or _first(row, _SUMMARY_KEYS)
         return build_pdf_filename(_first(row, _DATE_KEYS), summary,
                                   _first(row, _TYPE_KEYS), part=_part_of(row),

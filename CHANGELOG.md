@@ -475,6 +475,21 @@ did not read.
   fit the folder's limit, where it is told apart by a number as before. It
   happened in the apps that tell a second statement apart by an id, and
   for PayPal's business statements, told apart by their first day.
+- **A File names pattern with {number} keeps a statement's file named for
+  the id it was saved under.** Capital One and Schwab write down the id
+  each new listing gives a statement they already know, and Rename named
+  the file for the newest one. Schwab says its ids are not stable from one
+  listing to the next, so under such a pattern a Rename after a Discover
+  could offer to rename every Schwab file, while the File names page's
+  preview showed the id as saved. And two statements of one day,
+  one title and one account are told apart by their place in the list, so
+  when the list came back in another order each took the other's id, and
+  Rename offered to name each file for the statement it does not hold.
+  Rename now reads which document a file holds, its order number or id,
+  from the record written when the file was saved, while a summary or an
+  account the app has learned to read since still reaches the name. A
+  statement downloaded today is named for the id today's listing gave it,
+  as before.
 - **Every receipt app's Resume reads the purchase list again after a run
   that stopped while reading it.** After a Discover, Pilot or Run All that
   stopped while it read the purchase list, at a sign-in, a check or a
