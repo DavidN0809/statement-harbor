@@ -107,10 +107,10 @@ def capture(browser, tmp_path, monkeypatch):
         out = tmp_path / "2026-06-30 Bill.pdf"
         staging = tmp_path / "downloads"
         staging.mkdir(exist_ok=True)
-        trace = []
-        page.result = {"trace": trace, "out": out,
+        trace, pressed = [], []
+        page.result = {"trace": trace, "out": out, "pressed": pressed,
                        "saved": site._catch_pdf(page, page.locator("#get"), "Download PDF", out,
-                                                trace, staging)}
+                                                trace, staging, pressed)}
         return page
 
     yield run
@@ -146,3 +146,10 @@ def test_a_menu_once_download_pdf_was_drawn_anew_is_not_pressed(capture):
     assert page.evaluate("window.presses") == 1
     assert page.evaluate("window.entryPresses") == 0, "a menu entry was pressed after the bill was drawn anew"
     assert _where(page.result["trace"]) == ["the pressed control left the page"]
+    assert site._LEFT_THE_PAGE in page.result["pressed"], \
+        "download_bill would go on to press the View/print PDF showing now"
+
+
+def test_a_bill_saved_from_the_menu_beside_download_pdf_is_not_marked_gone(capture):
+    page = capture(BESIDE)
+    assert site._LEFT_THE_PAGE not in page.result["pressed"]

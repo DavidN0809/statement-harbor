@@ -364,7 +364,7 @@ PUT_BY_THE_PRESS = {
         "(el) => { const u = document.createElement('ul'); const li = document.createElement('li');"
         " li.append(control('Download PDF', true)); u.append(li); el.after(u); }",
 }
-EACH_APP = ["a list drawn anew", "the dialog the press opened"]
+EACH_APP = ["a list drawn anew", "another row's panel", "the dialog the press opened"]
 
 WORDS = re.compile(r"^\s*(download\s+pdf|regular\s+pdf|itemized\s+pdf)\s*$", re.I)
 
@@ -540,6 +540,96 @@ def test_a_menu_beside_the_control_in_a_list_of_no_rows_is_taken(site):
                               "<div class='cards'>%s%s</div>" % (OWN_CARD, OTHER_CARD)))
     (step, text), trace = _pressed_then_chosen(page)
     assert text == "Download PDF" and trace[-1]["where"] == controls.BESIDE_THE_CONTROL, trace
+
+
+PRESSED = ("<button id='get' type='button'"
+           " onclick='const el = this; setTimeout(() => { window.then(el); window.done = true; }, 30);'"
+           ">Download statement</button>")
+OTHER_ROW = ("<div class='row'><span>May 31, 2026</span>"
+             " <button type='button'>Download statement</button></div>")
+
+# Rows built as web components, each keeping its own control in a shadow
+# root of its own, the way E*TRADE's documents table is built.
+SHADOW_ROW = """<x-row id='b'></x-row><script>
+customElements.define('x-row', class extends HTMLElement {
+  connectedCallback() {
+    if (this.shadowRoot) return;
+    const r = this.attachShadow({mode: 'open'});
+    r.innerHTML = '<span>May 31, 2026</span> <button type="button">Download statement</button><slot></slot>';
+  }
+});
+</script>"""
+SHADOW_PICKER = """<x-pick id='c'></x-pick><script>
+customElements.define('x-pick', class extends HTMLElement {
+  connectedCallback() {
+    if (this.shadowRoot) return;
+    const r = this.attachShadow({mode: 'open'});
+    r.innerHTML = '<div role="listbox" id="lb">Choose a period</div>';
+  }
+});
+</script>"""
+SHADOW_OWN = """<x-own id='a'></x-own><script>
+customElements.define('x-own', class extends HTMLElement {
+  connectedCallback() {
+    if (this.shadowRoot) return;
+    const r = this.attachShadow({mode: 'open'});
+    r.innerHTML = '<span>June 30, 2026</span> <span class="w"><button id="get" type="button">'
+      + 'Download statement</button></span>';
+    r.getElementById('get').addEventListener('click', function () {
+      const el = this;
+      setTimeout(() => { window.then(el); window.done = true; }, 30);
+    });
+  }
+});
+</script>"""
+
+
+@pytest.mark.parametrize("then, body, where", [
+    ("(el) => document.getElementById('b').append(control('Download PDF'))",
+     "<div class='rows'><div class='row'><span>June 30, 2026</span> %s</div>%s</div>"
+     % (PRESSED, SHADOW_ROW), controls.ELSEWHERE),
+    ("(el) => document.getElementById('c').shadowRoot.getElementById('lb')"
+     ".append(control('Download PDF'))",
+     "<div class='row'><span>June 30, 2026</span> %s</div>%s%s" % (PRESSED, OTHER_ROW, SHADOW_PICKER),
+     controls.ELSEWHERE),
+    ("(el) => document.getElementById('dc').append(control('Download PDF'))",
+     "<div class='row'><span>June 30, 2026</span> %s</div>%s<div role='dialog' id='dc'"
+     " style='display: contents'><p>Your session is active</p></div>" % (PRESSED, OTHER_ROW),
+     controls.ELSEWHERE),
+    ("(el) => { for (let i = 0; i < 7; i++) document.body.append(control('Download PDF'));"
+     " const d = document.createElement('div'); d.setAttribute('role', 'dialog');"
+     " d.append(control('Download PDF', true), control('Download PDF', true));"
+     " document.body.append(d); }",
+     "<div class='row'><span>June 30, 2026</span> %s</div>%s" % (PRESSED, OTHER_ROW),
+     controls.CROWDED),
+], ids=["another web component row", "a listbox already open in a shadow root",
+        "a dialog already open with no box of its own", "more of them than are read"])
+def test_what_the_page_already_held_is_read_wherever_it_is(site, then, body, where):
+    """Found by the review. Both reads stopped at shadow roots, so another
+    row's control there went uncounted and a listbox open there looked
+    opened by the press. A dialog already open with no box of its own read
+    as hidden, so it looked opened by the press too. And past the eighth
+    control of one name, one where the press put it could be all that was
+    read."""
+    page = site("(el) => {}")
+    page.set_content(CARDS % (then, body))
+    (step, text), trace = _pressed_then_chosen(page)
+    assert (step, text) == (None, ""), trace
+    assert trace[-1]["where"] == [where], trace
+
+
+@pytest.mark.parametrize("then", [
+    "(el) => el.after(control('Download PDF', true))",
+    "(el) => { const d = document.createElement('div'); d.setAttribute('role', 'dialog');"
+    " d.append(control('Download PDF', true)); el.getRootNode().append(d); }",
+], ids=["a menu beside it", "a dialog the press opened"])
+def test_a_control_put_by_a_press_inside_a_shadow_root_is_taken(site, then):
+    page = site("(el) => {}")
+    page.set_content(CARDS % (then, "<div class='rows'>%s%s</div>" % (SHADOW_OWN, OTHER_ROW)))
+    (step, text), trace = _pressed_then_chosen(page)
+    assert text == "Download PDF" and trace[-1]["where"] in controls.TIED, trace
+    step.click()
+    assert page.evaluate("window.rightPresses") == 1
 
 
 def test_a_page_with_nothing_else_to_press_is_not_beside_the_control(site):

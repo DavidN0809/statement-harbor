@@ -286,7 +286,9 @@ did not read.
   document is left for the next run, and download-attempt.json says where
   the control sat. AT&T's Regular PDF menu is still taken wherever AT&T
   draws it, since that was never recorded, but only while Download PDF is
-  on the page, and the trace now says where it sat.
+  on the page, and the trace now says where it sat. Once the Download PDF
+  pressed has left the page, AT&T presses nothing more for that bill,
+  where it used to press whatever View/print PDF was showing then.
 - **A run whose documents page would not open no longer finishes clean.**
   In twenty document apps, when Discover could not open the documents
   page, even after checking the session, it said so and returned. Pilot

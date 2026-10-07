@@ -458,9 +458,10 @@ def second_step(page, appeared: set, pattern: Pattern, is_safe_control, place,
     one's name. The first choice in that order that shows at all decides.
     When none of it sits where the press put it, nothing is picked, not
     even a lesser choice that does, since the page did something besides
-    the press. When more than one does, which document each is for cannot
-    be told, and nothing is picked either. `trace`, when given, gets a note
-    of where it sat, in fixed words only.
+    the press. When more than one does, or there are more of that name than
+    are read, which document each is for cannot be told, and nothing is
+    picked either. `trace`, when given, gets a note of where it sat, in
+    fixed words only.
     """
     if not getattr(appeared, "complete", True):
         log.info("a survey of the controls was not whole, so no second step is taken")
@@ -470,12 +471,14 @@ def second_step(page, appeared: set, pattern: Pattern, is_safe_control, place,
     for text in ranked:
         if not (pattern.match(text) and is_safe_control(text)):
             continue
-        shown = []
+        shown, crowded = [], False
         for role in ("button", "link", "menuitem"):
             try:
                 loc = page.get_by_role(role, name=re.compile(
                     "^" + escape_for_locator(text) + "$", re.I))
-                for i in range(min(loc.count(), 8)):
+                count = loc.count()
+                crowded = crowded or count > _READ_AT_MOST
+                for i in range(min(count, _READ_AT_MOST)):
                     if loc.nth(i).is_visible():
                         shown.append(loc.nth(i))
             except Exception:
@@ -483,22 +486,27 @@ def second_step(page, appeared: set, pattern: Pattern, is_safe_control, place,
         if not shown:
             continue
         found, tied = [], []
-        for candidate in shown:
+        for candidate in ([] if crowded else shown):
             element = element_of(candidate)
             word = where_it_sits(place, element)
             found.append(word)
             if word in TIED:
                 tied.append((element, word))
+            else:
+                _let_go(element, candidate)
         if len(tied) == 1:
             if trace is not None:
                 trace.append({"note": "the revealed control sits where the press put it",
                               "where": tied[0][1]})
             return tied[0][0], text
+        for element, _word in tied:
+            _let_go(element, None)
         log.info("a revealed control is not where the press put it, so no second step is taken")
         if trace is not None:
             trace.append({"note": "a revealed control is not where the press put it, "
                                   "so it was not pressed",
-                          "where": [SEVERAL] if tied else sorted(set(found))})
+                          "where": [CROWDED] if crowded else [SEVERAL] if tied
+                          else sorted(set(found))})
         return None, ""
     return None, ""
 
@@ -506,10 +514,22 @@ def second_step(page, appeared: set, pattern: Pattern, is_safe_control, place,
 # -- where a revealed control sits ---------------------------------------------
 #
 # What the press put on the page is told from what was already there by a
-# look taken just before it. Only handles into the page are kept, never a
-# word the page wrote, so nothing of the page leaves it, and the elements
-# are held weakly, so a list drawn anew is not kept alive by a run going
-# through hundreds of documents.
+# look taken just before it. Only a handle into the page is kept, never a
+# word the page wrote, so nothing of the page leaves it. The look holds the
+# elements weakly and every element handle used to read it is let go, so a
+# list drawn anew is not kept alive by a run going through hundreds of
+# documents.
+#
+# Both reads go into every open shadow root, since a list built of web
+# components (E*TRADE's documents table is one) keeps its rows' controls
+# there. A closed shadow root cannot be read by anything, and its controls
+# are not counted.
+#
+# Where a control sits cannot tell a dialog the press opened from one the
+# page opened at the same moment for another reason, a late notice from an
+# earlier document say, nor a row the page reused for another document
+# around the very control pressed. Only what the saved PDF says can tell
+# those apart (identity.py).
 
 # What a press opens over the page or beside its control, a dialog, a modal
 # region, a menu, a list of choices or a popover.
@@ -535,50 +555,83 @@ LEFT_THE_PAGE = "the pressed control left the page"
 LOADED_ANEW = "the page was loaded anew"
 NOT_READ = "it could not be read"
 SEVERAL = "more than one sits where the press put it"
+CROWDED = "more of them than are read"
 WHERE_WORDS = TIED | {ELSEWHERE, LEFT_THE_PAGE, LOADED_ANEW, NOT_READ}
 
-# Read just before the press. The containers already open then, and for
-# every element around the control, how many other things that can be
-# pressed it held. A control inside the pressed one, or around it, is the
-# pressed one.
-_PLACE_JS = r"""(el) => {
+# How many controls of one name and kind second_step reads. When there are
+# more, which of them sit where the press put it cannot be told, and none
+# is taken.
+_READ_AT_MOST = 8
+
+# What both reads share. An element's parent, from the top of a shadow root
+# to the element that holds it. Whether `a` holds `c` that way. Every
+# element a selector finds in the page and in every open shadow root in it.
+_TREE_JS = r"""
   const shown = (e) => typeof e.checkVisibility === 'function'
       ? e.checkVisibility({visibilityProperty: true, checkVisibilityCSS: true})
       : e.getClientRects().length > 0;
-  const others = [...document.querySelectorAll(%s)].filter(
-      (c) => c !== el && !el.contains(c) && !c.contains(el) && shown(c));
+  const up = (n) => {
+    const p = n.parentNode;
+    if (p && p.nodeType === 11 && p.host) return p.host;
+    return p && p.nodeType === 1 ? p : null;
+  };
+  const holds = (a, c) => {
+    for (let n = c; n; n = up(n)) if (n === a) return true;
+    return false;
+  };
+  const every = (sel) => {
+    const out = [];
+    const walk = (root) => {
+      out.push(...root.querySelectorAll(sel));
+      for (const e of root.querySelectorAll('*')) if (e.shadowRoot) walk(e.shadowRoot);
+    };
+    walk(document);
+    return out;
+  };
+"""
+
+# Read just before the press. Every container present then and whether it
+# showed, the control's own row, and for every element around the control
+# how many other things that can be pressed it held. A control inside the
+# pressed one, or around it, is the pressed one.
+_PLACE_JS = r"""(el) => {%s
+  const others = every(%s).filter(
+      (c) => c !== el && !holds(el, c) && !holds(c, el) && shown(c));
   const around = [];
-  for (let a = el.parentElement; a; a = a.parentElement) {
-    around.push({node: new WeakRef(a), held: others.filter((c) => a.contains(c)).length});
+  let row = null;
+  for (let a = up(el); a; a = up(a)) {
+    around.push({node: new WeakRef(a), held: others.filter((c) => holds(a, c)).length});
+    if (!row && a.matches(%s)) row = a;
   }
-  const opened = [...document.querySelectorAll(%s)].filter(shown).map((e) => new WeakRef(e));
-  return {el: new WeakRef(el), row: el.closest(%s) ? new WeakRef(el.closest(%s)) : null,
-          around, opened};
-}""" % (repr(PRESSABLE_CSS), repr(OPENED_CSS), repr(ROW_CSS), repr(ROW_CSS))
+  const before = every(%s).map((e) => ({node: new WeakRef(e), shown: shown(e)}));
+  return {el: new WeakRef(el), row: row ? new WeakRef(row) : null, around, before};
+}""" % (_TREE_JS, repr(PRESSABLE_CSS), repr(ROW_CSS), repr(OPENED_CSS))
 
 # Where the revealed control `step` sits, read once the press is over.
-#   In what the press opened, a dialog, menu or popover not open before the
-#   press.
+#   In what the press opened, a dialog, menu or popover that was not there
+#   before the press, or was there hidden and shows now.
 #   Beside the pressed control, inside the smallest element holding both,
 #   which held nothing else to press before the press, is neither the
 #   body nor the page, and is not wider than the pressed control's own row.
 # Either way the pressed control is still on the page.
-_WHERE_JS = r"""(step, place) => {
+_WHERE_JS = r"""(step, place) => {%s
   const el = place.el.deref();
   if (!el || !el.isConnected) return %s;
-  const opened = place.opened.map((r) => r.deref());
-  for (let a = step; a; a = a.parentElement) {
-    if (a.matches(%s) && !opened.includes(a)) return %s;
+  const before = place.before.map((x) => ({node: x.node.deref(), shown: x.shown}));
+  for (let a = step; a; a = up(a)) {
+    if (!a.matches(%s)) continue;
+    const was = before.find((x) => x.node === a);
+    if (!was || (!was.shown && shown(a))) return %s;
   }
-  let both = el.parentElement;
-  while (both && !both.contains(step)) both = both.parentElement;
+  let both = up(el);
+  while (both && !holds(both, step)) both = up(both);
   if (!both || both === document.body || both === document.documentElement) return %s;
   const row = place.row ? place.row.deref() : null;
-  if (row && !row.contains(both)) return %s;
+  if (row && !holds(row, both)) return %s;
   const was = place.around.find((x) => x.node.deref() === both);
   return was && was.held === 0 ? %s : %s;
-}""" % (repr(LEFT_THE_PAGE), repr(OPENED_CSS), repr(OPENED_BY_THE_PRESS), repr(ELSEWHERE),
-        repr(ELSEWHERE), repr(BESIDE_THE_CONTROL), repr(ELSEWHERE))
+}""" % (_TREE_JS, repr(LEFT_THE_PAGE), repr(OPENED_CSS), repr(OPENED_BY_THE_PRESS),
+        repr(ELSEWHERE), repr(ELSEWHERE), repr(BESIDE_THE_CONTROL), repr(ELSEWHERE))
 
 
 class Place:
@@ -597,6 +650,34 @@ class Place:
         except Exception as e:
             return LOADED_ANEW if "context" in str(e).lower() else NOT_READ
         return word if word in WHERE_WORDS else NOT_READ
+
+    def still_there(self) -> bool:
+        """Whether the control pressed is still on the page it was pressed
+        on. False when that cannot be told."""
+        try:
+            return self.handle.evaluate(
+                "(place) => { const el = place.el.deref(); return !!el && el.isConnected; }") is True
+        except Exception:
+            return False
+
+
+def pressed_still_there(place: Optional[Place]) -> bool:
+    """Whether the control pressed at `place` is still on the page it was
+    pressed on, for a caller about to press something else for the same
+    document. False when there is no place or it cannot be told."""
+    return place is not None and place.still_there()
+
+
+def _let_go(handle, found) -> None:
+    """Let go of an element handle element_of made from `found`, so the
+    element is not kept alive in the page for as long as the run lasts. A
+    handle that was handed in is the caller's own and is kept."""
+    if handle is None or handle is found:
+        return
+    try:
+        handle.dispose()
+    except Exception:
+        pass
 
 
 def element_of(found):
@@ -624,6 +705,8 @@ def place_of(page, el) -> Optional[Place]:
     except Exception as e:
         log.info("where the press is made could not be read (%s)", type(e).__name__)
         return None
+    finally:
+        _let_go(handle, el)
 
 
 def where_it_sits(place: Optional[Place], step) -> str:

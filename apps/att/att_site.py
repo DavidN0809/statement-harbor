@@ -1757,6 +1757,11 @@ def _menu_entry(page, pat, place, wait_ms: int = 4000, trace: Optional[list] = N
                     if where in _NOT_THIS_PRESS:
                         log.info("a menu entry is not on the page the press was made on, "
                                  "so it is not pressed")
+                        try:
+                            if entry is not el and entry is not None:
+                                entry.dispose()
+                        except Exception:
+                            pass
                         return None, ""
                     return entry, text
         except Exception:
@@ -2000,6 +2005,13 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         if _ask_again(page, empty_answers, out_path, is_safe_url, zip_ok=False):
             return True
         log.info("click on %r produced no PDF", label)
+        # The control pressed has left the page since, so the bill was drawn
+        # anew and a View/print PDF showing now may be another bill's.
+        # download_bill presses nothing more for this one.
+        if pressed is not None and not _controls.pressed_still_there(place):
+            if trace is not None:
+                trace.append({"note": "the control pressed left the page after its press"})
+            pressed.append(_LEFT_THE_PAGE)
         return False
     finally:
         made_here.stop()

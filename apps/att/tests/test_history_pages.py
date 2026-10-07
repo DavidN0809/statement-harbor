@@ -679,6 +679,28 @@ def test_a_view_print_pressed_through_the_page_that_raised_ends_the_bill(
     assert counts["view"] == 1
 
 
+# Download PDF's press goes through and gives nothing, and the bill list is
+# drawn anew with the newest bill open, its own View/print PDF beside it.
+_DRAWN_ANEW_AFTER_THE_PRESS = (
+    "download = function () { presses.download++; selected = 0; draw(); };")
+
+
+def test_a_download_pdf_gone_after_its_press_is_followed_by_no_other_press(
+        browser, tmp_path, monkeypatch):
+    """The press went through and the page then drew another bill. Its
+    View/print PDF was pressed next, inside the capture as a menu entry and
+    by download_bill as the fallback, and saved under this bill's name."""
+    bills = _bills(_newest_now(), 16)
+    presses = _presses_on_leaving(browser[0], monkeypatch)
+    ok, out, trace, page = _download(
+        browser, tmp_path, _history(bills, extra=_DRAWN_ANEW_AFTER_THE_PRESS), bills[1]["iso"])
+    assert not ok and not out.exists()
+    counts = presses or page.evaluate("window.presses")
+    assert counts["download"] == 1
+    assert counts["view"] == 0, "another bill's View/print PDF was pressed"
+    assert {"note": "the control pressed left the page after its press"} in trace
+
+
 def test_download_pdf_drawn_after_view_print_is_still_the_one_pressed(browser, tmp_path):
     """In real time, since what is tested is the wait."""
     bills = _bills(_newest_now(), 16)
