@@ -15,6 +15,12 @@ which the browser takes for the panel's own origin, so Sec-Fetch-Site
 says same-origin. The Host header is what tells that page apart, since it
 names the address the request was made to. Every request here carries
 one, as curl and every browser send it, unless a test says otherwise.
+
+A link opened from an email, a chat or a PDF carries no Origin and no
+Referer either, and its Host is the panel's own. Sec-Fetch-Site says none
+for it, as it does for an address typed into the bar, since the browser
+opened the address by itself. Only a page is opened that way, never the
+API, so the API refuses none.
 """
 import sys
 from pathlib import Path
@@ -57,9 +63,28 @@ def test_the_panels_own_page_is_allowed():
     assert allowed(sec_fetch_site="same-origin")
 
 
-def test_an_address_typed_into_the_bar_is_allowed():
-    """Sec-Fetch-Site: none is a navigation the person started."""
-    assert allowed(sec_fetch_site="none")
+def test_a_link_opened_from_outside_the_browser_is_refused():
+    """A Sec-Fetch-Site of none is the browser opening an address by
+    itself, for a link opened from an email, a chat or a PDF as for an
+    address typed into the bar. It used to be allowed, and /api/run is a
+    GET that starts a run, so such a link started that run. The panel's
+    own page asks for the API by script, which the browser marks
+    same-origin."""
+    assert not allowed(sec_fetch_site="none")
+    assert not allowed(sec_fetch_site="NONE")
+    assert not allowed(host="localhost:8799", sec_fetch_site="none")
+
+
+def test_the_refusal_of_such_a_link_says_what_asks_here():
+    """The one refusal a person meets by doing something ordinary, opening
+    an address of the API by hand, so it says why."""
+    with pytest.raises(fastapi.HTTPException) as refused:
+        app_module._same_origin_only(Req(host=HOST, sec_fetch_site="none"))
+    assert refused.value.status_code == 403
+    assert "own page" in refused.value.detail and "link" in refused.value.detail
+    with pytest.raises(fastapi.HTTPException) as refused:
+        app_module._same_origin_only(Req(host=HOST, sec_fetch_site="cross-site"))
+    assert refused.value.detail == "cross-origin request refused"
 
 
 def test_a_tool_that_sends_no_headers_at_all_is_allowed():
@@ -194,6 +219,17 @@ def test_on_the_server_an_empty_origin_is_refused_too(monkeypatch):
     assert not allowed(host="nas.local:8765", sec_fetch_site="same-origin", origin="")
     assert allowed(host="nas.local:8765", sec_fetch_site="same-origin",
                    origin="http://nas.local:8765")
+
+
+def test_on_the_server_a_link_opened_from_outside_the_browser_is_refused_too(monkeypatch):
+    """A browser opening an address by itself sends the server's session
+    cookie, SameSite=Strict and all, so the sign-in gate lets such a link
+    through. The server's sign-in, sign-out and Browser Screen connection
+    ask the same question as the API, and none of them is a page."""
+    monkeypatch.setenv("PAPERPULL_SERVER", "1")
+    assert not server_mode.same_origin({"host": "nas.local:8765", "sec-fetch-site": "none"})
+    assert server_mode.same_origin({"host": "nas.local:8765", "sec-fetch-site": "same-origin"})
+    assert not allowed(host="nas.local:8765", sec_fetch_site="none")
 
 
 # -- the endpoints this actually guards ----------------------------------------

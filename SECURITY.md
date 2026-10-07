@@ -77,7 +77,8 @@ The `.gitignore` already blocks all of the following. Do not override it.
   done downloading. The panel answers only a request its own page sent to
   `127.0.0.1` or `localhost`, so another website you have open cannot drive
   it, not even one that points a name of its own at your computer, and no
-  other site may show the panel inside a page of its own.
+  other site may show the panel inside a page of its own. A link opened
+  from an email, a chat or a PDF can open the panel, never start a run.
 - **Delete-safe.** A sticky `downloaded_ok` marker means deleting the PDFs after
   you import them elsewhere will not cause re-downloads.
 
