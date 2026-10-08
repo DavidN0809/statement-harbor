@@ -64,12 +64,16 @@ from pathlib import Path
 _CORE = Path(__file__).resolve().parents[1] / "core"
 if (_CORE / "paperpull_core").is_dir():
     sys.path.insert(0, str(_CORE))
-from paperpull_core.not_shown import asked_again  # noqa: E402
+from paperpull_core.not_shown import DAYS_KEY, asked_again  # noqa: E402
 
 SCHEMA = 1
 
 # The fields a skip decision actually reads. Everything else is history.
-SKIP_FIELDS = ("state", "downloaded_ok", "pdf_path", "discovered_at", "updated_at")
+# The days a receipt page showed nothing are read too, since a receipt they
+# set aside is final in Meijer only while its record holds them, and every
+# receipt app's skip line says why from them (paperpull_core.not_shown).
+SKIP_FIELDS = ("state", "downloaded_ok", "pdf_path", "discovered_at", "updated_at",
+               DAYS_KEY)
 
 # Read out of an install's own storage.py, the same way the status report does,
 # so an install is identified by what it IS rather than what its folder is
@@ -282,8 +286,16 @@ def _merge(target: dict, incoming: dict, old_root: str,
         if inc.get("downloaded_ok") and not cur.get("downloaded_ok"):
             cur["downloaded_ok"] = True
             changed = True
-        if cur.get("state") not in TERMINAL and _done(dict(inc, downloaded_ok=False)):
+        if ((cur.get("state") not in TERMINAL or asked_again(cur))
+                and _done(dict(inc, downloaded_ok=False))):
             cur["state"] = inc["state"]
+            # The state comes with what it was written with. A receipt set
+            # aside is final in Meijer only with its days, and a note an
+            # older version wrote here would have it asked for again.
+            if DAYS_KEY in inc:
+                cur[DAYS_KEY] = list(inc[DAYS_KEY] or [])
+            if asked_again(cur):
+                cur["notes"] = str(inc.get("notes") or "")
             changed = True
         if changed:
             cur["imported_at"] = datetime.now().isoformat(timespec="seconds")

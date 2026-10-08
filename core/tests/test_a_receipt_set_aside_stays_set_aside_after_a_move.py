@@ -1,0 +1,161 @@
+"""A receipt set aside stays set aside on another computer.
+
+A receipt whose page showed nothing on three separate days is set aside as
+No Receipt Available, and the record keeps those days (not_shown_days).
+Meijer holds the purchase final only while the record holds three days,
+since Meijer does not take No Receipt Available as final otherwise, and
+every receipt app's skip line says a purchase set aside was skipped for
+that, by the days too. tools/migrate.py --minimal carried only the fields
+it listed, which left the days out, so on the new computer Meijer asked
+for every receipt set aside again and the other apps said each one was
+"Already completed and PDF verified", the words a tester was told for a
+receipt never saved (#70). An import into an install that already knew
+the purchase took the state and left the days behind, the same way.
+
+These set a purchase aside with each receipt app's own downloader over an
+output folder on disk, three days of the core's tried_again, move the
+history with the tool and ask the app's own _already_done and the core's
+skip line on the new computer. Every name and number is invented.
+"""
+import importlib.util
+import json
+import shutil
+import sys
+import zipfile
+from pathlib import Path
+
+import pytest
+
+from paperpull_core import not_shown
+from paperpull_core.models import State
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+migrate = pytest.importorskip("migrate")
+
+# The census beside this file, for its stand-in run of each receipt app.
+_CENSUS = Path(__file__).with_name("test_every_receipt_app_asks_again_for_a_receipt_not_shown.py")
+_spec = importlib.util.spec_from_file_location("not_shown_census", _CENSUS)
+census = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(census)
+
+OTHERWISE = "  Already completed and PDF verified - skipping."
+SAID = "did not show on %d separate days" % not_shown.DAYS
+
+
+def install(root: Path, app: Path, records: dict = None) -> Path:
+    """An output folder the tool takes for an install of this app, its own
+    storage.py beside its progress.json."""
+    out = root / app.name
+    out.mkdir(parents=True, exist_ok=True)
+    shutil.copy(app / "storage.py", out / "storage.py")
+    if records is not None:
+        (out / "progress.json").write_text(json.dumps(records), encoding="utf-8")
+    return out
+
+
+def set_aside(mod, out: Path):
+    """The purchase's receipt page shows nothing on three separate days,
+    through the app's own _record_state."""
+    for day in range(1, not_shown.DAYS + 1):
+        tried(mod, out, day)
+    p = census.purchase()
+    rec = census.app_in(mod, out).progress.get(p.key)
+    assert not_shown.set_aside(rec), rec
+    return p
+
+
+def tried(mod, out: Path, day: int):
+    """One run on that day, whose receipt page shows nothing. A new run
+    reads the purchase afresh, as a run does from discovery."""
+    p = census.purchase()
+    inst = census.app_in(mod, out, day=day)
+    inst.discovery.update(p.key, p.to_dict())
+    not_shown.tried_again(inst, p, "The receipt page did not show the receipt")
+    return inst
+
+
+def asked_after_the_move(mod, new: Path, p):
+    inst = census.app_in(mod, new)
+    rec = inst.progress.get(p.key)
+    return bool(inst._already_done(p)), not_shown.skipped(rec, OTHERWISE), rec
+
+
+@pytest.mark.parametrize("minimal", [True, False], ids=["minimal", "whole"])
+@pytest.mark.parametrize("app", census.APPS, ids=census.IDS)
+def test_a_receipt_set_aside_is_not_asked_for_again_on_a_new_computer(app, minimal, tmp_path,
+                                                                       capsys):
+    mod = census.load(app)
+    p = set_aside(mod, install(tmp_path / "old", app))
+    archive = tmp_path / "history.ppz"
+    assert migrate.export(tmp_path / "old", archive, minimal=minimal) == 0
+
+    install(tmp_path / "new", app, {})
+    assert migrate.do_import(archive, tmp_path / "new", assume_yes=True) == 0
+    capsys.readouterr()
+
+    done, said, rec = asked_after_the_move(mod, tmp_path / "new" / app.name, p)
+    assert done, "%s asks again for a receipt set aside on the old computer, %r" % (app.name, rec)
+    assert SAID in said, (app.name, said, rec)
+
+
+@pytest.mark.parametrize("minimal", [True, False], ids=["minimal", "whole"])
+@pytest.mark.parametrize("app", census.APPS, ids=census.IDS)
+def test_an_import_into_an_install_that_tried_once_brings_the_days(app, minimal, tmp_path,
+                                                                    capsys):
+    """The new computer ran once before the history came across, and its
+    page showed nothing that day too. The import finishes the record as
+    the old computer did, days and all."""
+    mod = census.load(app)
+    p = set_aside(mod, install(tmp_path / "old", app))
+    archive = tmp_path / "history.ppz"
+    assert migrate.export(tmp_path / "old", archive, minimal=minimal) == 0
+
+    new = install(tmp_path / "new", app)
+    inst = tried(mod, new, 40)
+    assert inst.progress.get(p.key)["state"] == State.FAILED.value
+    assert migrate.do_import(archive, tmp_path / "new", assume_yes=True) == 0
+    capsys.readouterr()
+
+    done, said, rec = asked_after_the_move(mod, new, p)
+    assert rec["state"] == State.NO_RECEIPT_AVAILABLE.value, rec
+    assert done, "%s asks again for a receipt set aside on the old computer, %r" % (app.name, rec)
+    assert SAID in said, (app.name, said, rec)
+
+
+def test_the_minimal_export_carries_the_days_and_nothing_more_of_the_purchase(tmp_path):
+    """The days are dates the page showed nothing, and they travel. What
+    the purchase was, its order number, summary and total, still does not."""
+    app = next(a for a in census.APPS if a.name == "meijer")
+    mod = census.load(app)
+    p = set_aside(mod, install(tmp_path / "old", app))
+    archive = tmp_path / "history.ppz"
+    migrate.export(tmp_path / "old", archive, minimal=True)
+    with zipfile.ZipFile(archive) as z:
+        recs = json.loads(z.read("apps/meijer/progress.json").decode("utf-8"))
+    rec = recs[p.key]
+    assert len(rec[not_shown.DAYS_KEY]) == not_shown.DAYS, rec
+    blob = json.dumps(rec)
+    for revealing in (p.summary, p.total, "The receipt page did not show"):
+        assert revealing not in blob, (revealing, rec)
+
+
+def test_an_older_note_on_this_install_does_not_outlast_an_import_that_set_it_aside(tmp_path):
+    """This install recorded the purchase as 0.44.0 did, No Receipt
+    Available with words that have it asked for again. The old computer set
+    it aside. The import finishes it, and the old words go with the state
+    they were written with."""
+    app = next(a for a in census.APPS if a.name == "kroger")
+    mod = census.load(app)
+    p = set_aside(mod, install(tmp_path / "old", app))
+    archive = tmp_path / "history.ppz"
+    migrate.export(tmp_path / "old", archive, minimal=True)
+
+    gave_up = dict(p.to_dict(), state=State.NO_RECEIPT_AVAILABLE.value,
+                   notes="Kroger could not load this receipt")
+    new = install(tmp_path / "new", app, {p.key: gave_up})
+    assert not census.app_in(mod, new)._already_done(p), "asked for again before the import"
+    assert migrate.do_import(archive, tmp_path / "new", assume_yes=True) == 0
+
+    done, said, rec = asked_after_the_move(mod, new, p)
+    assert done, rec
+    assert SAID in said, (said, rec)

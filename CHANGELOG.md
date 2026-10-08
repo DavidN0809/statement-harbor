@@ -230,6 +230,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   among them. Each now presses nothing more, waits as long as ever for
   what the press brought, and otherwise leaves the document for another
   run.
+- **A receipt set aside stays set aside after moving to another
+  computer.** The history tool's `--minimal` export left out the days a
+  receipt page showed nothing, and an import into an install that already
+  knew the purchase left them behind with either export. On the new
+  computer Meijer then asked again for every receipt set aside, and the
+  other receipt apps said each one was already completed instead of why it
+  was skipped. Both now carry the days.
 
 ## [0.45.0] - 2026-10-07
 
