@@ -5,7 +5,7 @@ The release review of 0.45.0 found it. pressing.press_once stopped the run
 when Playwright's press did not go through because the control was not
 enabled, and pressing.click did the same. The apps that find a document's
 control by its role and its name find a turned off one too, since
-Playwright's get_by_role does, so a greyed out Download for one document
+Playwright's get_by_role does, so a grayed out Download for one document
 had Playwright wait eight seconds and then stopped the run there. Every
 later run stopped at that same document, and nothing after it was ever
 downloaded.

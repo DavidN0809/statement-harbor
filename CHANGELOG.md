@@ -237,6 +237,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   computer Meijer then asked again for every receipt set aside, and the
   other receipt apps said each one was already completed instead of why it
   was skipped. Both now carry the days.
+- **A document whose Download the site has turned off no longer stops
+  every run there.** Most apps find a document's Download by its role and
+  its name, which finds a grayed out one too. Playwright waited eight
+  seconds for it to turn on and the run stopped, and every later run
+  stopped at the same document, so nothing after it was downloaded. Now
+  such a control is not pressed, nothing is, and the document is marked
+  for review and tried again on the next run while the run goes on. That
+  holds in the sixteen apps that press a document's own control through
+  the core (American Express, American Family, ADP's View statement, Apple
+  Card, AT&T, E*TRADE, Golden 1, Nelnet, Newrez, PG&E, SBA, SMUD, State
+  Farm, Vanguard, Verizon Mobile and Wells Fargo). A turned off control
+  that something covers still stops the run, and so does one that is not
+  a document's own (a page picker, a section heading, a dialog's
+  Download). A control the page turns on within those eight seconds is
+  pressed as before, and Vanguard's download icon is waited for eight
+  seconds where its press is given ninety.
 
 ## [0.45.0] - 2026-10-07
 
