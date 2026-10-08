@@ -20,10 +20,16 @@ no record naming the saved file. Capital One and Schwab write the id each
 new listing gives a known document into discovery, so the attempt wrote
 that id over the one the file was saved under as well.
 
+Now each document app's _record asks paperpull_core.saved_copy first, as
+each receipt app's _record_state does. An attempt changes nothing in a
+saved document's record but its notes until it has saved a copy of its
+own, and the Pilot report of that run says how it ended.
+
 These drive each document app's own process and download_one with its
 site handing nothing over, and each way its own code ends an attempt with
 nothing saved through its own record and index writes, over an output
-folder on disk. Every name, number and file is invented.
+folder on disk, and its own Pilot report. Every name, number and file is
+invented.
 """
 import ast
 import importlib
@@ -35,7 +41,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from paperpull_core import renaming
+from paperpull_core import renaming, saved_copy
 from paperpull_core import storage as core_storage
 from paperpull_core.models import State
 
@@ -309,17 +315,18 @@ def file_name_for(home: Home, doc) -> str:
     return core_storage.build_pdf_filename(doc.date, doc.summary, "", record=doc)
 
 
-def saved_by_a_first_run(home: Home):
+def saved_by_a_first_run(home: Home, notes: str = ""):
     """The document as a first run leaves it, written by the app's own
     record and index writes in the order download_one writes them, with its
-    file where download_one saves it. Returns the file, its record and what
-    discovery says of it, and keeps its key on `home`."""
+    file where download_one saves it and `notes` of its own. Returns the
+    file, its record and what discovery says of it, and keeps its key on
+    `home`."""
     app = home.build()
     doc = a_listed_document(home, app)
     path = opening_pdf(where_its_download_saves(app, doc, file_name_for(home, doc)))
     record = getattr(app, home.record)
     doc.pdf_path, doc.pdf_filename = str(path), path.name
-    record(doc, State.PDF_SAVED)
+    record(doc, State.PDF_SAVED, notes=notes)
     doc.pdf_size, doc.pdf_pages = path.stat().st_size, 1
     doc.downloaded_ok = True
     record(doc, State.COMPLETED)
@@ -351,13 +358,17 @@ def rename_names_for(app, saved: Path) -> list:
 
 
 def the_saved_record_stands(home: Home, saved: Path, before: dict, found_before: dict, app,
-                            renames: bool = True):
+                            renames: bool = True, ended=None):
     key = home.key
     after = app.progress.get(key)
     changed = unchanged(before, after)
     assert not changed, ("%s: a Download again that saved nothing changed the saved "
                          "document's record %r" % (home.app.name, changed))
     assert after["downloaded_ok"] is True
+    notes = after.get("notes", "")
+    assert saved_copy.NOTE in notes, "the record does not say the attempt saved nothing"
+    if ended is not None:
+        assert ended.value in notes, "the record does not say how the attempt ended"
     assert (app.discovery.get(key) or {}).get("state") == found_before.get("state")
 
     plain = home.build()
@@ -538,7 +549,46 @@ def test_download_again_that_saves_nothing_keeps_the_saved_record(home, ending):
     doc = a_listed_document(home, app)
     assert app._already_done(doc) is False, "Download again takes a saved document again"
     ending(home, app, doc, saved)
-    the_saved_record_stands(home, saved, before, found_before, app)
+    the_saved_record_stands(home, saved, before, found_before, app,
+                            ended=State.NEEDS_MANUAL_REVIEW if ending.state == State.PDF_SAVED
+                            else ending.state)
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_the_notes_say_how_the_latest_attempt_ended(home):
+    """Two Download agains that each saved nothing, one run after the
+    other. The saved copy's own notes stay, and one entry says how the
+    latest attempt ended."""
+    saved, before, _found = saved_by_a_first_run(home, notes="Invented note of the save")
+    assert before["notes"] == "Invented note of the save"
+    for ending in (would_not_capture, an_error_partway):
+        app = home.build(redownload=True)
+        ending(home, app, a_listed_document(home, app), saved)
+    notes = home.build().progress.get(home.key)["notes"]
+    assert notes.startswith(before["notes"] + "; "), notes
+    assert notes.count(saved_copy.NOTE) == 1, notes
+    assert State.FAILED.value in notes and "Could not capture" not in notes, notes
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_the_pilot_report_says_a_download_again_saved_nothing(home, capsys):
+    """The record keeps the saved copy, so its state says nothing of the
+    attempt. The Pilot report of that run names the attempt among what
+    needs attention, and a later run's report, which did not try it, does
+    not."""
+    saved, before, _found = saved_by_a_first_run(home)
+    app = home.build(redownload=True)
+    doc = a_listed_document(home, app)
+    put_aside_beside_the_saved_copy(home, app, doc, saved)
+    capsys.readouterr()
+    app._pilot_report([doc])
+    said = capsys.readouterr().out
+    assert "Needs attention" in said, said
+    assert saved_copy.NOTE in said.split("Needs attention")[-1], said
+
+    app = home.build()
+    app._pilot_report([a_listed_document(home, app)])
+    assert saved_copy.NOTE not in capsys.readouterr().out
 
 
 # -- an attempt that does save still takes the record --------------------------------

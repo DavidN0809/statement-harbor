@@ -87,6 +87,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
   now stays saved, the invoices that attempt did save are remembered so
   none is saved twice, and a Download again of the same dates fetches the
   rest.
+- **A document already saved keeps its record when Download again saves
+  nothing.** Download again takes every document in scope again, the ones
+  saved before included. In every document app, an attempt that ended with
+  no copy of its own, at a site that would not hand the document over, an
+  error, a session that ran out or a copy that failed its check and was
+  put aside in Manual Review, wrote the document as its listing gives it
+  over the saved document's record. The record then named no file, or the
+  copy put aside, with the attempt's state, and no longer said the
+  document had been downloaded. So the next plain run fetched it again and
+  saved a second copy beside the first, or brought back one deleted after
+  importing it elsewhere. Where Dominion found a bill no longer online or
+  Wealthfront found no download control, the record said the saved
+  document had none. Capital One and Schwab also wrote the id a later
+  listing gave over the one the file was saved under. Now an attempt
+  changes nothing in a saved document's record until it has saved a copy
+  of its own, as with receipts. The record's notes say how it ended and
+  that only another Download again tries it, and the Pilot report of that
+  run lists it among what needs attention.
 
 ### Security
 - **M&T presses a year heading only when nothing covers it, and once.**

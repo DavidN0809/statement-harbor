@@ -1,5 +1,5 @@
-"""The record of a receipt already saved, and a Download again that saves
-no copy of its own.
+"""The record of a receipt or a document already saved, and a Download
+again that saves no copy of its own.
 
 A receipt app saves a purchase once for good. Its record in progress.json
 then carries downloaded_ok and names the saved file, with the summary, the
@@ -25,6 +25,16 @@ attempt's writes take the record as they always did, since it now names
 the attempt's own copy. downloaded_ok is never taken away here, so a
 purchase saved once is still never fetched again by a plain run, and only
 another Download again tries it.
+
+A document app is the same. Its one _record wrote the whole document as
+discovery lists it, which names no file and was never downloaded, so an
+attempt that saved nothing also took downloaded_ok off a saved document
+and the next plain run fetched it again, a copy the person may have
+deleted on purpose after importing it elsewhere. Capital One and Schwab
+write the id a later listing gives a known document into discovery, so
+the attempt wrote that id over the one the file was saved under as well.
+holds() stands between each document app's _record and the record in the
+same way, and a purchase here is a document there.
 
 holding() is the same question for a write an app makes outside
 _record_state, Kroger's store in the purchase list and Walmart's date read

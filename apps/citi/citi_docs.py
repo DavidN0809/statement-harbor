@@ -29,6 +29,7 @@ from __future__ import annotations
 from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import renaming
+from paperpull_core import saved_copy
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
@@ -621,7 +622,12 @@ class App:
         doc.state = state.value
         if notes:
             doc.notes = (doc.notes + "; " if doc.notes else "") + notes
-        self.progress.update(doc.key, doc.to_dict())
+        rec = doc.to_dict()
+        # A document saved before keeps its record while a Download again
+        # saves no copy of its own (paperpull_core.saved_copy).
+        if saved_copy.holds(self, doc.key, rec):
+            return
+        self.progress.update(doc.key, rec)
         self.discovery.update(doc.key, {"state": state.value})
 
     def _write_row(self, doc: Document, status: str, processing: str):
@@ -672,6 +678,10 @@ class App:
             print(f"    State:  {state}   [{rec.get('confidence', '')}]")
             print(f"    PDF:    {rec.get('pdf_filename', '(none)')}"
                   f"  ({rec.get('pdf_size', '?')} bytes, {rec.get('pdf_pages', '?')} pages)")
+            # A Download again that saved nothing kept the saved copy's
+            # record as it was, so it is said here (paperpull_core.saved_copy).
+            if saved_copy.tried(self, d.key):
+                problems.append(f"{d.key}: {saved_copy.tried(self, d.key)}")
             if state != State.COMPLETED.value:
                 problems.append(f"{d.key}: {state} - {rec.get('notes', '')}")
         print("\n" + "-" * 70)
