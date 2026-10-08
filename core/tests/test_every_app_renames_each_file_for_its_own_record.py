@@ -941,7 +941,10 @@ def listing(app, name: str):
     """The app's own method that writes down a document its list gives it,
     taking a listed document's fields as a dict."""
     method = getattr(app, name)
-    others = [set()] * (len(inspect.signature(method).parameters) - 1)
+    # Only what the method has no default for, so one telling whether the
+    # listing surely named the document keeps its own answer.
+    others = [set() for p in list(inspect.signature(method).parameters.values())[1:]
+              if p.default is p.empty]
     return lambda fields: method(dict(fields), *others)
 
 

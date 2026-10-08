@@ -67,7 +67,8 @@ class Provider:
 
     With `lasting` False the provider hands each document a new id in each
     session (`new_session`), and an id from an earlier session is refused,
-    the way Schwab's README says its ids are not stable."""
+    the way Schwab's README says its ids are not stable. With `per_call`
+    too, each list it gives hands out new ids and refuses the ones before."""
 
     def __init__(self):
         self.ids = []
@@ -76,19 +77,30 @@ class Provider:
         self.asked = []
         self.days = {}
         self.lasting = True
+        self.per_call = False
         self.session = 1
+        self.call = 0
+        self.then = None
 
     def new_session(self):
         self.session += 1
 
     def id_of(self, document: str) -> str:
-        return document if self.lasting else "%sV%d" % (document, self.session)
+        if self.lasting:
+            return document
+        return "%sV%d" % (document, self.call if self.per_call else self.session)
 
     def day_of(self, document: str) -> str:
         return self.days.get(document, DATE)
 
     def listed(self):
-        return [(self.id_of(document), self.day_of(document)) for document in self.ids]
+        if self.per_call:
+            self.call += 1
+        listed = [(self.id_of(document), self.day_of(document)) for document in self.ids]
+        if self.then is not None:
+            # What every list after this one gives.
+            self.ids, self.then = self.then, None
+        return listed
 
     def pdf(self, document_id: str):
         self.asked.append(document_id)
@@ -148,15 +160,53 @@ class Schwab(Provider):
         return {"status": 200, "body": body}
 
 
-PROVIDERS = {"capitalone": CapitalOne, "schwab": Schwab}
-APPS = [REPO / "apps" / name for name in PROVIDERS]
+class CapitalOneQuarterly(Provider):
+    """A card account's quarterly statements of one day, which Capital One
+    lists through its enterprise search for each card its first list names,
+    and fetches by dataset."""
+
+    CARD = "CARD0001"
+
+    def __init__(self, site, monkeypatch):
+        super().__init__()
+        self.site = site
+        monkeypatch.setattr(site, "ensure_documents", lambda page: True)
+        monkeypatch.setattr(site, "_fetch_json", self._json)
+        monkeypatch.setattr(site, "fetch_pdf", self._pdf)
+
+    def _pdf(self, page, doc_type, ref, rec):
+        if doc_type == self.site.TYPE_CARD_STATEMENT:
+            return 200, pdf_of(self.CARD)
+        assert doc_type == self.site.TYPE_CARD_QUARTERLY and rec["dataset_id"] == "DS1", rec
+        return self.pdf(rec["document_id"])
+
+    def _json(self, page, url, headers, body=None):
+        listed = []
+        if url == self.site.API["search"]:
+            listed = [{"documentId": self.CARD, "documentType": self.site.TYPE_CARD_STATEMENT,
+                       "documentCategory": "STATEMENT", "documentName": "Card Statement",
+                       "documentDate": "2026-07-15", "description": "Savor...1234",
+                       "account": {"accountReferenceId": "REF1234"}}]
+        elif (url == self.site.API["ease_search"]
+              and body["datasetAlias"] == ["QUARTER_ENDING_STATEMENT_v1"]):
+            listed = [{"documentId": i, "datasetId": "DS1", "documentMetadata": [
+                {"itemName": "documentDate", "itemValue": day},
+                {"itemName": "documentType", "itemValue": "Card Quarterly Statement"}]}
+                for i, day in self.listed()]
+        return {"status": 200, "body": {"documents": listed}}
+
+
+PROVIDERS = {"capitalone": CapitalOne, "capitalone-quarterly": CapitalOneQuarterly,
+             "schwab": Schwab}
+APPS = list(PROVIDERS)
 
 
 class Home:
     """One app with a made-up config and output folder, run through its own
     main, and what the provider answers it."""
 
-    def __init__(self, app: Path, tmp_path: Path, monkeypatch, capsys):
+    def __init__(self, which: str, tmp_path: Path, monkeypatch, capsys):
+        app = REPO / "apps" / which.split("-")[0]
         for name in ("_SPEC", "_FILENAME_PATTERN", "_PATTERN_OWNER", "_FILENAME_OWNER"):
             monkeypatch.setattr(core_storage, name, getattr(core_storage, name))
         self.app = app
@@ -175,7 +225,7 @@ class Home:
         monkeypatch.setattr(self.mod.App, "_on_its_site", lambda app: PAGE)
         monkeypatch.setattr(self.mod.App, "check_session", lambda app, *_a, **_kw: None)
         monkeypatch.setattr("time.sleep", lambda *_a, **_kw: None)
-        self.provider = PROVIDERS[app.name](self.mod.site, monkeypatch)
+        self.provider = PROVIDERS[which](self.mod.site, monkeypatch)
 
     def run(self, *flags) -> str:
         """The app's own main, as the panel starts it, and what it said."""
@@ -188,14 +238,18 @@ class Home:
 
     def on_disk(self) -> list:
         """Whose PDF each file under the output folder holds."""
-        return sorted(whose(p.read_bytes()) for p in self.out.rglob("*.pdf"))
+        return sorted(document for document in (whose(p.read_bytes())
+                                                for p in self.out.rglob("*.pdf"))
+                      if document != CapitalOneQuarterly.CARD)
 
     def held(self) -> dict:
         """Whose PDF each saved record's file holds, by key."""
         progress = json.loads((self.out / "progress.json").read_text(encoding="utf-8"))
-        return {key: whose(Path(rec["pdf_path"]).read_bytes())
+        held = {key: whose(Path(rec["pdf_path"]).read_bytes())
                 for key, rec in sorted(progress.items())
                 if isinstance(rec, dict) and rec.get("downloaded_ok")}
+        return {key: document for key, document in held.items()
+                if document != CapitalOneQuarterly.CARD}
 
     def left_for_a_person(self) -> dict:
         """The notes of every record marked for manual review, by key."""
@@ -209,7 +263,7 @@ def home(request, tmp_path, monkeypatch, capsys):
     return Home(request.param, tmp_path, monkeypatch, capsys)
 
 
-each_app = pytest.mark.parametrize("home", APPS, ids=list(PROVIDERS), indirect=True)
+each_app = pytest.mark.parametrize("home", APPS, indirect=True)
 
 
 @each_app
@@ -318,7 +372,8 @@ def test_an_archive_whose_ids_a_listing_swapped_takes_neither_document_twice(hom
     home.run_all()
     found = home.out / "discovery.json"
     discovery = json.loads(found.read_text(encoding="utf-8"))
-    first, second = sorted(discovery)
+    first, second = sorted(key for key, rec in discovery.items()
+                           if rec["document_id"] != CapitalOneQuarterly.CARD)
     discovery[first]["document_id"], discovery[second]["document_id"] = "ST0002", "ST0001"
     found.write_text(json.dumps(discovery), encoding="utf-8")
 
@@ -367,7 +422,8 @@ def test_a_document_alone_on_its_day_is_taken_once_when_its_id_did_not_last(home
     home.run("--resume")
     assert home.on_disk() == ["ST0001"]
     progress = json.loads((home.out / "progress.json").read_text(encoding="utf-8"))
-    assert [rec["document_id"] for rec in progress.values()] == [
+    assert [rec["document_id"] for rec in progress.values()
+            if rec["document_id"] != CapitalOneQuarterly.CARD] == [
         home.provider.id_of("ST0001")], "the record keeps an id it was not saved under"
     home.provider.new_session()
     home.run_all()
@@ -426,6 +482,58 @@ def test_resume_leaves_a_document_for_a_person_when_ids_do_not_last(home):
     assert home.on_disk() == ["ST0001"]
     left = home.left_for_a_person()
     assert len(left) == 1 and NOT_TOLD in next(iter(left.values())), left
+
+
+@each_app
+def test_a_second_run_in_one_session_takes_nothing_again_when_ids_do_not_last(home):
+    """Run pressed twice in one session. The first run gave the statement
+    saved last session this session's id, and the second must know it by
+    that id, though it was saved under the old one."""
+    home.provider.lasting = False
+    home.provider.days = {"ST0009": "2026-08-12"}
+    home.provider.ids = ["ST0001"]
+    home.run_all()
+
+    home.provider.new_session()
+    home.provider.ids = ["ST0001", "ST0009"]
+    home.run_all()
+    home.run_all()
+    assert home.on_disk() == ["ST0001", "ST0009"], home.held()
+    home.provider.new_session()
+    home.run_all()
+    home.run_all()
+    assert home.on_disk() == ["ST0001", "ST0009"], home.held()
+
+
+@each_app
+def test_two_documents_are_each_taken_once_when_each_list_gives_new_ids(home):
+    """Ids that change on every list the provider gives, and an id from an
+    earlier list refused. Two alike, listed for the first time, were taken
+    by their place within the run, and still are."""
+    home.provider.lasting = False
+    home.provider.per_call = True
+    home.provider.days = {"ST0009": "2026-08-12"}
+    home.provider.ids = ["ST0001", "ST0002", "ST0009"]
+    home.run_all()
+    assert home.on_disk() == ["ST0001", "ST0002", "ST0009"], home.held()
+    assert home.left_for_a_person() == {}
+    home.run_all()
+    assert home.on_disk() == ["ST0001", "ST0002", "ST0009"], home.held()
+
+
+@each_app
+def test_a_place_is_never_gone_by_once_the_list_changed_within_the_run(home):
+    """Ids that change on every list. The run's own list gave two alike, and
+    by the time of the downloads a third alike stands ahead of them, so
+    neither place still names the document it named."""
+    home.provider.lasting = False
+    home.provider.per_call = True
+    home.provider.ids = ["ST0001", "ST0002"]
+    home.provider.then = ["ST0003", "ST0001", "ST0002"]
+    home.run_all()
+    assert home.on_disk() == [], home.held()
+    left = home.left_for_a_person()
+    assert len(left) == 2 and all(NOT_TOLD in why for why in left.values()), left
 
 
 @each_app

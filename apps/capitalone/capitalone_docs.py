@@ -26,6 +26,7 @@ import capitalone_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import told_apart as _told_apart
+from paperpull_core.keys import places as _places
 from paperpull_core.keys import twins as _twins
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
 from paperpull_core.words import shape, shape_tree, words_for, write_shaped
@@ -375,6 +376,11 @@ class App:
             # its id is kept for no record, and a new record has none to
             # download by (paperpull_core.keys.told_apart).
             doc.document_id = doc.dataset_id = ""
+        if sure and d.get("place") and isinstance(getattr(self, "_placed", None), dict):
+            # Where this run's own list put it among documents alike, which a
+            # download in this same run may go by when the provider's ids
+            # change with every list it gives (site.download_document).
+            self._placed[doc.key] = tuple(d["place"])
         existing = self.discovery.get(doc.key)
         if existing is None:
             rec = doc.to_dict()
@@ -419,10 +425,14 @@ class App:
         # with the document it was given to, found by the id it was saved
         # under before its place, and a row that cannot be told apart from
         # one saved is not taken for it (paperpull_core.keys.told_apart).
-        for d, (occ, sure) in zip(raw, _told_apart(
-                raw, self.discovery.data, fields=("doc_type", "title", "date"),
-                kind_field="doc_type", saved=self.progress.data)):
+        self._placed = {}
+        alike = ("doc_type", "title", "date")
+        for d, (occ, sure), place in zip(raw, _told_apart(
+                raw, self.discovery.data, fields=alike,
+                kind_field="doc_type", saved=self.progress.data),
+                _places(raw, fields=alike)):
             d["occurrence"] = occ
+            d["place"] = place
             n_new += self._record_c1_doc(d, sure)
 
         self.discovery.save()
@@ -555,7 +565,8 @@ class App:
         taken, why = site.download_document(page, doc.doc_type, doc.title, doc.date,
                                             doc.account_desc, doc.account_ref, out_path,
                                             document_id=doc.document_id,
-                                            dataset_id=doc.dataset_id, alone=alone)
+                                            dataset_id=doc.dataset_id, alone=alone,
+                                            place=getattr(self, "_placed", {}).get(doc.key))
         if not taken and why:
             # Refused rather than guessed, so nothing is saved twice and no
             # document is marked done while another is never taken.

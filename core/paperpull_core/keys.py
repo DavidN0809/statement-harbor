@@ -169,6 +169,21 @@ def _numbered(rows, existing, fields, taken):
     return out
 
 
+def places(rows, fields=("title", "date")):
+    """Each row's place among the rows of this one list that are what it
+    is, with how many those are, as (place, count)."""
+    whats = [_what_it_is(row, fields) for row in rows]
+    count = {}
+    for what in whats:
+        count[what] = count.get(what, 0) + 1
+    seen = {}
+    out = []
+    for what in whats:
+        out.append((seen.get(what, 0), count[what]))
+        seen[what] = seen.get(what, 0) + 1
+    return out
+
+
 def twins(record, existing, fields=("title", "date")) -> int:
     """How many known records are what this one is, itself included, so one
     when nothing known is alike."""
@@ -189,9 +204,9 @@ def told_apart(rows, existing=None, fields=("title", "date"), id_field="document
     the new one and taken twice, and the new one never.
 
     So a row the provider lists under the id a record keeps takes that
-    record's number. The id a record keeps is the one it was saved under,
-    from `saved` (the app's progress) when it was saved, else the one in
-    `existing` (discovery). When ids come back for a kind of document
+    record's number. A record answers first to the id it was saved under,
+    from `saved` (the app's progress), and then to the one in `existing`
+    (discovery), which a listing that surely named it wrote. When ids come back for a kind of document
     (`kind_field`), a row no record answers to is a new document. It takes
     the number of a record alike that was never saved, or else a number no
     record alike holds.
@@ -213,9 +228,10 @@ def told_apart(rows, existing=None, fields=("title", "date"), id_field="document
         record = saved.get(key)
         return isinstance(record, dict) and bool(record.get("downloaded_ok"))
 
-    def id_of(key):
-        if is_saved(key) and _tidy(saved[key].get(id_field)):
-            return _tidy(saved[key].get(id_field))
+    def saved_id(key):
+        return _tidy(saved[key].get(id_field)) if is_saved(key) else ""
+
+    def listed_id(key):
         return _tidy(records[key].get(id_field))
 
     def kind_of(row):
@@ -224,28 +240,28 @@ def told_apart(rows, existing=None, fields=("title", "date"), id_field="document
     alike = {}
     for key, record in records.items():
         alike.setdefault(_what_it_is(record, fields), []).append(key)
-    for keys in alike.values():
-        # A saved record is offered its id first, so an id a record not yet
-        # saved holds from before never takes the saved one's document.
-        keys.sort(key=lambda key: not is_saved(key))
 
     out = [None] * len(rows)
     taken = {}
     matched = set()
-    for i, row in enumerate(rows):
-        ident = _tidy(row.get(id_field))
-        if not ident:
-            continue
-        group = _group_of(row, fields)
-        for key in alike.get(_what_it_is(row, fields), ()):
-            occurrence = records[key].get("occurrence", 0) or 0
-            if (key in matched or id_of(key) != ident
-                    or occurrence in taken.setdefault(group, set())):
+    # The id a record was saved under first, then the one a listing that
+    # surely named it gave it, which is the one this session knows it by
+    # when the provider's ids change from one session to the next.
+    for id_of in (saved_id, listed_id):
+        for i, row in enumerate(rows):
+            ident = _tidy(row.get(id_field))
+            if out[i] is not None or not ident:
                 continue
-            taken[group].add(occurrence)
-            matched.add(key)
-            out[i] = occurrence
-            break
+            group = _group_of(row, fields)
+            for key in alike.get(_what_it_is(row, fields), ()):
+                occurrence = records[key].get("occurrence", 0) or 0
+                if (key in matched or id_of(key) != ident
+                        or occurrence in taken.setdefault(group, set())):
+                    continue
+                taken[group].add(occurrence)
+                matched.add(key)
+                out[i] = occurrence
+                break
     lasting = {kind_of(rows[i]) for i in range(len(rows)) if out[i] is not None}
 
     rest = [i for i in range(len(rows)) if out[i] is None]

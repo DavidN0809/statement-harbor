@@ -597,7 +597,8 @@ def fetch_pdf(page, doc: dict) -> Tuple[int, bytes]:
 def download_document(page, account_id: str, charitable: bool, doc_type: str,
                       title: str, date: str, out_path: Path,
                       document_id: str = "", on_demand_type: str = "",
-                      alone: bool = False) -> Tuple[str, str]:
+                      alone: bool = False,
+                      place: Optional[Tuple[int, int]] = None) -> Tuple[str, str]:
     """Save the document whose record keeps `document_id` to out_path.
 
     Answers the id of the document saved, and "" with why when none was.
@@ -606,7 +607,10 @@ def download_document(page, account_id: str, charitable: bool, doc_type: str,
     document is never taken by its place among documents alike, since a
     list in another order puts another one there. Only when the app knows
     no other document alike (`alone`) and the list gives exactly one is
-    that one taken, the case of an id that did not last."""
+    that one taken, the case of an id that did not last. Last, within the
+    run whose own list surely numbered it, its place in a list of as many
+    alike (`place`, as (place, count)), for ids that change with every
+    list."""
     alike = listed_alike(page, account_id, charitable, doc_type, title, date)
     own = [doc for doc in alike
            if document_id and (doc.get("documentId") or "") == document_id]
@@ -618,6 +622,9 @@ def download_document(page, account_id: str, charitable: bool, doc_type: str,
                       "onDemandDocumentType": on_demand_type, "type": doc_type})
     if not own and alone and len(alike) == 1:
         tries.append(alike[0])
+    if (not own and place and len(alike) == place[1]
+            and alike[place[0]] not in tries):
+        tries.append(alike[place[0]])
     for doc in tries:
         status, data = fetch_pdf(page, doc)
         if status == 200 and _write_if_pdf(data, out_path):
