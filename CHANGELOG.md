@@ -171,6 +171,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   element or one the page draws anew with the same id and words. The
   heading is gone from the reviewed list of presses made through a page
   script, where two links PG&E makes itself to save a PDF remain.
+  run lists it among what needs attention.
+- **Capital One and Schwab take each document by its own id, never by its
+  place in the list.** Two documents of one day sharing a type, a title
+  and an account, two buys of one fund in a Schwab account for instance,
+  were told apart only by where each stood in the provider's list. When
+  the list came back in another order, or with a new one ahead of one
+  already saved, the saved one was downloaded again in the other's place
+  and the other never was, and no later run asked for it. Each document
+  is now found by the id it was listed and saved under. Where the
+  provider's ids change and cannot say which of two was saved before, the
+  one not yet saved is marked for manual review rather than guessed at.
 
 ## [0.45.0] - 2026-10-07
 

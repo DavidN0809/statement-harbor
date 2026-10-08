@@ -34,7 +34,11 @@ controls entirely. The one click it ever makes is on a "Continue session" or
 Download identifiers are opaque and not stable, so a document is identified by
 what it is (type, name, date, account) plus its position among identical
 descriptors on the same day. Before each download the list for that day is
-fetched again and the document is matched afresh. If the account nickname on
+fetched again, and the document taken is the one listed under the id its
+record keeps, never whichever stands in its position, since a list in another
+order puts another one there. When the ids no longer say which of two alike
+was saved before, the one not yet saved is marked for manual review, to be
+downloaded from Schwab's site by hand. If the account nickname on
 Schwab changes, the labels change with it and history for that account starts
 over, so pick a nickname and keep it.
 
