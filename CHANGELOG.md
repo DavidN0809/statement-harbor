@@ -121,8 +121,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   receipt "2026-05-14 Unsure Purchase.pdf" offered "2026-05-14 Walmart Lamp
   Receipt.pdf". A file the records of two purchases (two order numbers,
   Target's invoices of an order included) or of two documents name now
-  keeps its name, whichever of the two kept its rows. Robinhood's and
-  Newrez's own records of one document under two keys still count as one.
+  keeps its name, whichever of the two kept its rows. When the deleted
+  one's rows were the ones gone, Rename used to name such a file for the
+  later one, rightly, but the records cannot tell that case from the
+  other, so it keeps its name there too. Robinhood's and Newrez's own
+  records of one document under two keys still count as one.
 
 
 ### Security

@@ -1048,13 +1048,17 @@ class _Known:
     def _owner(self, name: str):
         """Whose record the app's key `name` holds, shaped as _record_key
         shapes a receipt's row. A purchase is its order number, a document
-        its key, and a key a rename view says stands for another's record
-        that record's owner."""
+        the provider's id it keeps or else its key, as _key_of_record has
+        them, and a key a rename view says stands for another's record that
+        record's owner."""
         seen = {name}
         while self._stands_for.get(name, name) not in seen:
             name = self._stands_for[name]
             seen.add(name)
-        number = str((self.records.get(name) or {}).get("order_number") or "").strip()
+        # As written down when the file was saved. A later listing writes
+        # another statement's id over a document's in discovery at times.
+        rec = self._saved.get(name) or self.records.get(name) or {}
+        number = str(rec.get("order_number") or rec.get("document_id") or "").strip()
         return ("order", number) if number else ("key", name)
 
     def _view(self, name: str, saved: bool) -> dict:

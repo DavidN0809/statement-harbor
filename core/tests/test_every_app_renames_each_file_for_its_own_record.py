@@ -477,8 +477,11 @@ def test_a_freed_name_whose_later_owner_kept_only_its_record_keeps_its_name(home
 @pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
 def test_a_freed_name_whose_first_owner_kept_only_its_record_keeps_its_name(home):
     """The same with the deleted one's rows gone instead. Its record still
-    names the file, so the records say two documents hold it, and whose it
-    is cannot be told from them either."""
+    names the file, so the records say two documents hold it. Rename named
+    the file for the later one here, which was right, but the records read
+    exactly as they do in the case above with the two swapped (a row of one
+    and a record of each), so whose file it is cannot be told from them
+    either, and it keeps its name."""
     app = home.build()
     path, owners = a_freed_name_taken(home, app)
     rows_gone(app, *owners[0])

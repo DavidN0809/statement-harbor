@@ -1216,6 +1216,24 @@ def test_two_documents_records_naming_one_file_leave_it_its_name(tmp_path, monke
         "0000-00-00 Testco Form 1099.pdf"]
 
 
+def test_a_row_carrying_its_documents_id_takes_the_record_of_that_id(tmp_path, monkeypatch):
+    """A row that carries a document's id is matched by it, as a receipt's
+    row is by its order number, and the record keeping that id is the same
+    document and not a second one naming the file."""
+    monkeypatch.setattr(storage, "_FILENAME_PATTERN", "{date} {provider} {account} {summary}")
+    name = "2026-09-12 Testco Statement.pdf"
+    f = tmp_path / name
+    f.write_bytes(b"%PDF- statement")
+    rows = [{"PDF Filename": name, "PDF Full Path": str(f), "Document Date": "2026-09-12",
+             "Document Summary": "Statement", "Document Title": "Statement",
+             "Document ID": "D9", "Notes": ""}]
+    app = _App(tmp_path, rows, progress={"Statement:D9": {
+        "date": "2026-09-12", "title": "Statement", "summary": "Statement",
+        "account": "1111", "document_id": "D9", "pdf_path": str(f), "pdf_filename": name}})
+    renaming.run_for(app, apply_changes=True, say=lambda *a: None)
+    assert [p.name for p in tmp_path.glob("*.pdf")] == ["2026-09-12 Testco 1111 Statement.pdf"]
+
+
 def test_every_file_of_one_order_takes_the_orders_record(tmp_path, monkeypatch):
     """An order number names one purchase whichever of its files a row is,
     as when an order was downloaded again beside its first copy and the
