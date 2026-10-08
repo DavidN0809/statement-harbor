@@ -1177,6 +1177,24 @@ def held_receipt(row: dict, paths) -> Optional[Path]:
     return held_document(row.get("PDF Full Path"), paths.filing_folders())
 
 
+def _numbers_naming(rows: Iterable[dict], records: dict) -> dict:
+    """Each file the index rows and progress records name (_same_file of
+    it), with each spelling naming it and the order number of the purchase
+    whose row or record it is. A record's number is its order_number, or
+    what its key, Purchase.key, has after the purchase type."""
+    out = {}
+    named = [((r.get("PDF Full Path") or "").strip(),
+              (r.get("Order or Receipt Number") or "").strip()) for r in rows]
+    named += [(str(rec.get("pdf_path") or "").strip(),
+               str(rec.get("order_number") or str(key).partition(":")[2]).strip())
+              for key, rec in records.items() if isinstance(rec, dict)]
+    for raw, number in named:
+        where = _same_file(raw) if raw else ""
+        if where:
+            out.setdefault(where, []).append((raw, number))
+    return out
+
+
 def _write_down(app, rows: List[dict], order_rows: List[dict], backup: bool) -> None:
     """Both CSVs as the review now has them, the order history even when
     the index could not be written."""
@@ -1197,9 +1215,11 @@ def review_names(app, ask, words: ReviewWords = WORDS,
     built from, for an app that knows more than its progress record holds.
     Without it the progress record is used.
 
-    Only a receipt the app holds is offered (held_receipt), each file once.
-    A rename that fails is said, that receipt keeps its name, and the
-    review goes on. Each rename is written to progress.json and to both
+    Only a receipt the app holds is offered (held_receipt), each file once,
+    and not a file another purchase's index rows or progress record name as
+    well, since whose receipt it is cannot be told. The summary a file
+    already has leaves it where it is. A rename that fails is said, that
+    receipt keeps its name, and the review goes on. Each rename is written to progress.json and to both
     CSVs as it happens, so they name the files as they are on disk however
     the review ends. Closing the console window ends the process at once,
     with nothing run after it, so writing at the end would not be enough.
@@ -1211,9 +1231,10 @@ def review_names(app, ask, words: ReviewWords = WORDS,
     so an older copy of a purchase whose record names another copy leaves
     that record as it is."""
     rows = app.index_csv.read_all()
+    numbers = _numbers_naming(rows, getattr(app.progress, "data", None) or {})
     # A row somebody already renamed is left out, even one renamed before
     # its confidence was marked High as well (#47).
-    review, offered, left_out = [], set(), 0
+    review, offered, left_out, shared = [], set(), 0, 0
     for r in rows:
         unsure = (r.get("Classification Confidence") == "Low"
                   or "Review" in (r.get("Processing Status") or ""))
@@ -1222,12 +1243,26 @@ def review_names(app, ask, words: ReviewWords = WORDS,
         path = held_receipt(r, app.paths)
         if path is None:
             left_out += 1
+        elif any(number != (r.get("Order or Receipt Number") or "").strip()
+                 and _one_file(raw, str(path))
+                 for raw, number in numbers.get(_same_file(str(path)), ())):
+            # A file deleted once it was imported elsewhere leaves its name
+            # free, and a later purchase of the same day and summary is
+            # saved under it. Whose receipt the file is cannot be told, and
+            # a new name for the older purchase's row renamed the later
+            # one's file and left the later one's rows and record naming a
+            # file that was gone. run_for keeps such a file's name too.
+            shared += 1
         elif str(path) not in offered:
             offered.add(str(path))
             review.append((r, path))
     if left_out:
         print(f"{left_out} row(s) marked for review have no receipt PDF in this "
               "app's folders to rename, so they are left out.")
+    if shared:
+        print(f"{shared} row(s) marked for review name a file that another purchase's "
+              "rows or record also name, so whose receipt it is cannot be told and "
+              "they are left out.")
     if not review:
         print("No receipts need name review.")
         return
@@ -1257,9 +1292,21 @@ def review_names(app, ask, words: ReviewWords = WORDS,
             record = record_for(key, prog) if record_for else prog
             new_name = build_pdf_filename(date, new_summary, doc_type, record=record)
             try:
+                # The file does not stand in its own way. Asked for a free
+                # name as though it were another file's, the summary it
+                # already had moved it to "... (2).pdf", and the next Rename
+                # offered to move it back.
                 new_path = unique_path(old_path.parent, new_name,
-                                       app.config["max_path_length"])
-                old_path.rename(new_path)  # unique_path guarantees no overwrite
+                                       app.config["max_path_length"],
+                                       ignoring=old_path.name)
+                if new_path.name != old_path.name:
+                    # unique_path compares names in one case, so a folder
+                    # that tells case apart can hold another file of the
+                    # name a change of case gives, which a rename there
+                    # would replace.
+                    if new_path.exists() and not _one_file(str(new_path), str(old_path)):
+                        raise FileExistsError(17, "Another file has that name", str(new_path))
+                    old_path.rename(new_path)
             except (OSError, ValueError) as e:
                 print(f"    It could not be renamed ({type(e).__name__}), so it keeps "
                       "its name.\n")
@@ -1311,7 +1358,10 @@ def review_names(app, ask, words: ReviewWords = WORDS,
                 app.progress.update(key, named)  # key (purchase identifier) unchanged
             _write_down(app, rows, order_rows, backup=not written)
             pending, written = False, True
-            print(f"{words.renamed}{new_path.name}\n")
+            if new_path.name == old_path.name:
+                print("    It already has that name, so the file stays as it is.\n")
+            else:
+                print(f"{words.renamed}{new_path.name}\n")
     finally:
         # A rename whose rows were not written down yet, because something
         # between the two went wrong or the writing itself was cut short.

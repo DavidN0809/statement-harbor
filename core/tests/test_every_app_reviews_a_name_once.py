@@ -23,6 +23,13 @@ Completed, so no run fetched it again, though its copy was still the one
 that failed. A new name for an older copy of a purchase was written into
 the purchase's record as well, which changed what the next run fetched.
 
+A file deleted once it was imported elsewhere leaves its name free, and a
+later purchase of the same day and summary is saved under it. Reviewing the
+older purchase's row renamed the later purchase's file to the older one's
+name and left the later one's rows and record naming a file that was gone.
+And typing the summary a file already has moved it to "... (2).pdf", which
+the next Rename offered to move back.
+
 These run each app's own review_names over an output folder on disk, with
 the typing stood in for. Every name, number and answer is invented.
 """
@@ -145,13 +152,14 @@ def opening_pdf(folder: Path, name: str) -> Path:
     return path
 
 
-def as_a_run_left_it(inst, number: str, path: Path, saved: bool, confidence: str):
+def as_a_run_left_it(inst, number: str, path: Path, saved: bool, confidence: str,
+                     summary: str = "Unsure Purchase"):
     """A receipt's records, written by the app's own _record_state and
     _write_csv_rows in the order its run writes them. A receipt saved
     passed its check and was marked for review for its name alone. One not
     saved failed its check and was put aside in Manual Review."""
     purchase = Purchase(purchase_type=ONLINE, purchase_date="2026-05-14",
-                        order_number=number, summary="Unsure Purchase",
+                        order_number=number, summary=summary,
                         confidence=confidence, pdf_path=str(path), pdf_filename=path.name)
     inst._record_state(purchase, State.PDF_SAVED)
     if saved:
@@ -215,7 +223,7 @@ def test_a_receipt_renamed_before_the_fix_is_not_asked_about_either(app, tmp_pat
 
 @pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
 def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, capsys):
-    """Of fourteen rows, three name a receipt in a folder the app files
+    """Of thirteen rows, three name a receipt in a folder the app files
     receipts in, and each is offered once, though a second row the run was
     unsure of names the first. Eight are left out, and the review says so.
     They name no file, the folder the app runs in, the output folder
@@ -224,11 +232,11 @@ def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, cap
     set to the app's folder, and a PDF in Logs. The second receipt offered
     cannot be renamed, which is said, and the review goes on to its end.
     Every row of a purchase naming its renamed file follows it, a finished
-    one included, and a finished row of another purchase naming the same
-    file is left as it is. The CSVs and progress.json name every file as it
-    now is, and each CSV is backed up once. Every question is answered with
-    a new name, so a row offered by mistake would be renamed, and it would
-    show."""
+    one included. The CSVs and progress.json name every file as it now is,
+    and each CSV is backed up once. Every question is answered with a new
+    name, so a row offered by mistake would be renamed, and it would show.
+    A file another purchase's rows name as well is
+    test_a_file_another_purchase_names_is_left_out."""
     mod = load(app)
     here = tmp_path / "here"                     # the folder the app runs in
     receipt(here, "2026-05-14 Here Receipt.pdf")
@@ -247,8 +255,6 @@ def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, cap
     logged = receipt(inst.paths.logs, "2026-05-14 Logged Receipt.pdf")
     finished = index_row("ORDER-0011", last, status="Completed")
     finished["Classification Confidence"] = "High"
-    another = index_row("ORDER-0012", first, status="Completed")
-    another["Classification Confidence"] = "High"
     rows = [index_row("ORDER-0001", first),
             index_row("ORDER-0001", first),      # a second row for the one file
             index_row("ORDER-0002", "", status="Needs Manual Review"),
@@ -262,8 +268,7 @@ def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, cap
             index_row("ORDER-0009", logged),
             index_row("ORDER-0010", locked),
             index_row("ORDER-0011", last),
-            finished,
-            another]                             # another purchase naming the first's file
+            finished]
     inst.index_csv.append_rows(rows)
     inst.order_csv.append_rows([order_row(r["Order or Receipt Number"], r["PDF Filename"])
                                 for r in rows])
@@ -548,3 +553,117 @@ def test_a_new_name_for_an_older_copy_leaves_the_record_alone(app, tmp_path, mon
         index, ["Garden Hose", "Saved", "Hardware", "Newer", "Lamp"])] == [True] * 5
     assert [r["Processing Status"] for r in inst.order_csv.read_all()] == [
         r["Processing Status"] for r in index]
+
+
+@pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
+@pytest.mark.parametrize("later_kept", ["rows and record", "rows", "record"])
+def test_a_file_another_purchase_names_is_left_out(app, later_kept, tmp_path, monkeypatch,
+                                                   capsys):
+    """A receipt saved and then deleted, as a person does once it is imported
+    elsewhere, leaves its name free, and a later purchase of the same day and
+    summary is saved under it. Both purchases' rows and records name that one
+    file now. Reviewing the older purchase's row renamed the later purchase's
+    file to the older one's new name and wrote it into the older one's rows
+    and record, while the later one's rows and record named a file that was
+    gone. Whose receipt the file is cannot be told from the index, so a row
+    whose file another purchase's index rows or record name is left out, and
+    the review says how many. The later purchase may have kept its rows
+    alone, as when progress.json was lost, or its record alone, as when the
+    index was open in another program while its run wrote it. A third
+    purchase with a file of its own is still offered and renamed."""
+    mod = load(app)
+    inst = runnable(mod, tmp_path / "out")
+    filed = inst.paths.folder_for(ONLINE)
+    name = "2026-05-14 Unsure Purchase.pdf"
+    older = as_a_run_left_it(inst, "ORDER-0001", opening_pdf(filed, name),
+                             saved=True, confidence="Low")
+    (filed / name).unlink()                      # imported elsewhere, then deleted
+    later = as_a_run_left_it(inst, "ORDER-0002", opening_pdf(filed, name),
+                             saved=True, confidence="Low")
+    own = as_a_run_left_it(inst, "ORDER-0003",
+                           opening_pdf(filed, "2026-05-14 Other Purchase.pdf"),
+                           saved=True, confidence="Low", summary="Other Purchase")
+    if later_kept == "rows":
+        inst.progress.data.pop(later.key)
+        inst.progress.save()
+    if later_kept == "record":
+        for csv in (inst.index_csv, inst.order_csv):
+            csv.rewrite([r for r in csv.read_all()
+                         if r["Order or Receipt Number"] != "ORDER-0002"])
+    shared = (filed / name).read_bytes()
+    index, orders = inst.index_csv.read_all(), inst.order_csv.read_all()
+    records = json.loads(inst.paths.progress_json.read_text(encoding="utf-8"))
+    capsys.readouterr()
+
+    asked = []
+    monkeypatch.setattr(mod, "ask", lambda prompt: asked.append(prompt) or "Garden Hose")
+    inst.cmd_review_names()
+
+    said = " ".join(capsys.readouterr().out.split())
+    out = 1 if later_kept == "record" else 2
+    assert len(asked) == 1, "only the purchase with a file of its own is offered, %s" % said
+    assert ("%d row(s) marked for review name a file that another purchase's rows or "
+            "record also name, so whose receipt it is cannot be told and they are left "
+            "out." % out) in said, said
+    assert (filed / name).read_bytes() == shared
+    garden = [p for p in filed.iterdir() if "Garden Hose" in p.name]
+    assert len(garden) == 1 and sorted(p.name for p in filed.iterdir()) \
+        == sorted([name, garden[0].name])
+
+    def theirs(rows):
+        return [r for r in rows if r["Order or Receipt Number"] != "ORDER-0003"]
+    assert theirs(inst.index_csv.read_all()) == theirs(index)
+    assert theirs(inst.order_csv.read_all()) == theirs(orders)
+    now = json.loads(inst.paths.progress_json.read_text(encoding="utf-8"))
+    assert {k: v for k, v in now.items() if k != own.key} \
+        == {k: v for k, v in records.items() if k != own.key}
+    assert now[own.key]["pdf_path"] == str(garden[0])
+    assert [inst._already_done(p) for p in (older, own)] == [True, True]
+
+
+@pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
+@pytest.mark.parametrize("had", ["that name", "that name in another case"])
+def test_the_name_a_receipt_already_has_leaves_it_where_it_is(app, had, tmp_path,
+                                                               monkeypatch):
+    """Typing the summary a receipt's file already has asked for a free name
+    as though the file were another file's, so it was moved to
+    "... (2).pdf", and the next Rename offered to move it back. A file named
+    so in another case was moved to "... (2).pdf" as well, since names are
+    compared in one case. The file keeps its name now, or takes the new
+    case, and the receipt counts as reviewed as a new name would make it,
+    so the review does not ask about it again and Rename has nothing to
+    offer."""
+    from paperpull_core import renaming
+    from paperpull_core.storage import build_pdf_filename
+    mod = load(app)
+    inst = runnable(mod, tmp_path / "out")
+    filed = inst.paths.folder_for(ONLINE)
+    name = build_pdf_filename("2026-05-14", "Garden Hose", "Receipt")
+    was = name if had == "that name" else name.replace("Garden Hose", "Garden hose")
+    assert was.lower() == name.lower()
+    path = opening_pdf(filed, was)
+    data = path.read_bytes()
+    purchase = as_a_run_left_it(inst, "ORDER-0001", path, saved=True, confidence="Low",
+                                summary="Garden hose")
+
+    monkeypatch.setattr(mod, "ask", lambda prompt: "garden hose")
+    inst.cmd_review_names()
+
+    assert [p.name for p in filed.iterdir()] == [name] and (filed / name).read_bytes() == data
+    path = filed / name
+    record = json.loads(inst.paths.progress_json.read_text(encoding="utf-8"))[purchase.key]
+    assert (record["pdf_path"], record["state"], record["confidence"]) \
+        == (str(path), "Completed", "High")
+    for csv in (inst.index_csv, inst.order_csv):
+        assert [(r["PDF Filename"], r["Processing Status"]) for r in csv.read_all()] \
+            == [(name, "Completed")], csv.path.name
+    assert "renamed via --review-names" in inst.index_csv.read_all()[0]["Notes"]
+    assert inst._already_done(purchase)
+
+    asked = []
+    monkeypatch.setattr(mod, "ask", lambda prompt: asked.append(prompt) or "Lamp")
+    inst.cmd_review_names()
+    assert asked == []
+    said = []
+    renaming.run_for(inst, say=said.append)
+    assert said == ["Every file is already named the way this app names them."], said

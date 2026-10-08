@@ -149,6 +149,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
   other, so it keeps its name there too. Robinhood's and Newrez's own
   records of one document under two keys still count as one.
 
+  told apart by the last six characters of its id, as an EOB already was.
+  A file saved before keeps its name until Rename is run, which offers the
+  new name in a preview first.
+- **Review Names leaves out a file two purchases name, and keeps the name
+  a file already has, in every receipt app.** Deleting receipts once they
+  are imported elsewhere frees their names, and a later purchase of the
+  same day and summary is saved under one. A new name typed for the older
+  purchase's row then renamed the later purchase's file and left the later
+  purchase's rows and record naming a file that was gone. A row whose file
+  another purchase's index rows or record name as well is now left out of
+  the review, which says how many, as Rename already leaves such a file's
+  name alone. Typing the summary a file already has moved it to
+  "... (2).pdf", and the next Rename offered to move it back. The file now
+  keeps its name, or takes the new case when only the case changed, and
+  counts as reviewed.
 
 ### Security
 - **M&T presses a year heading only when nothing covers it, and once.**
