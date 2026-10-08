@@ -1312,9 +1312,15 @@ def review_names(app, ask, words: ReviewWords = WORDS,
                     # that tells case apart can hold another file of the
                     # name a change of case gives, which a rename there
                     # would replace.
-                    if new_path.exists() and not _one_file(str(new_path), str(old_path)):
+                    # A link whose file is gone has the name as well.
+                    if (os.path.lexists(new_path)
+                            and not _one_file(str(new_path), str(old_path))):
                         raise FileExistsError(17, "Another file has that name", str(new_path))
                     old_path.rename(new_path)
+                elif not old_path.is_file():
+                    # Deleted while the question waited. A rename would have
+                    # failed, and the rows would be marked for a file gone.
+                    raise FileNotFoundError(2, "The file is no longer there", str(old_path))
             except (OSError, ValueError) as e:
                 print(f"    It could not be renamed ({type(e).__name__}), so it keeps "
                       "its name.\n")

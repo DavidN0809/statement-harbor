@@ -159,10 +159,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   purchase's row then renamed the later purchase's file and left the later
   purchase's rows and record naming a file that was gone. A row whose file
   another purchase's index rows or record name as well, a Target invoice
-  included, is now left out of the review, which says how many. Typing the summary a file already has moved it to
-  "... (2).pdf", and the next Rename offered to move it back. The file now
-  keeps its name, or takes the new case when only the case changed, and
-  counts as reviewed.
+  included, is now left out of the review, which says how many. Typing the
+  summary a file already has moved it to "... (2).pdf", and the next
+  Rename offered to move it back. The file now keeps its name, or takes the
+  new case when only the case changed, and counts as reviewed.
 
 ### Security
 - **M&T presses a year heading only when nothing covers it, and once.**

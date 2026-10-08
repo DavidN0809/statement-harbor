@@ -677,3 +677,31 @@ def test_the_name_a_receipt_already_has_leaves_it_where_it_is(app, had, tmp_path
     said = []
     renaming.run_for(inst, say=said.append)
     assert said == ["Every file is already named the way this app names them."], said
+
+
+@pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
+def test_the_name_a_receipt_had_marks_nothing_once_its_file_is_gone(app, tmp_path,
+                                                                    monkeypatch, capsys):
+    """The file is deleted while the question waits, and the summary it had
+    is typed. A rename would have failed and written nothing, and so does
+    keeping the name, so no row or record is marked for a file gone."""
+    from paperpull_core.storage import build_pdf_filename
+    mod = load(app)
+    inst = runnable(mod, tmp_path / "out")
+    filed = inst.paths.folder_for(ONLINE)
+    path = opening_pdf(filed, build_pdf_filename("2026-05-14", "Garden Hose", "Receipt"))
+    as_a_run_left_it(inst, "ORDER-0001", path, saved=True, confidence="Low",
+                     summary="Garden Hose")
+    index, orders = inst.index_csv.read_all(), inst.order_csv.read_all()
+    records = inst.paths.progress_json.read_text(encoding="utf-8")
+
+    def answer(prompt):
+        path.unlink()
+        return "garden hose"
+    monkeypatch.setattr(mod, "ask", answer)
+    inst.cmd_review_names()
+
+    said = " ".join(capsys.readouterr().out.split())
+    assert "It could not be renamed (FileNotFoundError), so it keeps its name." in said, said
+    assert inst.index_csv.read_all() == index and inst.order_csv.read_all() == orders
+    assert inst.paths.progress_json.read_text(encoding="utf-8") == records
