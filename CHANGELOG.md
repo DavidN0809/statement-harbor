@@ -280,7 +280,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   saved. A second copy of one statement to one person is told apart by the
   end of its Ally id as other second copies are, not by " (2)". A statement
   listed without Ally's id, as when the list is read from the page, is no
-  longer taken again on every run.
+  longer taken again on every run. One taken that way before this version
+  is taken once more, beside its first copy, and then no more.
 
 ## [0.45.0] - 2026-10-07
 

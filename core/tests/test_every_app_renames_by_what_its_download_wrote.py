@@ -13,12 +13,12 @@ So no other app does what Ally did unseen, every document app's own code is
 read here. A function that changes a document's summary or account, other
 than one that writes the document into the listing whole, has to be one
 whose app hands run_for that field as saved. A document is a parameter
-annotated Document, one named doc with no annotation, or a name the
-function makes with Document(...) or Document.from_dict(...), and a change
-is an assignment to its attribute, a subscript of it or setattr with the
-field's name. Receipt apps are left out,
-since their listings leave a purchase's summary and account empty and the
-run state's are the ones Rename reads. What it does not see is a change made
+annotated Document, one named doc with no annotation, a loop's doc, or a
+name the function makes with Document(...) or Document.from_dict(...), and
+a change is an assignment to its attribute, a subscript of it or setattr
+with the field's name. Receipt apps are left out, since their listings
+leave a purchase's summary and account empty and the run state's are the
+ones Rename reads. What it does not see is a change made
 through another name, a helper's return or __dict__, and the canary at the
 end holds it to the shapes it must see.
 """
@@ -91,6 +91,10 @@ def _documents_in(func) -> set:
         if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
                 and ast.unparse(node.value.func) in ("Document", "Document.from_dict")):
             names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        # A loop over documents, as process walks the ones it was handed.
+        if (isinstance(node, (ast.For, ast.comprehension)) and isinstance(node.target, ast.Name)
+                and node.target.id == "doc"):
+            names.add("doc")
     return names
 
 
@@ -184,7 +188,8 @@ SEEN = {
     "a state alone": "    def named(self, doc: Document):\n        doc.summary = 'x'\n"
                      "        self.discovery.update(doc.key, {'state': 'done'})\n",
     "unannotated doc": "    def named(self, page, doc):\n        doc.summary = 'x'\n",
-    "augmented": "    def named(self, doc: Document):\n        doc.summary += ' x'\n",
+    "a loop": "    def run(self, docs):\n        for doc in docs:\n            doc.summary = 'x'\n",
+    "augmented":"    def named(self, doc: Document):\n        doc.summary += ' x'\n",
 }
 
 PASSED = {

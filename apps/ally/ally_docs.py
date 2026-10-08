@@ -81,7 +81,7 @@ class Document:
         # The account as Ally's list gave it. A statement named from its PDF
         # takes the PDF's addressee as its account, and one listed without
         # Ally's id is kept under this one all the same.
-        self.listed_account = kw.get("listed_account") or account
+        self.listed_account = kw.get("listed_account", account)
         self.category = category
         self.summary = summary
         self.date = date
@@ -616,10 +616,14 @@ class App:
         who they were addressed to, the addressee) come from the document's
         own first page.
 
-        The extraction is structural and offline; if it does not recognize the
-        layout the file KEEPS the name discovery gave it, and nothing is
-        guessed. Renaming is cosmetic either way: identity is documentId, so a
-        later improvement here can rename an archive without re-downloading it.
+        The extraction is structural and offline. If it does not recognize
+        the layout the file KEEPS the name discovery gave it, and nothing is
+        guessed. Renaming is cosmetic either way, since identity is
+        documentId. What the PDF said is written to the run state alone, and
+        Rename reads the summary and account from there (NAMED_FROM_THE_PDF),
+        so it never offers the file the list's name back. Rename does not
+        read a PDF again, so a statement already saved keeps the name its
+        PDF gave it when it was saved.
         """
         if doc.kind == "tax":
             # A tax form has no account-summary table; its own name ("1099-INT")

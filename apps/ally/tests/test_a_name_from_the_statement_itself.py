@@ -99,7 +99,8 @@ def run(home, app):
 
 
 def names(home):
-    return sorted(p.name for p in home.files().values())
+    """Every PDF's name, two with the same bytes included."""
+    return sorted(p.name for p in home.out.rglob("*.pdf"))
 
 
 def renamed_nothing(home):
