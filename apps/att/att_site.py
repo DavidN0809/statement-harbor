@@ -1921,25 +1921,25 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             return True
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
-        if outcome.page_error is not None:
-            # The press through the page raised, so it may have been made,
-            # and nothing more is pressed (pressing.Pressed). What it brought
-            # has been waited for, and the bill is left for another run.
+        # The press through the page raised, so it may have been made, and
+        # nothing more is pressed for this bill (pressing.Pressed). No menu
+        # entry is pressed, and what the press brought is still waited for.
+        unsure_press = outcome.page_error is not None
+        if unsure_press:
             if trace is not None:
                 trace.append({"note": "the press through the page raised, so nothing more is pressed"})
             if pressed is not None:
                 pressed.append(_PRESS_UNSURE)
-            return False
         # The menu under "Download PDF" holds "Regular PDF", which saves
         # the file, and "View/print PDF", which opens a tab. Found by text.
-        step, step_label = _menu_entry(page, _REGULAR_PDF_RE)
-        if step is None:
+        step, step_label = (None, "") if unsure_press else _menu_entry(page, _REGULAR_PDF_RE)
+        if step is None and not unsure_press:
             step, step_label = _second_step(page, appeared)
         # Not when View/print PDF is the control just pressed, which its
         # words would find again and press a second time.
-        if step is None and not _VIEW_PRINT_RE.match(label or ""):
+        if step is None and not unsure_press and not _VIEW_PRINT_RE.match(label or ""):
             step, step_label = _menu_entry(page, _VIEW_PRINT_RE, wait_ms=1000)
-        if step is None and trace is not None:
+        if step is None and not unsure_press and trace is not None:
             trace.append({"note": "no menu entry found after the click",
                           "pdf_texts_now": [{**x, "text": redact(x["text"])} for x in _pdf_texts(page)]})
         if step is not None:
@@ -2068,8 +2068,13 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
                 if not any(_VIEW_PRINT_RE.match(t or "") for t in tried):
                     alt, alabel = _view_print_button(page)
                     if alt is not None and alabel.lower() != blabel.lower():
-                        if _catch_pdf(page, alt, alabel, out_path, trace, dl_dir):
+                        alt_tried: list = []
+                        if _catch_pdf(page, alt, alabel, out_path, trace, dl_dir, alt_tried):
                             return True
+                        # Nor the billing center's Download PDF after a
+                        # View/print PDF that may have been pressed.
+                        if _PRESS_UNSURE in alt_tried:
+                            return False
             else:
                 log.info("no Download PDF after opening the bill for %s", iso_date)
                 if trace is not None:

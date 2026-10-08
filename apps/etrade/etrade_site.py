@@ -2096,22 +2096,21 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             return True
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
-        if outcome.page_error is not None:
-            # The press through the page raised, so it may have been made,
-            # and nothing more is pressed (pressing.Pressed). What it brought
-            # has been waited for, and the document is left for another run.
-            if trace is not None:
-                trace.append({"note": "the press through the page raised, so nothing more is pressed"})
-            if unsure is not None:
-                unsure.append(label)
-            return False
+        # The press through the page raised, so it may have been made, and
+        # nothing more is pressed (pressing.Pressed). No second step is
+        # looked for, and what the press brought is still waited for.
+        unsure_press = outcome.page_error is not None
+        if unsure_press and trace is not None:
+            trace.append({"note": "the press through the page raised, so nothing more is pressed"})
+        if unsure_press and unsure is not None:
+            unsure.append(label)
         appeared = _control_texts(page) - controls_before
         if trace is not None:
             trace.append({"note": "after the click", "url": mask_href(page.url or ""),
                           "appeared": len(appeared),
                           "finishing_words": sorted({_fixed_word(t) for t in appeared} - {""})[:10],
                           "new_tabs": len([p for p in ctx.pages if p not in before])})
-        step, step_label = _second_step(page, appeared)
+        step, step_label = (None, "") if unsure_press else _second_step(page, appeared)
         if step is not None:
             try:
                 step.click(timeout=8000)

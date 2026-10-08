@@ -218,8 +218,16 @@ def dismiss_helpers():
     for source in census.SOURCES:
         if not source.name.startswith("apps/"):
             continue
+        closing = _closing_patterns(source)
         for node in source.tree.body:
             if isinstance(node, ast.FunctionDef) and _calls_core_dismiss(node):
+                found.add((source.name, node.name))
+            # A pattern picking Close handed to a helper of the app's own,
+            # which reads labels with it rather than handing it to a locator,
+            # Golden 1's close_history through _pager.
+            elif isinstance(node, ast.FunctionDef) and _presses(node) and any(
+                    isinstance(a, ast.Name) and a.id in closing
+                    for n in ast.walk(node) if isinstance(n, ast.Call) for a in n.args):
                 found.add((source.name, node.name))
     out = []
     for name, fn_name in sorted(found):
@@ -227,6 +235,20 @@ def dismiss_helpers():
         fn = next(n for n in source.tree.body if isinstance(n, ast.FunctionDef) and n.name == fn_name)
         if [a.arg for a in fn.args.args] == ["page"]:
             out.append((name, fn_name))
+    return out
+
+
+def _closing_patterns(source) -> set:
+    """The module's own names for a compiled pattern that takes "Close"."""
+    out = set()
+    for node in source.tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Call) \
+                and census.is_re(node.value, "compile") and node.value.args \
+                and isinstance(node.value.args[0], ast.Constant) and isinstance(node.value.args[0].value, str):
+            text, flags = node.value.args[0].value, census.flags_of(node.value)
+            if _compiles(text, flags) and re.compile(text, flags).search("Close"):
+                out.add(node.targets[0].id)
     return out
 
 
@@ -268,6 +290,7 @@ def test_every_dismiss_press_is_here():
     Card's, T-Mobile's and Verizon's of their own, and Costco's receipt
     dialog's Close, once the core's helper is what they press through."""
     apps = {name.split("/")[1] for name, _ in HELPERS}
+    assert ("apps/golden1/golden1_site.py", "close_history") in HELPERS, HELPERS
     assert apps >= {"adp", "amfam", "applecard", "att", "etrade", "golden1", "nelnet", "newrez",
                     "sba", "smud", "statefarm", "tmobile", "verizon", "verizonmobile",
                     "wellsfargo"} | ({"costco"} if hasattr(controls, "dismiss_overlays") else set()), sorted(apps)
@@ -310,3 +333,56 @@ def test_no_dismiss_press_presses_a_control_that_closes_an_account_or_signs_out(
     wrong = sorted(k for k in LEAVE_ALONE if hits.get(k))
     assert not wrong, "%s.%s pressed %s" % (name, fn_name, wrong)
     assert hits.get("ok") or hits.get("ok-menu"), "%s.%s pressed nothing at all, %s" % (name, fn_name, hits)
+
+
+# -- the core's helper, on the shapes its review found ---------------------------
+
+def _run_core(browser, html, **kwargs):
+    page = browser.new_page()
+    try:
+        page.set_content("<script>window.hits = {}; function hit(k) { window.hits[k] = "
+                         "(window.hits[k] || 0) + 1; }</script>" + html)
+        pressed = controls.dismiss_overlays(page, **kwargs)
+        return pressed, page.evaluate("window.hits")
+    finally:
+        page.close()
+
+
+def test_a_close_that_confirms_closing_the_account_is_never_pressed(browser):
+    """The button says Close and nothing else. The dialog it sits in asks
+    whether to close the account, so pressing it confirms that."""
+    for dialog in ('<div role="dialog" aria-label="Close your account?">',
+                   '<div role="alertdialog" aria-labelledby="t"><h2 id="t">Sign out of every device?</h2>',
+                   '<dialog open><h3>Close your account</h3>'):
+        end = "</dialog>" if dialog.startswith("<dialog") else "</div>"
+        pressed, hits = _run_core(browser, dialog + '<button onclick="hit(\'confirm\')">Close</button>' + end
+                                  + '<div role="dialog" aria-label="Cookies">'
+                                  '<button onclick="hit(\'ok\')">Close</button></div>')
+        assert not hits.get("confirm"), dialog
+        assert hits.get("ok") == 1 and pressed == 1, (dialog, hits)
+
+
+def test_a_close_that_leaves_the_page_moves_none_of_the_others_along(browser):
+    html = "".join('<button onclick="hit(\'%s\'); this.remove()">Close</button>' % k for k in "abc")
+    pressed, hits = _run_core(browser, html)
+    assert pressed == 3 and hits == {"a": 1, "b": 1, "c": 1}, hits
+
+
+def test_a_bare_close_beside_the_app_s_own_menu_name_is_taken(browser):
+    """Verizon's, a Close shown with "Close Mobile menu" as its aria-label."""
+    verizon = re.compile(r"^\s*close\s+(?:[\w'-]+\s+){0,2}?menu\s*$", re.I)
+    pressed, hits = _run_core(browser, '<button aria-label="Close Mobile menu" onclick="hit(\'menu\')">Close</button>'
+                              '<button aria-label="Close Mobile menu" onclick="hit(\'out\')">Sign out</button>',
+                              name_re=verizon)
+    assert hits == {"menu": 1}, hits
+
+
+@pytest.mark.parametrize("label", ["Close bill download menu", "Close the survey window", "Close Account menu"])
+def test_up_to_two_words_may_name_what_is_put_away(label):
+    assert controls.is_dismiss_label(label), label
+
+
+@pytest.mark.parametrize("label", ["Close account dialog", "Close my account window", "Close and sign out menu",
+                                   "Close autopay panel"])
+def test_the_lists_still_refuse_what_those_words_name(label):
+    assert not controls.is_dismiss_label(label), label

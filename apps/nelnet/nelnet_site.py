@@ -323,8 +323,13 @@ def is_safe_control(name: str) -> bool:
     joined by " | ", so each is judged on its own, with its own document
     title taken off. Splitting the whole once at " with subject " left
     every label after the first unread, and "Download document with
-    subject Notice | Make a payment" passed (review of 0.45.0)."""
-    actions = [_action_of(part.strip()) for part in (name or "").split(" | ")]
+    subject Notice | Make a payment" passed (review of 0.45.0). A label
+    that is word for word the subject another label carries is that
+    document's title, the way the old split read it, and not judged."""
+    parts = [re.sub(r"\s+", " ", part).strip() for part in (name or "").split(" | ")]
+    subjects = {pieces[1].strip().casefold() for pieces in
+                (_SUBJECT_SPLIT_RE.split(part, maxsplit=1) for part in parts) if len(pieces) == 2}
+    actions = [_action_of(part) for part in parts if part.casefold() not in subjects]
     actions = [a for a in actions if a]
     if not actions:
         return False
@@ -885,19 +890,18 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             return True
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
-        if outcome.page_error is not None:
-            # The press through the page raised, so it may have been made,
-            # and nothing more is pressed (pressing.Pressed). What it brought
-            # has been waited for, and the document is left for another run.
-            if trace is not None:
-                trace.append({"note": "the press through the page raised, so nothing more is pressed"})
-            return False
+        # The press through the page raised, so it may have been made, and
+        # nothing more is pressed (pressing.Pressed). No second step is
+        # looked for, and what the press brought is still waited for.
+        unsure_press = outcome.page_error is not None
+        if unsure_press and trace is not None:
+            trace.append({"note": "the press through the page raised, so nothing more is pressed"})
         appeared = _control_texts(page) - controls_before
         if trace is not None:
             trace.append({"note": "after the click", "url": redact(page.url or "")[:160],
                           "appeared": [redact(t) for t in sorted(appeared)[:15]],
                           "new_tabs": len([p for p in ctx.pages if p not in before])})
-        step, step_label = _second_step(page, appeared)
+        step, step_label = (None, "") if unsure_press else _second_step(page, appeared)
         if step is not None:
             try:
                 step.click(timeout=8000)

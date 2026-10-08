@@ -136,7 +136,7 @@ def capture(browser, tmp_path, monkeypatch):
     context = browser.new_context(viewport={"width": 1000, "height": 600})
     monkeypatch.setattr(pressing, "PRESS_MS", 500)
 
-    def run(app, extra="", taken_away=False, page_error=False):
+    def run(app, extra="", taken_away=False, page_error=False, late=False):
         site = site_of(app)
         monkeypatch.setattr(site, "is_safe_url", lambda url: (
             urlsplit(url or "").hostname == "127.0.0.1" and urlsplit(url).port == port))
@@ -180,6 +180,18 @@ def capture(browser, tmp_path, monkeypatch):
             monkeypatch.setattr(pressing, "press_once", raised_through_the_page)
             own_wait = page.wait_for_timeout
             page.wait_for_timeout = lambda ms: own_wait(min(ms, 20))
+            if late:
+                # The statement the press asked for answers only once the
+                # capture's first wait is over, when it looks for a new tab.
+                real_tab = site._take_new_tab
+                asked = []
+
+                def then_the_statement(*args, **kwargs):
+                    if not asked:
+                        asked.append(1)
+                        page.evaluate("() => fetch('/statement.pdf')")
+                    return real_tab(*args, **kwargs)
+                monkeypatch.setattr(site, "_take_new_tab", then_the_statement)
         try:
             page.result["saved"] = site._catch_pdf(page, held, "Download statement", out, [],
                                                    staging)
@@ -266,4 +278,16 @@ def test_nothing_is_pressed_after_a_press_through_the_page_that_raised(capture, 
     page = capture(app, page_error=True)
     assert "stop" not in page.result, page.result
     assert page.result["saved"] is False
+    assert page.evaluate("window.laterPresses") == 0, "a control shown after the press was pressed"
+
+
+@pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
+def test_a_statement_a_press_that_raised_brought_late_is_still_saved(capture, app):
+    """Only the second step is left out after such a press. The waits after
+    it stay, so a statement the press brought after the first wait is
+    saved, not pressed for again on the next run (review of this change)."""
+    page = capture(app, page_error=True, late=True)
+    assert "stop" not in page.result, page.result
+    assert page.result["saved"] is True
+    assert page.result["out"].read_bytes() == _PDF
     assert page.evaluate("window.laterPresses") == 0, "a control shown after the press was pressed"

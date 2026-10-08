@@ -640,6 +640,45 @@ def test_a_download_pdf_pressed_through_the_page_that_raised_is_followed_by_no_o
     assert {"note": "the press through the page raised, so nothing more is pressed"} in trace
 
 
+# A View/print PDF named by its aria-label alone, an icon, so only the
+# fallback after Download PDF finds it, never Download PDF's own menu.
+_VIEW_PRINT_BY_ITS_LABEL = r"""
+  panel = function () {
+    return '<div class="panel"><button>Internet<br>$1.00</button>' +
+      '<button onclick="download()">Download PDF</button>' +
+      '<button aria-label="View/print PDF" onclick="presses.view++"><svg width="16" height="16"></svg></button></div>';
+  };
+  draw();"""
+
+
+def test_a_view_print_pressed_through_the_page_that_raised_ends_the_bill(
+        browser, tmp_path, monkeypatch):
+    """Download PDF gave nothing, and the press of View/print PDF through the
+    page raised, so it may have been made. Nothing more is pressed for the
+    bill, the billing center's Download PDF least of all (review of this
+    change)."""
+    from paperpull_core import pressing
+    real = pressing.press_once
+    bills = _bills(_newest_now(), 16)
+    presses = _presses_on_leaving(browser[0], monkeypatch)
+
+    def view_print_raised(pg, el, *args, **kwargs):
+        if (el.get_attribute("aria-label") or "") != "View/print PDF":
+            return real(pg, el, *args, **kwargs)
+        el.evaluate("e => e.click()")
+        return pressing.Pressed(pressing.THROUGH_THE_PAGE, RuntimeError("covered"),
+                                RuntimeError("the press through the page raised"))
+    monkeypatch.setattr(pressing, "press_once", view_print_raised)
+    ok, out, trace, page = _download(
+        browser, tmp_path, _history(bills, extra=_DOWNLOAD_GIVES_NOTHING + _VIEW_PRINT_BY_ITS_LABEL),
+        bills[1]["iso"])
+    assert not ok and not out.exists()
+    assert not presses, "the billing center was opened after a press that may have been made"
+    counts = page.evaluate("window.presses")
+    assert counts["download"] == 1
+    assert counts["view"] == 1
+
+
 def test_download_pdf_drawn_after_view_print_is_still_the_one_pressed(browser, tmp_path):
     """In real time, since what is tested is the wait."""
     bills = _bills(_newest_now(), 16)

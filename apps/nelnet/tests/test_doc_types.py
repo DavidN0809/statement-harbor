@@ -115,6 +115,11 @@ def test_every_label_a_control_carries_is_read_and_not_only_the_first():
         assert not site.is_safe_control(label), label
     for label in ["Download | Download document with subject Payment Confirmation",
                   "Download document with subject Payment Confirmation | Download document",
+                  # The subject again as the text or the title, as the old
+                  # split took it.
+                  "Download document with subject Payment Confirmation | Payment Confirmation",
+                  "Autopay Enrollment Confirmation | Download document with subject "
+                  "Autopay Enrollment Confirmation",
                   "2024 1098-E Form | 2024 1098-E Form"]:
         assert site.is_safe_control(label), label
 

@@ -212,10 +212,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   button's title, T-Mobile checked nothing, Verizon's reached "Close menu
   and sign out", and Costco closed its receipt dialog through any button
   whose text held Close. All of them, and American Family's, which was
-  already careful, now go through one core helper that presses only a button whose every
-  label says close, dismiss, no thanks or not now and nothing else, and
-  the core's shared list refuses closing an account and signing out in
-  every app.
+  already careful, now go through one core helper. It presses only a
+  button whose every label says close, dismiss, no thanks or not now and
+  nothing else, never one in a dialog named for closing the account or
+  signing out, and the core's shared list refuses closing an account and
+  signing out in every app. Golden 1's history dialog Close reads every
+  label too.
 - **Nelnet reads every label a control carries.** The part of a label
   after " with subject " went unread as the document's title, and the
   labels joined after it with it, so "Download document with subject
@@ -225,8 +227,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   a press through the page raised, twelve apps went on to press a control
   it revealed, AT&T pressed the bill's View/print PDF next, and E*TRADE
   pressed the document's other controls, its own link a second time
-  among them. Each now waits for what the press brought and leaves the
-  document for another run.
+  among them. Each now presses nothing more, waits as long as ever for
+  what the press brought, and otherwise leaves the document for another
+  run.
 
 ## [0.45.0] - 2026-10-07
 

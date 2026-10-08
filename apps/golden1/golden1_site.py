@@ -72,6 +72,7 @@ from paperpull_core.controls import control_texts as _control_texts
 from paperpull_core.controls import second_step as _core_second_step
 from paperpull_core.controls import controls_named as _controls_named
 from paperpull_core.controls import escape_for_locator
+from paperpull_core.controls import control_labels as _control_labels
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
 from paperpull_core import pressing
@@ -1536,6 +1537,12 @@ def _pager(page, name_re, why: Optional[dict] = None):
             label = (el.get_attribute("aria-label") or el.inner_text(timeout=500) or "").strip()
             if not label or not name_re.match(label) or FORBIDDEN_CONTROL_RE.search(label):
                 continue
+            # Every label it carries, its text and title too. A Close by its
+            # aria-label whose text said "Close my account" was pressed
+            # (review of 0.45.0).
+            if any(FORBIDDEN_CONTROL_RE.search(w) or SETTINGS_CONTROL_RE.search(w)
+                   or AUTH_CONTROL_RE.search(w) for w in _control_labels(el)):
+                continue
             if not el.is_visible():
                 hidden += 1
                 continue
@@ -2139,19 +2146,18 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             return True
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
-        if outcome.page_error is not None:
-            # The press through the page raised, so it may have been made,
-            # and nothing more is pressed (pressing.Pressed). What it brought
-            # has been waited for, and the document is left for another run.
-            if trace is not None:
-                trace.append({"note": "the press through the page raised, so nothing more is pressed"})
-            return False
+        # The press through the page raised, so it may have been made, and
+        # nothing more is pressed (pressing.Pressed). No second step is
+        # looked for, and what the press brought is still waited for.
+        unsure_press = outcome.page_error is not None
+        if unsure_press and trace is not None:
+            trace.append({"note": "the press through the page raised, so nothing more is pressed"})
         appeared = _control_texts(page) - controls_before
         if trace is not None:
             trace.append({"note": "after the click", "on": _where(page.url or ""),
                           "appeared": len(appeared),
                           "new_tabs": len([p for p in ctx.pages if p not in before])})
-        step, step_label = _second_step(page, appeared)
+        step, step_label = (None, "") if unsure_press else _second_step(page, appeared)
         if step is not None:
             try:
                 step.click(timeout=8000)

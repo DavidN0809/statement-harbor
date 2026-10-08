@@ -229,11 +229,13 @@ SETTINGS_CONTROL_RE = re.compile(
 # close. Their one check read the button's text alone, so a button named
 # Close by its aria-label whose text or title said "Close my account" was
 # pressed too (review of 0.45.0). American Family's own, from the review of
-# 0.41.0, is the one this was taken from.
+# 0.41.0, is the one this was taken from. Up to two words may name what is
+# put away before its kind, "Close bill download menu", and the lists
+# below still refuse "Close account dialog".
 
 DISMISS_NAME_RE = re.compile(
     r"^\s*[×✕✖]?\s*(?:close|dismiss|no,?\s*thanks|not\s+now)"
-    r"(?:\s+(?:this\s+)?(?:dialog|banner|window|message|pop-?up|survey|notice|alert|panel|menu|"
+    r"(?:\s+(?:this\s+|the\s+)?(?:[\w'-]+\s+){0,2}?(?:dialog|banner|window|message|pop-?up|survey|notice|alert|panel|menu|"
     r"modal|notification|overlay))?\s*[×✕✖xX]?\s*$",
     re.I)
 
@@ -265,7 +267,10 @@ def is_dismiss_control(labels, forbidden_re: Optional[Pattern] = None,
     if not labels or any(_refused_words(w, forbidden_re) for w in labels):
         return False
     said = [w for w in labels if is_dismiss_label(w, forbidden_re, name_re)]
-    return bool(said) and all(w in said or _GLYPH_ONLY_RE.match(w) for w in labels)
+    # Another label may be the core's own whole dismiss name, a bare Close
+    # shown beside an aria-label in the app's own words, "Close Mobile menu".
+    return bool(said) and all(w in said or _GLYPH_ONLY_RE.match(w) or is_dismiss_label(w, forbidden_re)
+                              for w in labels)
 
 
 _FOCUS_IN_A_FORM_JS = r"""() => {
@@ -283,6 +288,33 @@ def _focus_in_a_form(page) -> bool:
         return True
 
 
+# The name of the dialog a control sits in, its aria-label, what its
+# aria-labelledby names or else its first heading, "" outside one. A Close
+# in a dialog asking "Close your account?" confirms, it does not dismiss.
+_DIALOG_NAME_JS = r"""el => {
+  const d = el.closest('[role=dialog], [role=alertdialog], dialog, [aria-modal=true]');
+  if (!d) return '';
+  const own = d.getAttribute('aria-label');
+  if (own) return own;
+  const ids = (d.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
+  const named = ids.map(id => { const n = document.getElementById(id); return n ? n.innerText : ''; })
+                   .join(' ').trim();
+  if (named) return named;
+  const h = d.querySelector('h1, h2, h3, h4, [role=heading]');
+  return h ? (h.innerText || '') : '';
+}"""
+
+
+def _in_a_refused_dialog(el) -> bool:
+    """Whether the dialog around `el` is named for something the core's
+    lists refuse. True when it could not be read."""
+    try:
+        name = re.sub(r"\s+", " ", el.evaluate(_DIALOG_NAME_JS) or "").strip()
+    except Exception:
+        return True
+    return bool(name) and _refused_words(name)
+
+
 def dismiss_overlays(page, forbidden_re: Optional[Pattern] = None,
                      name_re: Pattern = DISMISS_NAME_RE, within=None, escape: bool = True,
                      limit: int = 6, settle_ms: int = 250, click_ms: int = 1000) -> int:
@@ -290,9 +322,11 @@ def dismiss_overlays(page, forbidden_re: Optional[Pattern] = None,
     is in a form's control, which the key would reach. Then each visible
     button, in `within` when given, else anywhere on the page, whose name
     `name_re` takes and whose every label is_dismiss_control takes, against
-    the core's lists and the app's own `forbidden_re`. Never accept, and
-    never what closes an account or signs out. Answers how many it pressed.
-    Nothing here raises."""
+    the core's lists and the app's own `forbidden_re`, and that is not in a
+    dialog the core's lists refuse by its name. Never accept, and never what
+    closes an account or signs out. The buttons are read once, before any
+    press, so one that leaves the page moves none of the others along.
+    Answers how many it pressed. Nothing here raises."""
     if escape:
         try:
             if not _focus_in_a_form(page):
@@ -303,12 +337,13 @@ def dismiss_overlays(page, forbidden_re: Optional[Pattern] = None,
     pressed = 0
     try:
         found = (within if within is not None else page).get_by_role("button", name=name_re)
-        for i in range(min(found.count(), limit)):
-            el = found.nth(i)
+        for el in found.element_handles()[:limit]:
             try:
                 if not el.is_visible():
                     continue
                 if not is_dismiss_control(control_labels(el), forbidden_re, name_re):
+                    continue
+                if _in_a_refused_dialog(el):
                     continue
                 el.click(timeout=click_ms)
                 pressed += 1
