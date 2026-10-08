@@ -50,6 +50,7 @@ from typing import List, Optional, Tuple
 from urllib.parse import unquote, urlsplit
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
 
 # Everything on its way into a diagnostic file goes through here. It
 # lives in core because seventeen apps each had their own copy and
@@ -406,71 +407,19 @@ def _take_new_tab(page, new_pages, out_path: Path) -> bool:
 # Billing page
 # ---------------------------------------------------------------------------
 
-# What closes an overlay, as the whole of a control's words. Anything that
-# began with Close was pressed, "Close my account" and "Close policy" among
-# it (review of 0.41.0).
-_DISMISS_RE = re.compile(
-    r"^\s*(close|dismiss|no\s+thanks|not\s+now)"
-    r"(\s+(this\s+)?(dialog|banner|window|message|pop-?up|survey|notice|alert|panel|menu))?\s*[×✕x]?\s*$",
-    re.I)
-
-
-# A close button that shows only its glyph, the way Bootstrap draws one.
-_CLOSE_GLYPH_RE = re.compile(r"^\s*[×✕✖xX]\s*$")
-
-
 def _refused(words: str) -> bool:
     """Whether any of `words` is something the guard refuses."""
     return bool(words and (FORBIDDEN_CONTROL_RE.search(words) or SETTINGS_CONTROL_RE.search(words)
                            or AUTH_CONTROL_RE.search(words)))
 
 
-_FOCUS_IN_A_FORM_JS = r"""() => {
-  const a = document.activeElement;
-  return !!(a && a.closest && a.closest('form, input, select, textarea, [contenteditable]'));
-}"""
-
-
-def _focus_in_a_form(page) -> bool:
-    """Whether the focus is in a form's control, where a key would reach it.
-    True when it could not be told."""
-    try:
-        return bool(page.evaluate(_FOCUS_IN_A_FORM_JS))
-    except Exception:
-        return True
-
-
 def dismiss_overlay(page) -> None:
-    """Close a cookie banner, a survey prompt or a promo overlay, the things
-    that sit over signed-in pages and intercept clicks. Escape first, then
-    only a control that says close or dismiss, never accept. Escape is never
-    pressed while the focus is in a form's control, such as the one above a
-    bill's statements, which a key would reach (review of the Bill details
-    change)."""
-    try:
-        if not _focus_in_a_form(page):
-            page.keyboard.press("Escape")
-            page.wait_for_timeout(250)
-    except Exception:
-        pass
-    try:
-        cl = page.get_by_role("button", name=_DISMISS_RE)
-        for i in range(min(cl.count(), 6)):
-            el = cl.nth(i)
-            try:
-                if el.is_visible():
-                    label = (el.inner_text(timeout=500) or "").strip()
-                    if label and not (_DISMISS_RE.search(label) or _CLOSE_GLYPH_RE.search(label)):
-                        continue
-                    if (_refused(label) or _refused(el.get_attribute("aria-label") or "")
-                            or _refused(el.get_attribute("title") or "")):
-                        continue
-                    el.click(timeout=1000)
-                    page.wait_for_timeout(250)
-            except Exception:
-                continue
-    except Exception:
-        pass
+    """Put away a cookie banner, a survey prompt or a notice overlay, the
+    things that sit over signed-in pages and intercept clicks. Escape
+    first, then only a button whose every label says close, dismiss, no
+    thanks or not now and nothing else, never accept, and never what
+    closes an account or signs out (controls.dismiss_overlays)."""
+    _dismiss_overlays(page, FORBIDDEN_CONTROL_RE)
 
 
 def _bill_controls(page):
@@ -1835,6 +1784,13 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             return True
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
+        if outcome.page_error is not None:
+            # The press through the page raised, so it may have been made,
+            # and nothing more is pressed (pressing.Pressed). What it brought
+            # has been waited for, and the document is left for another run.
+            if trace is not None:
+                trace.append({"note": "the press through the page raised, so nothing more is pressed"})
+            return False
         appeared = _control_texts(page) - controls_before
         if trace is not None:
             trace.append({"note": "after the click", "url": redact(page.url or "")[:160],

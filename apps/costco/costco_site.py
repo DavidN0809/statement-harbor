@@ -91,6 +91,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from paperpull_core.identity import Identity
+from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from storage import now_iso
 
@@ -301,7 +302,6 @@ FALLBACK = {
     # found that one every time, so everything below picks by what is on
     # screen instead. See _VISIBLE_JS.
     "dialog": "[role=dialog], [aria-modal=true], .modal.show, .modal.in",
-    "dialog_close": "[role=dialog] button:has-text('Close')",
     "print_invoice": "a:has-text('Print Invoice')",
     # The receipt itself, inside the dialog. The dialog is the block worth
     # rendering, so the shell and the block are the same thing here.
@@ -1026,9 +1026,10 @@ def close_dialog(page) -> None:
 
     Escape rather than the Close button, because Escape is not a control
     and cannot be the wrong one. A page that ignores it falls back to the
-    dialog's own Close, found inside the dialog rather than by name, so
-    there is no way to reach a "Close Account" somewhere else on the
-    page."""
+    dialog's own Close, found inside the dialog, and only a button whose
+    every label says Close and nothing else. It was any button in a dialog
+    whose text held "Close", which a "Close Account" does (review of
+    0.45.0)."""
     if not dialog_open(page):
         return
     try:
@@ -1038,13 +1039,9 @@ def close_dialog(page) -> None:
         pass
     if not dialog_open(page):
         return
-    try:
-        button = page.locator(FALLBACK["dialog_close"]).first
-        if button.count():
-            button.click(timeout=5000)
-            page.wait_for_timeout(400)
-    except Exception as e:
-        log.warning("Could not close the receipt dialog: %s", e)
+    if not _dismiss_overlays(page, FORBIDDEN_CONTROL_RE, within=page.locator(FALLBACK["dialog"]),
+                             escape=False, settle_ms=400, click_ms=5000):
+        log.warning("Could not close the receipt dialog")
 
 
 def goto_receipt(page, purchase: Purchase) -> None:

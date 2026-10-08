@@ -616,6 +616,30 @@ def test_a_download_pdf_that_left_the_page_is_followed_by_no_other_press(
     assert {"note": "the control left the page before it was pressed"} in trace
 
 
+def test_a_download_pdf_pressed_through_the_page_that_raised_is_followed_by_no_other_press(
+        browser, tmp_path, monkeypatch):
+    """The press through the page raised, so it may have been made, and
+    press_once says nothing more is pressed then. The bill's View/print PDF
+    was pressed next all the same, since the label of a press that raised
+    was never counted as tried (review of 0.45.0)."""
+    from paperpull_core import pressing
+    bills = _bills(_newest_now(), 16)
+    presses = _presses_on_leaving(browser[0], monkeypatch)
+
+    def raised_through_the_page(pg, el, *args, **kwargs):
+        el.evaluate("e => e.click()")
+        return pressing.Pressed(pressing.THROUGH_THE_PAGE, RuntimeError("covered"),
+                                RuntimeError("the press through the page raised"))
+    monkeypatch.setattr(pressing, "press_once", raised_through_the_page)
+    ok, out, trace, page = _download(
+        browser, tmp_path, _history(bills, extra=_DOWNLOAD_GIVES_NOTHING), bills[1]["iso"])
+    assert not ok and not out.exists()
+    counts = presses or page.evaluate("window.presses")
+    assert counts["download"] == 1
+    assert counts["view"] == 0, "View/print PDF was pressed after a press that may have been made"
+    assert {"note": "the press through the page raised, so nothing more is pressed"} in trace
+
+
 def test_download_pdf_drawn_after_view_print_is_still_the_one_pressed(browser, tmp_path):
     """In real time, since what is tested is the wait."""
     bills = _bills(_newest_now(), 16)

@@ -36,6 +36,7 @@ from paperpull_core.capture import snapshot as _snapshot
 from paperpull_core.capture import take_new_pdf as _take_new_pdf
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.controls import escape_for_locator
+from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
 
 log = logging.getLogger("verizon_docs.site")
 
@@ -244,27 +245,18 @@ def is_safe_control(name: str) -> bool:
 DOWNLOAD_URL = "https://www.verizon.com/downloadbill/#/download"
 BILLING_URL = DOWNLOAD_URL
 
+# The whole name of the button that closes one of the mega-menus.
+_MENU_CLOSE_RE = re.compile(r"^\s*close\s+(?:[\w'-]+\s+){0,2}?menu\s*$", re.I)
+
 
 def dismiss_overlay(page) -> None:
     """Close Verizon's full-screen mega-menu overlay (Mobile/Home/Account menus)
-    which otherwise covers the page and intercepts clicks."""
-    try:
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(300)
-    except Exception:
-        pass
-    try:
-        cl = page.get_by_role("button", name=re.compile(r"^close .*(menu|sign in)", re.I))
-        for i in range(min(cl.count(), 6)):
-            el = cl.nth(i)
-            try:
-                if el.is_visible():
-                    el.click(timeout=1200)
-                    page.wait_for_timeout(300)
-            except Exception:
-                continue
-    except Exception:
-        pass
+    which otherwise covers the page and intercepts clicks. Only a button
+    whose every label is Close and a menu's name, "Close Mobile menu", and
+    never what closes an account or signs out (controls.dismiss_overlays).
+    Anything from "close" to a later "menu" or "sign in" was pressed,
+    "Close menu and sign out" among it (review of 0.45.0)."""
+    _dismiss_overlays(page, FORBIDDEN_CONTROL_RE, name_re=_MENU_CLOSE_RE, settle_ms=300, click_ms=1200)
 
 
 def goto_documents(page) -> bool:

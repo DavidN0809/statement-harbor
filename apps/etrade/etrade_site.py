@@ -158,6 +158,7 @@ from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
 
 # Everything on its way into a diagnostic file goes through here. It
 # lives in core because seventeen apps each had their own copy and
@@ -483,29 +484,12 @@ def _take_new_tab(page, new_pages, out_path: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 def dismiss_overlay(page) -> None:
-    """Close a cookie banner, a survey prompt or a promo overlay, the things
-    that sit over bank pages and intercept clicks. Escape first, then
-    only a control that says close or dismiss, never accept."""
-    try:
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(250)
-    except Exception:
-        pass
-    try:
-        cl = page.get_by_role("button", name=re.compile(r"^(close|dismiss|no thanks|not now)\b", re.I))
-        for i in range(min(cl.count(), 6)):
-            el = cl.nth(i)
-            try:
-                if el.is_visible():
-                    label = el.inner_text(timeout=500) or ""
-                    if FORBIDDEN_CONTROL_RE.search(label) or SESSION_CONTROL_RE.search(label):
-                        continue
-                    el.click(timeout=1000)
-                    page.wait_for_timeout(250)
-            except Exception:
-                continue
-    except Exception:
-        pass
+    """Put away a cookie banner, a survey prompt or a notice overlay, the
+    things that sit over signed-in pages and intercept clicks. Escape
+    first, then only a button whose every label says close, dismiss, no
+    thanks or not now and nothing else, never accept, and never what
+    closes an account or signs out (controls.dismiss_overlays)."""
+    _dismiss_overlays(page, FORBIDDEN_CONTROL_RE)
 
 
 def _bill_controls(page):
@@ -1940,7 +1924,7 @@ def _json_answer_shape(value) -> dict:
 
 
 def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
-               dl_dir=None) -> bool:
+               dl_dir=None, unsure: Optional[list] = None) -> bool:
     """Click `el` and save whatever PDF the site produces, a file landing
     in `dl_dir`, a download event, a PDF response, a new tab, this tab
     moving to the document, or a second control the click revealed. A PDF
@@ -1948,7 +1932,9 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     was made during this attempt, and for a redirect, the request it came
     from. A download event or a file landing in `dl_dir` is not tied to the
     click that way yet, so such an answer wins over them.
-    `trace` collects what happened, the click's own outcome included."""
+    `trace` collects what happened, the click's own outcome included.
+    `unsure` is given the label when the press may have been made and
+    nothing came, so nothing more is pressed for this document."""
     ctx = page.context
     got: dict = {}
     downloads: list = []
@@ -2110,6 +2096,15 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             return True
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
+        if outcome.page_error is not None:
+            # The press through the page raised, so it may have been made,
+            # and nothing more is pressed (pressing.Pressed). What it brought
+            # has been waited for, and the document is left for another run.
+            if trace is not None:
+                trace.append({"note": "the press through the page raised, so nothing more is pressed"})
+            if unsure is not None:
+                unsure.append(label)
+            return False
         appeared = _control_texts(page) - controls_before
         if trace is not None:
             trace.append({"note": "after the click", "url": mask_href(page.url or ""),
@@ -3146,6 +3141,7 @@ def _try_every_way(page, dl_dir, iso_date: str, out_path: Path, title: str, trac
         order = [i for kind in ("title", "control", "pointer")
                  for i, c in enumerate(cands) if c["kind"] == kind and not left_out(i)]
         tried = 0
+        unsure: list = []
         for i in order[:6]:
             c, el = cands[i], els[i]
             if el is None:
@@ -3154,8 +3150,12 @@ def _try_every_way(page, dl_dir, iso_date: str, out_path: Path, title: str, trac
             if trace is not None:
                 trace.append({"note": "trying", "kind": c["kind"]})
             tried += 1
-            if _catch_pdf(page, el, label, out_path, trace, dl_dir):
+            if _catch_pdf(page, el, label, out_path, trace, dl_dir, unsure=unsure):
                 return True
+            # A press that may have been made ends this document, so no
+            # other control of its row is pressed (review of 0.45.0).
+            if unsure:
+                return False
             if trace is not None and requests:
                 trace.append({"note": "requests after that click", "requests": requests[-12:]})
                 requests.clear()
@@ -3212,8 +3212,13 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         show_period_for(page, iso_date, trace)
     el, label = _row_link_for(page, iso_date, title, trace)
     if el is not None and is_safe_control(label):
-        if _catch_pdf(page, el, label, out_path, trace, dl_dir):
+        unsure: list = []
+        if _catch_pdf(page, el, label, out_path, trace, dl_dir, unsure=unsure):
             return True
+        # A press that may have been made ends this document, so its own
+        # control is not pressed again (review of 0.45.0).
+        if unsure:
+            return False
     expand_all(page)
 
     el, label = _control_for(page, iso_date, title, trace)

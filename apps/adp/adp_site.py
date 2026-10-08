@@ -86,6 +86,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
 
 # Everything on its way into a diagnostic file goes through here. It
 # lives in core because seventeen apps each had their own copy and
@@ -345,29 +346,12 @@ def is_safe_control(name: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def dismiss_overlay(page) -> None:
-    """Close a cookie banner, a survey prompt or a promo overlay, the things
-    that sit over signed-in pages and intercept clicks. Escape first, then
-    only a control that says close or dismiss, never accept."""
-    try:
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(250)
-    except Exception:
-        pass
-    try:
-        cl = page.get_by_role("button", name=re.compile(r"^(close|dismiss|no thanks|not now)\b", re.I))
-        for i in range(min(cl.count(), 6)):
-            el = cl.nth(i)
-            try:
-                if el.is_visible():
-                    label = el.inner_text(timeout=500) or ""
-                    if FORBIDDEN_CONTROL_RE.search(label):
-                        continue
-                    el.click(timeout=1000)
-                    page.wait_for_timeout(250)
-            except Exception:
-                continue
-    except Exception:
-        pass
+    """Put away a cookie banner, a survey prompt or a notice overlay, the
+    things that sit over signed-in pages and intercept clicks. Escape
+    first, then only a button whose every label says close, dismiss, no
+    thanks or not now and nothing else, never accept, and never what
+    closes an account or signs out (controls.dismiss_overlays)."""
+    _dismiss_overlays(page, FORBIDDEN_CONTROL_RE)
 
 
 def _bill_controls(page):

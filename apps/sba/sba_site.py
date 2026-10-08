@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
 
 # Everything on its way into a diagnostic file goes through here. It
 # lives in core because seventeen apps each had their own copy and
@@ -325,29 +326,12 @@ def _take_new_tab(page, new_pages, out_path: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 def dismiss_overlay(page) -> None:
-    """Close a cookie banner, a survey prompt or a notice overlay, the
-    things that sit over portal pages and intercept clicks. Escape first, then
-    only a control that says close or dismiss, never accept."""
-    try:
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(250)
-    except Exception:
-        pass
-    try:
-        cl = page.get_by_role("button", name=re.compile(r"^(close|dismiss|no thanks|not now)\b", re.I))
-        for i in range(min(cl.count(), 6)):
-            el = cl.nth(i)
-            try:
-                if el.is_visible():
-                    label = el.inner_text(timeout=500) or ""
-                    if FORBIDDEN_CONTROL_RE.search(label):
-                        continue
-                    el.click(timeout=1000)
-                    page.wait_for_timeout(250)
-            except Exception:
-                continue
-    except Exception:
-        pass
+    """Put away a cookie banner, a survey prompt or a notice overlay, the
+    things that sit over signed-in pages and intercept clicks. Escape
+    first, then only a button whose every label says close, dismiss, no
+    thanks or not now and nothing else, never accept, and never what
+    closes an account or signs out (controls.dismiss_overlays)."""
+    _dismiss_overlays(page, FORBIDDEN_CONTROL_RE)
 
 
 def _bill_controls(page):
@@ -663,6 +647,13 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             return True
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
+        if outcome.page_error is not None:
+            # The press through the page raised, so it may have been made,
+            # and nothing more is pressed (pressing.Pressed). What it brought
+            # has been waited for, and the document is left for another run.
+            if trace is not None:
+                trace.append({"note": "the press through the page raised, so nothing more is pressed"})
+            return False
         appeared = _control_texts(page) - controls_before
         if trace is not None:
             trace.append({"note": "after the click", "url": redact(page.url or "")[:160],

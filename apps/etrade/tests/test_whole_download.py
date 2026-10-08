@@ -103,7 +103,7 @@ def run(monkeypatch, tmp_path):
     hits: list = []
     brings: set = set()
 
-    def fake(pg, el, label, out_path, trace=None, dl_dir=None):
+    def fake(pg, el, label, out_path, trace=None, dl_dir=None, unsure=None):
         before = len(pg.evaluate("window.hits"))
         try:
             el.click(timeout=3000)

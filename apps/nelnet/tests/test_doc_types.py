@@ -103,6 +103,22 @@ def test_the_guard_reads_the_control_and_not_the_title_of_its_document():
         assert not site.is_safe_control(label), label
 
 
+def test_every_label_a_control_carries_is_read_and_not_only_the_first():
+    """pressing.press_once joins a control's text, aria-label and title
+    with " | ". Everything after the first " with subject " was taken for
+    the document's title and went unread (review of 0.45.0)."""
+    for label in ["Download document with subject Notice | Make a payment",
+                  "Download document with subject Notice | Download document with subject X | Pay now",
+                  "Download | Download document with subject Notice | Sign out",
+                  "Make a payment | Download document with subject Notice",
+                  "Download document with subject Notice |  with subject Make a payment"]:
+        assert not site.is_safe_control(label), label
+    for label in ["Download | Download document with subject Payment Confirmation",
+                  "Download document with subject Payment Confirmation | Download document",
+                  "2024 1098-E Form | 2024 1098-E Form"]:
+        assert site.is_safe_control(label), label
+
+
 def test_a_document_control_that_also_pays_is_refused():
     for label in ["View statement and pay", "Pay and download statement"]:
         assert not site.is_safe_control(label), label

@@ -110,6 +110,7 @@ from pathlib import Path
 from typing import List, NamedTuple, Optional, Tuple
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
 from paperpull_core.controls import safe_selects as _safe_selects
 
 # Everything on its way into a diagnostic file goes through here. It
@@ -416,29 +417,12 @@ def _take_new_tab(page, new_pages, out_path: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 def dismiss_overlay(page) -> None:
-    """Close a cookie banner, a survey prompt or a promo overlay, the things
-    that sit over att.com pages and intercept clicks. Escape first, then
-    only a control that says close or dismiss, never accept."""
-    try:
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(250)
-    except Exception:
-        pass
-    try:
-        cl = page.get_by_role("button", name=re.compile(r"^(close|dismiss|no thanks|not now)\b", re.I))
-        for i in range(min(cl.count(), 6)):
-            el = cl.nth(i)
-            try:
-                if el.is_visible():
-                    label = el.inner_text(timeout=500) or ""
-                    if FORBIDDEN_CONTROL_RE.search(label):
-                        continue
-                    el.click(timeout=1000)
-                    page.wait_for_timeout(250)
-            except Exception:
-                continue
-    except Exception:
-        pass
+    """Put away a cookie banner, a survey prompt or a notice overlay, the
+    things that sit over signed-in pages and intercept clicks. Escape
+    first, then only a button whose every label says close, dismiss, no
+    thanks or not now and nothing else, never accept, and never what
+    closes an account or signs out (controls.dismiss_overlays)."""
+    _dismiss_overlays(page, FORBIDDEN_CONTROL_RE)
 
 
 ACCOUNT_KIND_RE = re.compile(
@@ -1810,6 +1794,9 @@ def _view_print_button(page):
 # control left the page before anything pressed it. A page's own words
 # never hold a NUL, so no label can read as this.
 _LEFT_THE_PAGE = "\x00left the page"
+# What it adds when its press through the page raised, so the press may
+# have been made and nothing more is pressed for this bill.
+_PRESS_UNSURE = "\x00a press that may have been made"
 
 
 def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
@@ -1893,7 +1880,9 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             brought=lambda: bool(downloads or got or (_control_texts(page) - controls_before)))
         if outcome.error is not None:
             log.info("click on %r failed: %s", label, str(outcome.error)[:120])
-        if pressed is not None and outcome.page_error is None and outcome.how != pressing.GONE:
+        # A press through the page that raised may have been made, so its
+        # control is counted as pressed too (review of 0.45.0).
+        if pressed is not None and outcome.how != pressing.GONE:
             pressed.append(label)
         if trace is not None:
             if outcome.error is None:
@@ -1932,6 +1921,15 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             return True
         if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
             return True
+        if outcome.page_error is not None:
+            # The press through the page raised, so it may have been made,
+            # and nothing more is pressed (pressing.Pressed). What it brought
+            # has been waited for, and the bill is left for another run.
+            if trace is not None:
+                trace.append({"note": "the press through the page raised, so nothing more is pressed"})
+            if pressed is not None:
+                pressed.append(_PRESS_UNSURE)
+            return False
         # The menu under "Download PDF" holds "Regular PDF", which saves
         # the file, and "View/print PDF", which opens a tab. Found by text.
         step, step_label = _menu_entry(page, _REGULAR_PDF_RE)
@@ -2057,6 +2055,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
                 # page was drawn anew, and a View/print PDF found on it now may
                 # be another bill's. Nothing more is pressed for this one.
                 if _LEFT_THE_PAGE in tried:
+                    return False
+                # Its press through the page raised, so it may have been made,
+                # and nothing more is pressed for this bill (review of 0.45.0).
+                if _PRESS_UNSURE in tried:
                     return False
                 # Download PDF gave nothing. View/print PDF is the other
                 # control the survey saw, and it may open the PDF in a tab.

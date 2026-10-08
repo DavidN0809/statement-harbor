@@ -86,7 +86,7 @@ def presses(monkeypatch):
     hits: list = []
     brings: set = set()
 
-    def fake(pg, el, label, out_path, trace=None, dl_dir=None):
+    def fake(pg, el, label, out_path, trace=None, dl_dir=None, unsure=None):
         before = len(pg.evaluate("window.hits"))
         try:
             el.click(timeout=3000)
@@ -455,7 +455,7 @@ def test_a_box_drawn_in_a_shadow_root_counts_once(page, monkeypatch):
     over."""
     pressed: list = []
 
-    def fake(pg, el, label, out_path, trace=None, dl_dir=None):
+    def fake(pg, el, label, out_path, trace=None, dl_dir=None, unsure=None):
         if label != "Download":
             return False
         el.click()
@@ -841,3 +841,55 @@ def test_a_title_with_a_slash_is_still_found_by_its_links_own_words(page, presse
     el, label = site._row_link_for(page, ALONE, title, trace)
     assert el is not None and label == title, trace
     assert not _refusals(trace), trace
+
+
+@pytest.fixture
+def unsure_presses(page, monkeypatch):
+    """The real catch, whose press through the page raises after it went
+    through, so the press may have been made (pressing.Pressed's
+    page_error). Remembers each element pressed, and every wait is a
+    moment."""
+    from paperpull_core import pressing
+    pressed: list = []
+
+    def raised_through_the_page(pg, el, *args, **kwargs):
+        before = len(pg.evaluate("window.hits"))
+        el.evaluate("e => e.click()")
+        pressed.extend(pg.evaluate("window.hits")[before:])
+        return pressing.Pressed(pressing.THROUGH_THE_PAGE, RuntimeError("covered"),
+                                RuntimeError("the press through the page raised"))
+    monkeypatch.setattr(pressing, "press_once", raised_through_the_page)
+    own_wait = page.wait_for_timeout
+    monkeypatch.setattr(page, "wait_for_timeout", lambda ms: own_wait(min(ms, 20)))
+    return pressed
+
+
+def test_nothing_more_is_pressed_for_a_document_after_a_press_it_was_unsure_of(
+        page, unsure_presses, monkeypatch, tmp_path):
+    """press_once says nothing more is pressed once its press through the
+    page raised, since that press may have been made. The walk went on to
+    the row's next control for the same document (review of 0.45.0)."""
+    annual = "Annual " + BROKERAGE
+    _listed(monkeypatch, SHARED, [annual, BROKERAGE])
+    page.set_content("<ul>"
+                     "<li><span>11/30/25</span> <span>%s</span> <a href='#' data-guid='g-theirs'>View</a></li>"
+                     "<li><span>11/30/25</span> <span data-guid='g-mine-title'>%s</span> "
+                     "<a href='#' data-guid='g-mine'>View</a></li>"
+                     "</ul>%s" % (BROKERAGE, annual, LISTENER))
+    got = site._try_every_way(page, tmp_path, SHARED, tmp_path / "out.pdf", annual, [])
+    assert not got
+    assert unsure_presses == ["g-mine-title"], unsure_presses
+
+
+def test_download_bill_presses_nothing_more_after_a_press_it_was_unsure_of(
+        page, unsure_presses, monkeypatch, tmp_path):
+    monkeypatch.setattr(site, "_LISTED", {SHARED: 2})
+    monkeypatch.setattr(site, "_LISTED_TITLES", BOTH)
+    rows = "".join(
+        "<tr><td>11/30/25</td><td>%s</td>"
+        "<td><a href='#' data-guid='g-%s' aria-label='%s PDF for %s'>%s</a></td>"
+        "<td><a href='#' data-guid='g-%s-insert'>Insert</a></td></tr>" % (ACCOUNT, g, t, ACCOUNT, t, g)
+        for g, t in (("theirs", RETIREMENT), ("mine", BROKERAGE)))
+    page.set_content("<table><tbody>%s</tbody></table>%s" % (rows, LISTENER))
+    assert not site.download_bill(page, tmp_path, SHARED, tmp_path / "out.pdf", BROKERAGE, [])
+    assert unsure_presses == ["g-mine"], unsure_presses

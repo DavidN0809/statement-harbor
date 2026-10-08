@@ -136,7 +136,7 @@ def capture(browser, tmp_path, monkeypatch):
     context = browser.new_context(viewport={"width": 1000, "height": 600})
     monkeypatch.setattr(pressing, "PRESS_MS", 500)
 
-    def run(app, extra="", taken_away=False):
+    def run(app, extra="", taken_away=False, page_error=False):
         site = site_of(app)
         monkeypatch.setattr(site, "is_safe_url", lambda url: (
             urlsplit(url or "").hostname == "127.0.0.1" and urlsplit(url).port == port))
@@ -167,6 +167,17 @@ def capture(browser, tmp_path, monkeypatch):
             monkeypatch.setattr(pressing, "press_once", then_redrawn)
             # Every wait after the press is a moment, so a capture that went
             # on would reach its second step quickly.
+            own_wait = page.wait_for_timeout
+            page.wait_for_timeout = lambda ms: own_wait(min(ms, 20))
+        if page_error:
+            # The press through the page raised, so it may have been made,
+            # and the page shows what such a press would reveal, a Download
+            # PDF. Nothing more may be pressed (pressing.Pressed).
+            def raised_through_the_page(*args, **kwargs):
+                page.evaluate(REDRAWN)
+                return pressing.Pressed(pressing.THROUGH_THE_PAGE, sync_api.TimeoutError("covered"),
+                                        sync_api.Error("the press through the page raised"))
+            monkeypatch.setattr(pressing, "press_once", raised_through_the_page)
             own_wait = page.wait_for_timeout
             page.wait_for_timeout = lambda ms: own_wait(min(ms, 20))
         try:
@@ -244,3 +255,15 @@ def test_a_control_the_page_took_away_is_not_pressed_nor_anything_after_it(captu
     assert page.result["saved"] is False
     assert page.evaluate("window.presses") == 0
     assert page.evaluate("window.laterPresses") == 0, "a control drawn after the press was pressed"
+
+
+@pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
+def test_nothing_is_pressed_after_a_press_through_the_page_that_raised(capture, app):
+    """press_once says the press through the page may have been made when it
+    raised, and that nothing more is pressed then (page_error). Every
+    capture went on to its second step all the same, and pressed a Download
+    PDF the page showed after it (review of 0.45.0)."""
+    page = capture(app, page_error=True)
+    assert "stop" not in page.result, page.result
+    assert page.result["saved"] is False
+    assert page.evaluate("window.laterPresses") == 0, "a control shown after the press was pressed"

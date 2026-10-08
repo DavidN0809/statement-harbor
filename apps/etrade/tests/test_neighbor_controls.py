@@ -87,7 +87,7 @@ def clicks(monkeypatch):
     The page's Download reports which boxes it handed over."""
     got: list = []
 
-    def fake(pg, el, label, out_path, trace=None, dl_dir=None):
+    def fake(pg, el, label, out_path, trace=None, dl_dir=None, unsure=None):
         if label == "Download":
             el.click()
             got.append(("Download", pg.evaluate("window.handed")))

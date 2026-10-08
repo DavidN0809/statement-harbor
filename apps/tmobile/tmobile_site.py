@@ -30,6 +30,7 @@ from typing import List, Optional, Tuple
 
 from paperpull_core.delivery import DOWNLOAD, DocumentRequest
 from paperpull_core.identity import Identity
+from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
 
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import human_date as _human_date
@@ -244,24 +245,11 @@ def is_safe_control(name: str) -> bool:
 
 def dismiss_overlay(page) -> None:
     """Close T-Mobile's full-screen mega-menu / bill-download menu overlay,
-    which otherwise covers the page and intercepts clicks."""
-    try:
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(250)
-    except Exception:
-        pass
-    try:
-        cl = page.get_by_role("button", name=re.compile(r"^close\b", re.I))
-        for i in range(min(cl.count(), 6)):
-            el = cl.nth(i)
-            try:
-                if el.is_visible():
-                    el.click(timeout=1000)
-                    page.wait_for_timeout(250)
-            except Exception:
-                continue
-    except Exception:
-        pass
+    which otherwise covers the page and intercepts clicks. Only a button
+    whose every label says close and nothing else, never what closes an
+    account or signs out (controls.dismiss_overlays). Anything that began
+    with close was pressed, with no check at all (review of 0.45.0)."""
+    _dismiss_overlays(page, FORBIDDEN_CONTROL_RE)
 
 
 def _detailed_buttons(page):

@@ -203,6 +203,30 @@ All notable changes to PaperPull are recorded here. Versioning follows
   though it were the whole order, and no Rename could put it back, since
   Rename reads the part from the file's own name. The new name now keeps
   the part, as Rename does.
+- **Putting an overlay away never presses Close account or Sign out.**
+  Eleven apps put a cookie banner or a survey away by pressing any
+  visible button whose name began with close, dismiss, no thanks or not
+  now, after reading only its text against the app's own list, so a
+  "Close account" button, or one named Close whose text or title said
+  "Close my account" or "Sign out", was pressed. Apple Card never read a
+  button's title, T-Mobile checked nothing, Verizon's reached "Close menu
+  and sign out", and Costco closed its receipt dialog through any button
+  whose text held Close. All of them, and American Family's, which was
+  already careful, now go through one core helper that presses only a button whose every
+  label says close, dismiss, no thanks or not now and nothing else, and
+  the core's shared list refuses closing an account and signing out in
+  every app.
+- **Nelnet reads every label a control carries.** The part of a label
+  after " with subject " went unread as the document's title, and the
+  labels joined after it with it, so "Download document with subject
+  Notice | Make a payment" passed the guard. Each label is now judged on
+  its own.
+- **Nothing more is pressed after a press that may have been made.** When
+  a press through the page raised, twelve apps went on to press a control
+  it revealed, AT&T pressed the bill's View/print PDF next, and E*TRADE
+  pressed the document's other controls, its own link a second time
+  among them. Each now waits for what the press brought and leaves the
+  document for another run.
 
 ## [0.45.0] - 2026-10-07
 

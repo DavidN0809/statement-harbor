@@ -209,8 +209,115 @@ SETTINGS_CONTROL_RE = re.compile(
     r"\bwithholding\b|\bautopay\b|\bauto-pay\b|"
     r"\bappl(y|ies|ied|ication)\b|\bplace\s+order\b|\brebalance\b|"
     r"\breallocate\b|\bliquidat(e|es|ed|ing|ion)\b|"
-    r"\bbuy\b|\bsell\b|\bschedule\s+(a\s+)?(payment|transfer)\b",
+    r"\bbuy\b|\bsell\b|\bschedule\s+(a\s+)?(payment|transfer)\b|"
+    # And what ends an account or the session. A dismiss press once took
+    # "Close account" and "Dismiss and sign out" for a Close, and most
+    # apps' own lists named neither (review of 0.45.0). "Close Account
+    # menu" puts a menu away, and "Closed", "Closing" and "Close of" name
+    # documents, so none of those is one.
+    r"\bclose\s+(?!of\b)(?:[\w'-]+\s+){0,3}?accounts?\b(?!\s+menu\b)|"
+    r"\b(?:sign|log)[\s_-]?(?:out|off)\b",
     re.I)
+
+
+# -- putting an overlay away ------------------------------------------------------
+#
+# A cookie banner, a survey or a promo sits over the page and takes the
+# press meant for what is under it. What puts one away is a control whose
+# WHOLE name says so. Eleven apps pressed any button whose name began with
+# close, dismiss, no thanks or not now, and "Close account" begins with
+# close. Their one check read the button's text alone, so a button named
+# Close by its aria-label whose text or title said "Close my account" was
+# pressed too (review of 0.45.0). American Family's own, from the review of
+# 0.41.0, is the one this was taken from.
+
+DISMISS_NAME_RE = re.compile(
+    r"^\s*[×✕✖]?\s*(?:close|dismiss|no,?\s*thanks|not\s+now)"
+    r"(?:\s+(?:this\s+)?(?:dialog|banner|window|message|pop-?up|survey|notice|alert|panel|menu|"
+    r"modal|notification|overlay))?\s*[×✕✖xX]?\s*$",
+    re.I)
+
+# A close button that shows only its glyph, the way Bootstrap draws one.
+_GLYPH_ONLY_RE = re.compile(r"^\s*[×✕✖✗xX]?\s*$")
+
+
+def _refused_words(label: str, forbidden_re: Optional[Pattern] = None) -> bool:
+    return bool(SETTINGS_CONTROL_RE.search(label) or AUTH_CONTROL_RE.search(label)
+                or (forbidden_re is not None and forbidden_re.search(label)))
+
+
+def is_dismiss_label(label: str, forbidden_re: Optional[Pattern] = None,
+                     name_re: Pattern = DISMISS_NAME_RE) -> bool:
+    """Whether this one label, whole, says put it away and nothing else."""
+    label = re.sub(r"\s+", " ", (label or "").strip())
+    return bool(label and name_re.search(label) and not _refused_words(label, forbidden_re))
+
+
+def is_dismiss_control(labels, forbidden_re: Optional[Pattern] = None,
+                       name_re: Pattern = DISMISS_NAME_RE) -> bool:
+    """Whether a control whose labels, its text, aria-label and title as
+    control_labels reads them, are these only puts something away. One of
+    them says so whole, every other says so too or is a glyph alone, and
+    none is a word the core's lists or the app's own `forbidden_re` refuse.
+    No labels at all is not a dismiss control."""
+    labels = [re.sub(r"\s+", " ", (w or "").strip()) for w in labels or ()]
+    labels = [w for w in labels if w]
+    if not labels or any(_refused_words(w, forbidden_re) for w in labels):
+        return False
+    said = [w for w in labels if is_dismiss_label(w, forbidden_re, name_re)]
+    return bool(said) and all(w in said or _GLYPH_ONLY_RE.match(w) for w in labels)
+
+
+_FOCUS_IN_A_FORM_JS = r"""() => {
+  const a = document.activeElement;
+  return !!(a && a.closest && a.closest('form, input, select, textarea, [contenteditable]'));
+}"""
+
+
+def _focus_in_a_form(page) -> bool:
+    """Whether the focus is in a form's control, where a key would reach
+    it. True when it could not be told."""
+    try:
+        return bool(page.evaluate(_FOCUS_IN_A_FORM_JS))
+    except Exception:
+        return True
+
+
+def dismiss_overlays(page, forbidden_re: Optional[Pattern] = None,
+                     name_re: Pattern = DISMISS_NAME_RE, within=None, escape: bool = True,
+                     limit: int = 6, settle_ms: int = 250, click_ms: int = 1000) -> int:
+    """Put away what sits over the page. Escape first, never while the focus
+    is in a form's control, which the key would reach. Then each visible
+    button, in `within` when given, else anywhere on the page, whose name
+    `name_re` takes and whose every label is_dismiss_control takes, against
+    the core's lists and the app's own `forbidden_re`. Never accept, and
+    never what closes an account or signs out. Answers how many it pressed.
+    Nothing here raises."""
+    if escape:
+        try:
+            if not _focus_in_a_form(page):
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(settle_ms)
+        except Exception:
+            pass
+    pressed = 0
+    try:
+        found = (within if within is not None else page).get_by_role("button", name=name_re)
+        for i in range(min(found.count(), limit)):
+            el = found.nth(i)
+            try:
+                if not el.is_visible():
+                    continue
+                if not is_dismiss_control(control_labels(el), forbidden_re, name_re):
+                    continue
+                el.click(timeout=click_ms)
+                pressed += 1
+                page.wait_for_timeout(settle_ms)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return pressed
 
 
 # -- reading the controls on a page -------------------------------------------

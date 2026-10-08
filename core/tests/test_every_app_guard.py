@@ -28,6 +28,8 @@ DANGEROUS = [
     "Edit Preferences", "Document Removal", "Loss Mitigation Application",
     "Manage AutoPay", "Turn off", "Opt Out", "Update Beneficiary",
     "Place Order", "Rebalance", "Liquidate", "Buy", "Sell",
+    # A dismiss press once took any of these for a Close (review of 0.45.0).
+    "Close Account", "Close my account", "Sign Out", "Log out", "Logout",
 ]
 
 # Shapes a URL guard must refuse. `{h}` is the app's own allowed host.
@@ -66,6 +68,33 @@ def test_no_app_will_click_a_control_that_commits_something(app):
         return
     clickable = [l for l in DANGEROUS if check(l)]
     assert not clickable, "%s would click: %s" % (app.name, clickable)
+
+
+# Labels an app's guard may take, one of which every guard does.
+_ACCEPTED = ["Download statement", "Download PDF", "View statement", "View PDF", "Download",
+             "View Receipt", "Download Bill", "Download 1098-E", "View order details",
+             "Purchase history",
+             "Download document with subject Repayment Notice"]
+
+
+@pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
+def test_a_control_with_one_label_the_guard_refuses_is_refused_whatever_its_others_say(app):
+    """pressing.press_once hands the guard every label a control carries,
+    its text, aria-label and title, joined by " | ". Nelnet took the part
+    of a label after " with subject " off as the document's own title, so
+    everything after it, the labels joined on included, went unread, and
+    "Download document with subject Notice | Make a payment" passed (review
+    of 0.45.0). A label the guard refuses alone is refused beside one it
+    takes, on either side."""
+    site = _site(app)
+    check = getattr(site, "is_safe_control", None)
+    if check is None:
+        return
+    accepted = [label for label in _ACCEPTED if check(label)]
+    assert accepted, "%s takes none of %s, so this asks nothing of it" % (app.name, _ACCEPTED)
+    joined = ["%s | %s" % pair for ok in accepted for d in DANGEROUS for pair in ((ok, d), (d, ok))]
+    clickable = [label for label in joined if check(label)]
+    assert not clickable, "%s would click: %s" % (app.name, clickable[:6])
 
 
 @pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)

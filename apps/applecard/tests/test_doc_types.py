@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds the AppSpec
-from paperpull_core import doc_types
+from paperpull_core import controls, doc_types
 import applecard_site as site
 from storage import build_pdf_filename
 
@@ -94,9 +94,9 @@ def test_closing_the_card_or_savings_is_refused_however_it_is_worded():
         assert site.FORBIDDEN_CONTROL_RE.search(label), label
     for label in ["Close", "Dismiss", "No thanks", "No, thanks", "Not now"]:
         assert not site.FORBIDDEN_CONTROL_RE.search(label), label
-        assert site.DISMISS_RE.match(label), label
+        assert controls.is_dismiss_label(label, site.FORBIDDEN_CONTROL_RE), label
     for label in ["Close Apple Card Account", "Close dialog and pay", "Not now, pay later", "Closed"]:
-        assert not site.DISMISS_RE.match(label), label
+        assert not controls.is_dismiss_label(label, site.FORBIDDEN_CONTROL_RE), label
 
 
 def test_an_export_is_never_mistaken_for_a_statement():

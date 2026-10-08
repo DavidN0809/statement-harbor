@@ -492,7 +492,7 @@ def test_the_selectors_meant_for_playwright_are_only_used_there():
     """These carry :has-text on purpose, and page.locator is the only
     thing that may see them."""
     import inspect
-    for name in ("receipt_button", "dialog_close", "print_invoice"):
+    for name in ("receipt_button", "print_invoice"):
         assert ":has-text(" in site.FALLBACK[name], name
     src = inspect.getsource(site)
     assert 'page.evaluate(_READ_ROWS_JS' in src
