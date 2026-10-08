@@ -356,6 +356,25 @@ def test_a_turned_off_control_the_person_pressed_stops_the_run(show, monkeypatch
     assert presses(page) == 1, "only the person's press"
 
 
+def test_a_control_the_page_turned_on_as_playwright_gave_up_is_not_left(show, monkeypatch):
+    """Turned off for all of Playwright's wait and turned on just after. It
+    no longer reads as turned off, so it is not left as one, and the run
+    stops as it did."""
+    page = show(OFF % "")
+    real = sync_api.Locator.click
+
+    def then_on(self, *args, **kwargs):
+        try:
+            return real(self, *args, **kwargs)
+        finally:
+            self.page.evaluate("document.getElementById('go').disabled = false")
+    monkeypatch.setattr(sync_api.Locator, "click", then_on)
+    with pytest.raises(pressing.NotPressed) as stop:
+        press(page, timeout=500)
+    assert not isinstance(stop.value, pressing.TurnedOff)
+    assert presses(page) == 0
+
+
 def test_a_turned_off_control_that_could_not_be_listened_to_stops_the_run(show, monkeypatch):
     page = show(OFF % "")
     monkeypatch.setattr(pressing, "_HEAR_JS", "(el, word) => { throw new Error('no'); }")
