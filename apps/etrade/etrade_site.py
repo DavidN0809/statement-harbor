@@ -2120,6 +2120,10 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 if trace is not None:
                     trace.append({"note": "second step click failed", "words": _fixed_word(step_label) or "other",
                                   "error": type(e).__name__})
+                # A click that raised may have been made, so nothing more is
+                # pressed for this document (review of 0.45.0's fixes).
+                if unsure is not None:
+                    unsure.append(step_label)
             if wait_for_pdf(20):
                 return True
             if _take_same_tab(page, start_url, out_path, trace) or \

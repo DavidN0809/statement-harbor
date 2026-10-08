@@ -1953,6 +1953,11 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 if trace is not None:
                     trace.append({"note": "second step click failed", "control": redact(step_label)[:60],
                                   "error": str(e)[:160]})
+                # A click that raised may have been made, so nothing more is
+                # pressed for this bill, View/print PDF again least of all
+                # (review of 0.45.0's fixes).
+                if pressed is not None:
+                    pressed.extend([step_label, _PRESS_UNSURE])
             if wait_for_pdf(20):
                 return True
             if _take_viewer(page, out_path, trace) or \

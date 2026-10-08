@@ -229,13 +229,13 @@ SETTINGS_CONTROL_RE = re.compile(
 # close. Their one check read the button's text alone, so a button named
 # Close by its aria-label whose text or title said "Close my account" was
 # pressed too (review of 0.45.0). American Family's own, from the review of
-# 0.41.0, is the one this was taken from. Up to two words may name what is
-# put away before its kind, "Close bill download menu", and the lists
-# below still refuse "Close account dialog".
+# 0.41.0, is the one this was taken from. Nothing may stand between Close
+# and what it puts away, since "Close session window" and "Close policy
+# panel" do more than dismiss (review of this change).
 
 DISMISS_NAME_RE = re.compile(
     r"^\s*[×✕✖]?\s*(?:close|dismiss|no,?\s*thanks|not\s+now)"
-    r"(?:\s+(?:this\s+|the\s+)?(?:[\w'-]+\s+){0,2}?(?:dialog|banner|window|message|pop-?up|survey|notice|alert|panel|menu|"
+    r"(?:\s+(?:this\s+)?(?:dialog|banner|window|message|pop-?up|survey|notice|alert|panel|menu|"
     r"modal|notification|overlay))?\s*[×✕✖xX]?\s*$",
     re.I)
 

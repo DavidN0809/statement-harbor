@@ -111,14 +111,19 @@ def test_every_label_a_control_carries_is_read_and_not_only_the_first():
                   "Download document with subject Notice | Download document with subject X | Pay now",
                   "Download | Download document with subject Notice | Sign out",
                   "Make a payment | Download document with subject Notice",
-                  "Download document with subject Notice |  with subject Make a payment"]:
+                  "Download document with subject Notice |  with subject Make a payment",
+                  # A label before the subject it repeats is read, as the
+                  # old split read it (review of this change).
+                  "Make a payment | Download document with subject Make a payment",
+                  "Enroll in autopay | Download document with subject Enroll in autopay",
+                  "Sign out | Download document with subject Sign out"]:
         assert not site.is_safe_control(label), label
     for label in ["Download | Download document with subject Payment Confirmation",
                   "Download document with subject Payment Confirmation | Download document",
                   # The subject again as the text or the title, as the old
                   # split took it.
                   "Download document with subject Payment Confirmation | Payment Confirmation",
-                  "Autopay Enrollment Confirmation | Download document with subject "
+                  "Download document with subject Autopay Enrollment Confirmation | "
                   "Autopay Enrollment Confirmation",
                   "2024 1098-E Form | 2024 1098-E Form"]:
         assert site.is_safe_control(label), label

@@ -377,12 +377,10 @@ def test_a_bare_close_beside_the_app_s_own_menu_name_is_taken(browser):
     assert hits == {"menu": 1}, hits
 
 
-@pytest.mark.parametrize("label", ["Close bill download menu", "Close the survey window", "Close Account menu"])
-def test_up_to_two_words_may_name_what_is_put_away(label):
-    assert controls.is_dismiss_label(label), label
-
-
 @pytest.mark.parametrize("label", ["Close account dialog", "Close my account window", "Close and sign out menu",
-                                   "Close autopay panel"])
-def test_the_lists_still_refuse_what_those_words_name(label):
+                                   "Close autopay panel", "Close session window", "Close policy dialog",
+                                   "Close Savings panel", "Close bill download menu"])
+def test_nothing_may_stand_between_close_and_what_it_puts_away(label):
+    """AmFam's and Apple Card's own names took none of these, and the core's
+    must not either (review of this change)."""
     assert not controls.is_dismiss_label(label), label

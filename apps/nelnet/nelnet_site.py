@@ -324,12 +324,18 @@ def is_safe_control(name: str) -> bool:
     title taken off. Splitting the whole once at " with subject " left
     every label after the first unread, and "Download document with
     subject Notice | Make a payment" passed (review of 0.45.0). A label
-    that is word for word the subject another label carries is that
-    document's title, the way the old split read it, and not judged."""
+    that is word for word the subject a label before it carries is that
+    document's title, which the old split never read either, and is not
+    judged. One before the subject it repeats is."""
     parts = [re.sub(r"\s+", " ", part).strip() for part in (name or "").split(" | ")]
-    subjects = {pieces[1].strip().casefold() for pieces in
-                (_SUBJECT_SPLIT_RE.split(part, maxsplit=1) for part in parts) if len(pieces) == 2}
-    actions = [_action_of(part) for part in parts if part.casefold() not in subjects]
+    actions, subjects = [], set()
+    for part in parts:
+        if part.casefold() in subjects:
+            continue
+        pieces = _SUBJECT_SPLIT_RE.split(part, maxsplit=1)
+        if len(pieces) == 2:
+            subjects.add(pieces[1].strip().casefold())
+        actions.append(_action_of(part))
     actions = [a for a in actions if a]
     if not actions:
         return False

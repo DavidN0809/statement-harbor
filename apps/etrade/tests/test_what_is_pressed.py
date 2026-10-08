@@ -893,3 +893,40 @@ def test_download_bill_presses_nothing_more_after_a_press_it_was_unsure_of(
     page.set_content("<table><tbody>%s</tbody></table>%s" % (rows, LISTENER))
     assert not site.download_bill(page, tmp_path, SHARED, tmp_path / "out.pdf", BROKERAGE, [])
     assert unsure_presses == ["g-mine"], unsure_presses
+
+
+def test_nothing_more_is_pressed_after_a_second_step_whose_click_raised(page, monkeypatch, tmp_path):
+    """The row's first control was pressed, and the click of the second step
+    it revealed went through and then raised, so it may have been made. The
+    walk went on to the row's next control (review of 0.45.0's fixes)."""
+    from paperpull_core import pressing
+    pressed: list = []
+
+    def press_ok(pg, el, *args, **kwargs):
+        before = len(pg.evaluate("window.hits"))
+        el.evaluate("e => e.click()")
+        pressed.extend(pg.evaluate("window.hits")[before:])
+        return pressing.Pressed(pressing.PRESSED)
+    monkeypatch.setattr(pressing, "press_once", press_ok)
+
+    class Step:
+        def click(self, timeout=None):
+            pressed.append("second-step")
+            raise RuntimeError("Timeout 8000ms exceeded. waiting for scheduled navigations to finish")
+    shown = []
+
+    def second_step(pg, appeared):
+        shown.append(1)
+        return (Step(), "Download PDF") if len(shown) == 1 else (None, "")
+    monkeypatch.setattr(site, "_second_step", second_step)
+    own_wait = page.wait_for_timeout
+    monkeypatch.setattr(page, "wait_for_timeout", lambda ms: own_wait(min(ms, 5)))
+    annual = "Annual " + BROKERAGE
+    _listed(monkeypatch, SHARED, [annual, BROKERAGE])
+    page.set_content("<ul>"
+                     "<li><span>11/30/25</span> <span>%s</span> <a href='#' data-guid='g-theirs'>View</a></li>"
+                     "<li><span>11/30/25</span> <span data-guid='g-mine-title'>%s</span> "
+                     "<a href='#' data-guid='g-mine'>View</a></li>"
+                     "</ul>%s" % (BROKERAGE, annual, LISTENER))
+    assert not site._try_every_way(page, tmp_path, SHARED, tmp_path / "out.pdf", annual, [])
+    assert pressed == ["g-mine-title", "second-step"], pressed
