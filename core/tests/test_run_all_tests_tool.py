@@ -16,7 +16,8 @@ and a part of a CI run without the core suite says which part runs it.
 
 They also check that every suite runs on the newest Playwright the
 machine holds, as CI and the packaged app do, and that a run where one
-could not is refused.
+could not is refused, and that a suite's counts come from pytest's own
+last line, whatever a test's thread printed after it.
 """
 import functools
 import io
@@ -610,6 +611,74 @@ def test_a_failing_suite_in_a_run_prints_its_frames_and_keeps_its_output(one_sui
     kept = tmp_path / "test-output" / "core.log"
     assert "       whole output in %s\n" % kept in out
     assert "1 failed, 1 passed" in kept.read_text(encoding="utf-8")
+
+
+# On 2026-10-07 a run printed "ok   core   Exception occurred during
+# processing of request from ('127.0.0.1', 55033)" and counted none of the
+# core's 11537 passed and 305 skipped tests. A test's server had written
+# socketserver's message after pytest's own last line, and the runner took
+# whatever a suite printed last as its summary. A suite's stderr is read
+# after its stdout, so anything written there comes after that line.
+LATE = """
+    import atexit, sys
+
+    def _late():
+        print("-" * 40, file=sys.%s)
+        print("Exception occurred during processing of request from ('127.0.0.1', 55033)", file=sys.%s)
+
+    atexit.register(_late)
+    """
+SKIPS = """
+    import pytest
+
+    def test_another():
+        pass
+
+    def test_not_here():
+        pytest.skip("nothing to ask")
+    """
+
+
+@pytest.mark.parametrize("stream", ["stderr", "stdout"])
+def test_a_line_printed_after_pytests_own_last_line_is_not_the_summary(stream, one_suite, capsys):
+    one_suite({"tests/test_failure_canary.py": CANARY, "tests/test_another.py": SKIPS,
+               "tests/conftest.py": LATE % (stream, stream)})
+    assert rat.main() == 0
+    out = capsys.readouterr().out
+    assert re.search(r"(?m)^ok   core +2 passed, 1 skipped in \d+\.\d\ds$", out), out
+    assert "\n2 passed, 0 failed, 1 skipped, in " in out, out
+    assert "Exception occurred" not in out, out
+    skip = "SKIPPED [1] %s:7: nothing to ask" % os.path.join("tests", "test_another.py")
+    assert "\nwhat did not run:\n   %s\n" % skip in out, out
+    assert out.rstrip().endswith("all suites passed, privacy canary included"), out
+
+
+def test_a_suite_stopped_for_time_says_so_whatever_pytest_printed_before():
+    """A suite that hangs once pytest has printed its last line, on a
+    thread that never ends, is stopped by the runner, and its line says
+    that rather than how its tests went."""
+    out = "..\n2 passed in 0.31s\nException occurred\n\ntimed out after 60s, the suite was stopped\n"
+    assert rat.summary_of(out, -1) == "timed out after 60s, the suite was stopped"
+    assert rat.summary_of(out, 1) == "2 passed in 0.31s"
+
+
+@pytest.mark.parametrize("line", [
+    "11537 passed, 305 skipped, 3 xfailed in 1188.23s (0:19:48)",
+    "1 failed, 1 passed in 0.52s",
+    "1 error in 0.12s",
+    "no tests ran in 0.01s",
+    "3 passed, 2 warnings, 1 deselected in 1.01s",
+    "===== 3 passed in 0.12s =====",
+])
+def test_each_shape_of_pytests_last_line_is_the_summary(line):
+    out = "....\nFAILED x.py::test_x - AssertionError\n%s\nException occurred\n" % line
+    assert rat.summary_of(out, 0) == line
+
+
+def test_with_no_line_of_pytests_the_last_line_is_the_summary():
+    assert rat.summary_of("INTERNALERROR> a crash\n3 passed through the proxy\n\n", 3) == \
+        "3 passed through the proxy"
+    assert rat.summary_of("\n  \n", 0) == "no output"
 
 
 # -- which Playwright each suite runs on ----------------------------------------

@@ -726,6 +726,32 @@ def _exception_lines(exc: dict) -> list:
     return out
 
 
+# pytest's own last line, as -q writes it, "11537 passed, 305 skipped, 3
+# xfailed in 1188.23s (0:19:48)" or "no tests ran in 0.01s", and inside a
+# row of = signs when a suite has pytest say more.
+PYTEST_SUMMARY = re.compile(r"(?:=+ )?(?:no tests ran|\d+ \w[\w -]*(?:, \d+ \w[\w -]*)*)"
+                            r" in \d+(?:\.\d+)?s(?: \([^()]*\))?(?: =+)?")
+
+
+def summary_of(output: str, returncode: int) -> str:
+    """The line that says how a suite ended, whose counts go into the run's.
+    pytest's own last line, wherever it sits, since a suite's stderr is read
+    after its stdout and a thread can still write once pytest is done. On
+    2026-10-07 a test's server in the core suite wrote socketserver's
+    message about a request after it, and the run printed that message as
+    the core's summary and counted none of its 11537 passed and 305 skipped
+    tests. A suite the runner stopped for time says so, and a suite without
+    a line of pytest's ends with whatever it printed last."""
+    lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
+    if not lines:
+        return "no output"
+    if returncode == -1:
+        # run_suite's own line, how long the suite had before it was stopped.
+        return lines[-1]
+    said = [ln for ln in lines if PYTEST_SUMMARY.fullmatch(ln)]
+    return said[-1] if said else lines[-1]
+
+
 def where_it_failed(output: str, failures: list, root: Path = REPO) -> list:
     """What to print about a failing suite. Each failure with every frame
     of its traceback and the exception that ended it, as the plugin wrote
@@ -1250,8 +1276,7 @@ def run(args, lock=None) -> int:
         took[name], codes[name] = round(seconds), returncode
         if name == CANARY_SUITE:
             canary = canary_counts(records)
-        lines = [ln for ln in out.strip().splitlines() if ln.strip()]
-        summary = lines[-1] if lines else "no output"
+        summary = summary_of(out, returncode)
         for n, kindword in re.findall(r"(\d+) (passed|failed|skipped|error)", summary):
             if kindword == "passed":
                 passed += int(n)
