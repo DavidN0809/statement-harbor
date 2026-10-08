@@ -166,9 +166,22 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
+class _Server(ThreadingHTTPServer):
+    """A tab closed at the end of a test can reset a connection it kept
+    open, and socketserver prints a message for it from the handler's
+    thread. That is the browser going away, not an answer a test is about.
+    On 2026-10-07 a message like it came after pytest's own last line, once
+    the test's capture had let go, and the runner took it for the core's
+    summary. Anything else a handler raises is still printed."""
+
+    def handle_error(self, request, client_address):
+        if not isinstance(sys.exc_info()[1], ConnectionError):
+            super().handle_error(request, client_address)
+
+
 @pytest.fixture(scope="module")
 def server():
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    httpd = _Server(("127.0.0.1", 0), _Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield httpd.server_address[1]
     httpd.shutdown()
