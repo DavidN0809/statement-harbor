@@ -1181,13 +1181,21 @@ def _numbers_naming(rows: Iterable[dict], records: dict) -> dict:
     """Each file the index rows and progress records name (_same_file of
     it), with each spelling naming it and the order number of the purchase
     whose row or record it is. A record's number is its order_number, or
-    what its key, Purchase.key, has after the purchase type."""
+    what its key, Purchase.key, has after the purchase type. A record names
+    its pdf_path, and each file of its invoices as well, since Target keeps
+    every invoice of an order split into several there and only one of them
+    in pdf_path and the order's index row."""
     out = {}
     named = [((r.get("PDF Full Path") or "").strip(),
               (r.get("Order or Receipt Number") or "").strip()) for r in rows]
-    named += [(str(rec.get("pdf_path") or "").strip(),
-               str(rec.get("order_number") or str(key).partition(":")[2]).strip())
-              for key, rec in records.items() if isinstance(rec, dict)]
+    for key, rec in records.items():
+        if not isinstance(rec, dict):
+            continue
+        number = str(rec.get("order_number") or str(key).partition(":")[2]).strip()
+        invoices = rec.get("invoices")
+        files = [rec.get("pdf_path")] + [e.get("file") for e in (
+            invoices if isinstance(invoices, list) else ()) if isinstance(e, dict)]
+        named += [(str(f or "").strip(), number) for f in files]
     for raw, number in named:
         where = _same_file(raw) if raw else ""
         if where:
@@ -1251,7 +1259,7 @@ def review_names(app, ask, words: ReviewWords = WORDS,
             # saved under it. Whose receipt the file is cannot be told, and
             # a new name for the older purchase's row renamed the later
             # one's file and left the later one's rows and record naming a
-            # file that was gone. run_for keeps such a file's name too.
+            # file that was gone.
             shared += 1
         elif str(path) not in offered:
             offered.add(str(path))

@@ -556,7 +556,7 @@ def test_a_new_name_for_an_older_copy_leaves_the_record_alone(app, tmp_path, mon
 
 
 @pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
-@pytest.mark.parametrize("later_kept", ["rows and record", "rows", "record"])
+@pytest.mark.parametrize("later_kept", ["rows and record", "rows", "record", "an invoice"])
 def test_a_file_another_purchase_names_is_left_out(app, later_kept, tmp_path, monkeypatch,
                                                    capsys):
     """A receipt saved and then deleted, as a person does once it is imported
@@ -569,7 +569,10 @@ def test_a_file_another_purchase_names_is_left_out(app, later_kept, tmp_path, mo
     whose file another purchase's index rows or record name is left out, and
     the review says how many. The later purchase may have kept its rows
     alone, as when progress.json was lost, or its record alone, as when the
-    index was open in another program while its run wrote it. A third
+    index was open in another program while its run wrote it. Or the later
+    purchase is an order split into invoices, whose record names one of
+    them in pdf_path and every one in its list of invoices, as Target's
+    does, and its index row names another than the freed name. A third
     purchase with a file of its own is still offered and renamed."""
     mod = load(app)
     inst = runnable(mod, tmp_path / "out")
@@ -586,10 +589,18 @@ def test_a_file_another_purchase_names_is_left_out(app, later_kept, tmp_path, mo
     if later_kept == "rows":
         inst.progress.data.pop(later.key)
         inst.progress.save()
-    if later_kept == "record":
+    if later_kept in ("record", "an invoice"):
         for csv in (inst.index_csv, inst.order_csv):
             csv.rewrite([r for r in csv.read_all()
                          if r["Order or Receipt Number"] != "ORDER-0002"])
+    if later_kept == "an invoice":
+        first = opening_pdf(filed, "2026-05-14 Unsure Purchase Invoice (1 of 2).pdf")
+        inst.progress.update(later.key, {"pdf_path": str(first), "invoices": [
+            {"file": str(first), "part": "1 of 2"},
+            {"file": str(filed / name), "part": "2 of 2"}]})
+        inst.index_csv.append_rows([dict(index_row("ORDER-0002", first),
+                                         **{"Classification Confidence": "High",
+                                            "Processing Status": "Completed"})])
     shared = (filed / name).read_bytes()
     index, orders = inst.index_csv.read_all(), inst.order_csv.read_all()
     records = json.loads(inst.paths.progress_json.read_text(encoding="utf-8"))
@@ -600,15 +611,14 @@ def test_a_file_another_purchase_names_is_left_out(app, later_kept, tmp_path, mo
     inst.cmd_review_names()
 
     said = " ".join(capsys.readouterr().out.split())
-    out = 1 if later_kept == "record" else 2
+    out = 1 if later_kept in ("record", "an invoice") else 2
     assert len(asked) == 1, "only the purchase with a file of its own is offered, %s" % said
     assert ("%d row(s) marked for review name a file that another purchase's rows or "
             "record also name, so whose receipt it is cannot be told and they are left "
             "out." % out) in said, said
     assert (filed / name).read_bytes() == shared
     garden = [p for p in filed.iterdir() if "Garden Hose" in p.name]
-    assert len(garden) == 1 and sorted(p.name for p in filed.iterdir()) \
-        == sorted([name, garden[0].name])
+    assert len(garden) == 1 and {name, garden[0].name} <= {p.name for p in filed.iterdir()}
 
     def theirs(rows):
         return [r for r in rows if r["Order or Receipt Number"] != "ORDER-0003"]
