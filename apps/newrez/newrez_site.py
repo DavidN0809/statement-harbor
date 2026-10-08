@@ -1364,6 +1364,8 @@ _CAPTURE_STEPS = {
     "the press reached the page although it raised, so it was not made again":
         "click reached the page and raised",
     "the control left the page before it was pressed": "control left the page before the click",
+    "the press through the page raised, so nothing more is pressed":
+        "page click raised so nothing more pressed",
     "the tab moved": "the tab moved",
     "after the click": "looked after the click",
     "second step clicked": "second step clicked",

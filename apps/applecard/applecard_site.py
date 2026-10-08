@@ -1331,6 +1331,7 @@ _TRACE_WORDS = frozenset(KINDS) | frozenset({
     "clicked", "click failed", "clicked through the DOM instead", "DOM click failed too",
     "the press reached the page although it raised, so it was not made again",
     "the control left the page before it was pressed",
+    "the press through the page raised, so nothing more is pressed",
     "after the click", "second step clicked", "second step click failed",
     "pressed again", "the second press failed",
     "the page made the document itself", "another apple host",
