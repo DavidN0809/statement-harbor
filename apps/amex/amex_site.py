@@ -25,7 +25,7 @@ by login.bat and attached over CDP) carries the auth, so this module only reads
 and clicks document/download controls. Statement PDFs may be plain <a> download
 links, may sit behind a period selector, or may be produced by a JSON/PDF
 endpoint - collect_download_docs + download_named handle the link case and are
-refined against the real DOM via diagnose.bat.
+refined against the real DOM via paperpull amex diagnose.
 """
 # Site layer verified working against the live site: 2026-08
 from __future__ import annotations
@@ -931,7 +931,7 @@ def download_named(page, title: str, out_path) -> bool:
 
 # ---------------------------------------------------------------------------
 # Document source pages. document_source_urls() yields (url, label) pairs that
-# cmd_discover scans. Repair the URLs after diagnose.bat confirms the real ones.
+# cmd_discover scans. Repair the URLs after paperpull amex diagnose confirms the real ones.
 # ---------------------------------------------------------------------------
 STATEMENT_URLS = [
     URLS["statements"],

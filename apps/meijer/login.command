@@ -30,5 +30,6 @@ echo 'A browser window will open. Then:'
 echo '1. Sign in to your Meijer account (handle any OTP / puzzle yourself)'
 echo '2. Open your Purchase History and confirm you see your orders'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
+echo '4. Then run:  ./paperpull meijer pilot   (downloads the newest few)'
 
 "$PY" meijer_receipts.py --open-browser $CFG

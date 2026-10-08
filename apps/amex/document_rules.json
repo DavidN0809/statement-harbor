@@ -1,5 +1,5 @@
 {
-  "_comment": "Editable rules mapping American Express document titles to filename summaries. Checked in order: tax, then year-end, then insurance (unused for Amex), then statement. Repair after running diagnose.bat against your real Statements & Activity / Documents pages.",
+  "_comment": "Editable rules mapping American Express document titles to filename summaries. Checked in order: tax, then year-end, then insurance (unused for Amex), then statement. Repair after running paperpull amex diagnose against your real Statements & Activity / Documents pages.",
   "tax_rules": [
     {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
     {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},

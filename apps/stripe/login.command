@@ -29,7 +29,7 @@ echo '============================================================'
 echo 'Your own Edge or Chrome will open, with a separate profile. Then:'
 echo '1. Sign in to the Stripe Dashboard yourself, including any code it sends'
 echo '2. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
-echo '3. Then run:  paperpull stripe pilot   (the five newest documents)'
+echo '3. Then run:  ./paperpull stripe pilot   (the five newest documents)'
 echo 'READ-ONLY: this tool only downloads your invoice and tax form PDFs. It NEVER'
 
 "$PY" stripe_docs.py --open-browser $CFG

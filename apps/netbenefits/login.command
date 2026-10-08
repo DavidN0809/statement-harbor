@@ -30,6 +30,6 @@ echo 'A browser window will open on fidelity.com. Then:'
 echo '1. Sign in to NetBenefits yourself, including the two-factor prompt'
 echo '2. Open your statements or messages area if you know where it is'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
-echo '4. Then run:  paperpull netbenefits diagnose   (a safe look, downloads nothing)'
+echo '4. Then run:  ./paperpull netbenefits diagnose   (a safe look, downloads nothing)'
 
 "$PY" netbenefits_docs.py --open-browser $CFG

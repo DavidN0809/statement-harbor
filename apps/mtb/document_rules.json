@@ -1,5 +1,5 @@
 {
-  "_comment": "Editable rules mapping M&T mortgage document titles to filename summaries. Case-insensitive regexes matched against the title/row text, checked in order: tax, then year-end, then insurance/escrow, then statement. These are STARTING GUESSES for a mortgage servicing account and MUST be repaired after diagnose.bat shows the real titles. A mortgage's core documents are the monthly mortgage statement, the annual escrow analysis, and the year-end 1098.",
+  "_comment": "Editable rules mapping M&T mortgage document titles to filename summaries. Case-insensitive regexes matched against the title/row text, checked in order: tax, then year-end, then insurance/escrow, then statement. These are STARTING GUESSES for a mortgage servicing account and MUST be repaired after paperpull mtb diagnose shows the real titles. A mortgage's core documents are the monthly mortgage statement, the annual escrow analysis, and the year-end 1098.",
   "tax_rules": [
     {"pattern": "1098-?E\\b", "summary": "1098-E Tax Form"},
     {"pattern": "\\b1098\\b", "summary": "1098 Mortgage Interest Statement"},

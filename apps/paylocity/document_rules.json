@@ -1,5 +1,5 @@
 {
-  "_comment": "Editable rules mapping Paylocity document titles to filename summaries. Checked in order: tax, then insurance, then statement. At Paylocity a 'statement' IS a pay statement, so statement_rules carry the payroll wording. Repair after running diagnose.bat against your real Pay area.",
+  "_comment": "Editable rules mapping Paylocity document titles to filename summaries. Checked in order: tax, then insurance, then statement. At Paylocity a 'statement' IS a pay statement, so statement_rules carry the payroll wording. Repair after running paperpull paylocity diagnose against your real Pay area.",
   "tax_rules": [
     {
       "pattern": "\\bW-?2\\b",

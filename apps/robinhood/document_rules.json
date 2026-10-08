@@ -1,5 +1,5 @@
 {
-  "_comment": "Editable rules mapping Robinhood document titles to filename summaries. Checked in order: tax, then insurance (unused for Robinhood), then statement. Repair after running diagnose.bat against your real Documents page. Trade confirmations are intentionally skipped (see skip_patterns).",
+  "_comment": "Editable rules mapping Robinhood document titles to filename summaries. Checked in order: tax, then insurance (unused for Robinhood), then statement. Repair after running paperpull robinhood diagnose against your real Documents page. Trade confirmations are intentionally skipped (see skip_patterns).",
   "tax_rules": [
     {"pattern": "consolidated\\s+(form\\s+)?1099", "summary": "Consolidated 1099 Tax Form"},
     {"pattern": "crypto\\s+1099|1099\\s+crypto", "summary": "Crypto 1099 Tax Form"},

@@ -29,5 +29,6 @@ echo '============================================================'
 echo 'A browser window will open. Then:'
 echo '1. Sign in to Target (handle any code or puzzle yourself)'
 echo '2. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
+echo '3. Then run:  ./paperpull target pilot   (downloads the newest few)'
 
 "$PY" target_receipts.py --open-browser $CFG

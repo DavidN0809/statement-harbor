@@ -12,7 +12,8 @@ echo A normal Chromium window will open. Then:
 echo   1. Sign in to Amazon (handle any OTP / puzzle yourself).
 echo   2. Go to Your Orders and confirm you see the orders.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
-echo   4. Then run run_pilot.bat %~1
+echo   4. Then run:  paperpull amazon pilot   (downloads the newest few)
+if not "%~1"=="" echo      For this account, add  --account %~1
 echo.
 rem This app's own Python when setup.bat made one. Otherwise, in a
 rem checkout, the one setup-all.bat made for every app in gui\.venv, once

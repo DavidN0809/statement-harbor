@@ -12,7 +12,8 @@ echo A normal Chromium window will open. Then:
 echo   1. Sign in to Verizon (do all the 2FA / device approval yourself).
 echo   2. Go to Account -^> Reports ^& statements (Documents / Tax center).
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
-echo   4. Then run:  diagnose.bat %~1   (a safe look, downloads nothing)
+echo   4. Then run:  paperpull verizon diagnose   (a safe look, downloads nothing)
+if not "%~1"=="" echo      For this account, add  --account %~1
 echo.
 echo READ-ONLY: this tool only downloads statements and tax documents.
 echo It NEVER buys, sells, trades, transfers, withdraws, moves crypto, or

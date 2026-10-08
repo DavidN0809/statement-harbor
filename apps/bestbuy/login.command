@@ -30,5 +30,6 @@ echo 'A browser window will open. Then:'
 echo '1. Sign in to your Best Buy account (handle any OTP / puzzle yourself)'
 echo '2. Open Account, Purchases, and confirm you see your purchases'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
+echo '4. Then run:  ./paperpull bestbuy pilot   (downloads the newest few)'
 
 "$PY" bestbuy_receipts.py --open-browser $CFG

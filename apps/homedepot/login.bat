@@ -12,7 +12,8 @@ echo A browser window will open. Then:
 echo   1. Sign in to your Home Depot account (handle any OTP / puzzle yourself).
 echo   2. Open Account, Purchase History, and confirm you see your orders.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
-echo   4. Tell Claude you're signed in (or run run_pilot.bat %~1)
+echo   4. Then run:  paperpull homedepot pilot   (downloads the newest few)
+if not "%~1"=="" echo      For this account, add  --account %~1
 echo.
 rem This app's own Python when setup.bat made one. Otherwise, in a
 rem checkout, the one setup-all.bat made for every app in gui\.venv, once

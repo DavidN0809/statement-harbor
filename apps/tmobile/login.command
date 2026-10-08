@@ -30,5 +30,6 @@ echo 'A normal Chromium window will open. Then:'
 echo '1. Sign in to T-Mobile (do all the 2FA / device approval yourself)'
 echo '2. Open your Bills page (Account -> Bill -> View bill history)'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
+echo '4. Then run:  ./paperpull tmobile pilot   (downloads the newest few)'
 
 "$PY" tmobile_docs.py --open-browser $CFG

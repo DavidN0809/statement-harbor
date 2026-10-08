@@ -30,6 +30,6 @@ echo 'A browser window will open on fidelity.com. Then:'
 echo '1. Sign in to the Fairfax Water customer portal yourself'
 echo '2. Open your statements or messages area if you know where it is'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
-echo '4. Then run:  paperpull fairfaxwater diagnose   (a safe look, downloads nothing)'
+echo '4. Then run:  ./paperpull fairfaxwater diagnose   (a safe look, downloads nothing)'
 
 "$PY" fairfaxwater_docs.py --open-browser $CFG

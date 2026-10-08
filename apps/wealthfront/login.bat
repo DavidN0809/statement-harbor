@@ -12,7 +12,8 @@ echo A normal Chromium window will open. Then:
 echo   1. Sign in to Wealthfront (do the 2FA yourself).
 echo   2. Open your Documents / Statements page.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
-echo   4. Then run run_pilot.bat %~1
+echo   4. Then run:  paperpull wealthfront pilot   (downloads the newest few)
+if not "%~1"=="" echo      For this account, add  --account %~1
 echo.
 echo READ-ONLY: this tool only downloads statements and tax forms.
 echo It never transfers money, trades, or changes any setting.

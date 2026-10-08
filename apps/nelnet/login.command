@@ -30,6 +30,6 @@ echo 'Your own Edge or Chrome will open, with a separate profile. Then:'
 echo '1. Sign in to Nelnet (do all the 2FA / device approval yourself)'
 echo '2. Open Documents, then Inbox & Statements'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
-echo '4. Then run:  paperpull nelnet diagnose   (a survey for the maintainer)'
+echo '4. Then run:  ./paperpull nelnet diagnose   (a survey for the maintainer)'
 
 "$PY" nelnet_docs.py --open-browser $CFG

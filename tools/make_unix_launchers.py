@@ -152,8 +152,10 @@ REVIEW_TITLE_RE = re.compile(r"^echo\s+(.+? - review names)\s*$", re.M)
 
 
 def windows_to_unix(text: str) -> str:
-    """A macOS user should never be told to run a .bat file."""
-    return re.sub(r"\b([A-Za-z_]+)\.bat\b", r"./\1.command", text)
+    """A macOS user should never be told to run a .bat file, and a checkout
+    on a Mac runs the one command as ./paperpull, as README.md shows."""
+    text = re.sub(r"\b([A-Za-z_]+)\.bat\b", r"./\1.command", text)
+    return re.sub(r"(?<![\w./])paperpull(?= [a-z0-9]+ [a-z-]+\b)", "./paperpull", text)
 
 
 def shell_quote(text: str) -> str:

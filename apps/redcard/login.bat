@@ -14,7 +14,8 @@ echo   1. Sign in to your Target Circle Card / RedCard credit account (do all
 echo      the 2FA / verification yourself).
 echo   2. Open your Statements / eStatements / Documents section.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
-echo   4. Then run:  diagnose.bat %~1   (a safe look, downloads nothing)
+echo   4. Then run:  paperpull redcard diagnose   (a safe look, downloads nothing)
+if not "%~1"=="" echo      For this account, add  --account %~1
 echo.
 echo READ-ONLY: this tool only downloads your billing statements. It NEVER
 echo pays a bill, makes a payment, transfers a balance, moves money, redeems

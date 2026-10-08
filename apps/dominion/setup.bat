@@ -32,7 +32,7 @@ rem somebody is present to agree to it.
 
 echo.
 echo Setup complete. Next: login.bat  (sign in, keep the browser open),
-echo then diagnose.bat, then run_pilot.bat.
+echo then paperpull dominion diagnose, then paperpull dominion pilot.
 pause
 exit /b 0
 

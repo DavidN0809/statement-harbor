@@ -30,5 +30,6 @@ echo 'A normal Chromium window will open. Then:'
 echo '1. Sign in to Dominion (do all the 2FA / device approval yourself)'
 echo '2. Go to Account -> Billing & payments (your bill history)'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
+echo '4. Then run:  ./paperpull dominion diagnose   (a safe look, downloads nothing)'
 
 "$PY" dominion_docs.py --open-browser $CFG

@@ -26,7 +26,7 @@ if exist "..\..\core\pyproject.toml" (
 
 echo.
 echo Setup complete. Next: login.bat  (sign in, keep the browser open),
-echo then diagnose.bat, then run_pilot.bat.
+echo then paperpull pge diagnose, then paperpull pge pilot.
 pause
 exit /b 0
 

@@ -12,7 +12,8 @@ echo A normal Chromium window will open. Then:
 echo   1. Sign in to American Express (do all the 2FA / device approval yourself).
 echo   2. Go to Statements ^& Activity (statements, year-end summary, tax docs).
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
-echo   4. Then run:  diagnose.bat %~1   (a safe look, downloads nothing)
+echo   4. Then run:  paperpull amex diagnose   (a safe look, downloads nothing)
+if not "%~1"=="" echo      For this account, add  --account %~1
 echo.
 echo READ-ONLY: this tool only downloads statements, year-end summaries, and
 echo tax documents. It NEVER pays a bill, transfers a balance, moves money,

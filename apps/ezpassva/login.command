@@ -29,7 +29,7 @@ echo '============================================================'
 echo 'Your own Edge or Chrome will open, with a separate profile. Then:'
 echo '1. Sign in to E-ZPass Virginia yourself'
 echo '2. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
-echo '3. Then run:  paperpull ezpassva pilot   (the five newest statements)'
+echo '3. Then run:  ./paperpull ezpassva pilot   (the five newest statements)'
 echo 'READ-ONLY: this tool only downloads your statement PDFs. It NEVER'
 
 "$PY" ezpassva_docs.py --open-browser $CFG

@@ -15,7 +15,7 @@ Bills are genuine PDF downloads (not rendered pages). Verizon blocks the
 Playwright Chromium, so the browser is launched as real Edge or Chrome and
 the download directory is set over CDP. The selectors are verified against
 the live signed-in pages (see the date recorded under this docstring). When
-the provider redesigns, run `diagnose.bat` and repair the FALLBACK entries
+the provider redesigns, run `paperpull verizon diagnose` and repair the FALLBACK entries
 and goto_documents against Diagnostics/.
 """
 # Site layer verified working against the live site: 2026-08

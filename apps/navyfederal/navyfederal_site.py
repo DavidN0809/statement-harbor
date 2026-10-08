@@ -17,7 +17,7 @@ Playwright download event -> download.save_as().
 
 The selectors below are verified against the live signed-in pages (see the
 date recorded under this docstring). Each keeps a FALLBACK entry as a safety
-net. When the provider redesigns, run `diagnose.bat` after signing in and
+net. When the provider redesigns, run `paperpull navyfederal diagnose` after signing in and
 repair the FALLBACK entries + goto_documents URLs against Diagnostics/.
 """
 # Site layer verified working against the live site: 2026-08

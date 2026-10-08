@@ -15,7 +15,8 @@ echo   1. Sign in to Walmart (handle any "Robot or human?" check). If this is
 echo      your first time on Edge, you'll need to sign in again here.
 echo   2. Go to walmart.com/orders and confirm you see the orders.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
-echo   4. Then run run_pilot.bat %~1
+echo   4. Then run:  paperpull walmart pilot   (downloads the newest few)
+if not "%~1"=="" echo      For this account, add  --account %~1
 echo.
 rem This app's own Python when setup.bat made one. Otherwise, in a
 rem checkout, the one setup-all.bat made for every app in gui\.venv, once

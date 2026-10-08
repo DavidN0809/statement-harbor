@@ -1,5 +1,5 @@
 {
-  "_comment": "Editable rules mapping USAA document titles to filename summaries. Patterns are case-insensitive regexes matched against the document title/row text. Checked in order: tax, then insurance, then statement. Repair these after running diagnose.bat against your real Documents page.",
+  "_comment": "Editable rules mapping USAA document titles to filename summaries. Patterns are case-insensitive regexes matched against the document title/row text. Checked in order: tax, then insurance, then statement. Repair these after running paperpull usaa diagnose against your real Documents page.",
   "tax_rules": [
     {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
     {"pattern": "1099-?DIV\\b", "summary": "1099-DIV Tax Form"},

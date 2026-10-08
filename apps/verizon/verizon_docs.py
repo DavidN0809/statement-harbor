@@ -326,7 +326,7 @@ class App:
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         elif ok:
             print("Success: connected and the Documents page is visible.")
-            print("Keep that browser window OPEN, then run run_pilot.bat.")
+            print("Keep that browser window OPEN, then run the diagnostics or pilot.")
         else:
             print("Connected, but the Documents list did not load, so this cannot say")
             print("whether you are signed in. Look at the browser window and answer")

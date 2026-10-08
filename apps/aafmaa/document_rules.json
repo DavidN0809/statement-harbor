@@ -1,5 +1,5 @@
 {
-  "_comment": "Editable rules mapping AAFMAA (Armed Forces Mutual) document titles to filename summaries. Checked in order: tax, then year-end, then insurance, then statement - so an 'annual premium statement' files as a year-end summary rather than an ordinary statement. AAFMAA is a member association: life insurance certificates, premium billing, policy loans, and survivor-assistance paperwork. These are STARTING GUESSES until diagnose.bat has been run against the real Member Center and the Digital Vault - repair them against what your account actually shows.",
+  "_comment": "Editable rules mapping AAFMAA (Armed Forces Mutual) document titles to filename summaries. Checked in order: tax, then year-end, then insurance, then statement - so an 'annual premium statement' files as a year-end summary rather than an ordinary statement. AAFMAA is a member association: life insurance certificates, premium billing, policy loans, and survivor-assistance paperwork. These are STARTING GUESSES until paperpull aafmaa diagnose has been run against the real Member Center and the Digital Vault - repair them against what your account actually shows.",
   "tax_rules": [
     {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
     {"pattern": "1099-?R\\b", "summary": "1099-R Tax Form"},

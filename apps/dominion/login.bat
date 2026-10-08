@@ -12,7 +12,8 @@ echo A normal Chromium window will open. Then:
 echo   1. Sign in to Dominion (do all the 2FA / device approval yourself).
 echo   2. Go to Account -^> Billing ^& payments (your bill history).
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
-echo   4. Then run:  diagnose.bat %~1   (a safe look, downloads nothing)
+echo   4. Then run:  paperpull dominion diagnose   (a safe look, downloads nothing)
+if not "%~1"=="" echo      For this account, add  --account %~1
 echo.
 echo READ-ONLY: this tool only downloads your bill PDFs.
 echo It NEVER pays a bill, sets up AutoPay, adds or changes a bank account

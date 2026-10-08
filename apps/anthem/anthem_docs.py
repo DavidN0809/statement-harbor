@@ -355,7 +355,7 @@ class App:
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         elif ok:
             print("Success: connected and the Documents page is visible.")
-            print("Keep that browser window OPEN, then run run_pilot.bat.")
+            print("Keep that browser window OPEN, then run the diagnostics or pilot.")
         else:
             print("Connected, but the Documents list did not load, so this cannot say")
             print("whether you are signed in. Look at the browser window and answer")
@@ -583,7 +583,7 @@ class App:
             # having saved nothing.
             print("\n  !! Anthem returned a sign-in page instead of a document.")
             print("     Your session has expired. Sign in again in the open")
-            print("     browser, re-list your statements, then run resume.bat.")
+            print("     browser, re-list your statements, then run Resume.")
             self.stats["session_expired"] = 1
             raise
         if not saved:
@@ -766,7 +766,7 @@ class App:
             raise SystemExit(0)
 
     def _session_expired(self) -> None:
-        print("  !! Anthem session expired. Sign in again, then run resume.bat.")
+        print("  !! Anthem session expired. Sign in again, then run Resume.")
         self.stats["session_expired"] = 1
 
     def _listing_incomplete(self, err: Exception) -> None:
@@ -774,7 +774,7 @@ class App:
         and count it as failed so the run exits nonzero instead of looking clean
         while a document is silently missing from the archive."""
         print(f"  !! {err}. The archive may be incomplete - try again shortly, "
-              f"then run resume.bat.")
+              f"then run Resume.")
         self.stats["failed"] += 1
 
     def _save_collected(self, kind: str, rows: List[dict], fetch_fn) -> None:

@@ -163,6 +163,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
   summary a file already has moved it to "... (2).pdf", and the next
   Rename offered to move it back. The file now keeps its name, or takes the
   new case when only the case changed, and counts as reviewed.
+- **Every app's next step names a command that still exists.** The
+  run_pilot.bat, diagnose.bat and resume.bat files went when
+  `paperpull <app> <command>` replaced them (#23), and 31 login.bat
+  banners, 48 setup.bat files and 51 messages the apps print still told
+  the person to run them, eight of the banners as "Tell Claude you're
+  signed in". Each now names `paperpull <app> pilot` or
+  `paperpull <app> diagnose`, a login.bat started for a second person
+  shows the `--account` to add, and a message the apps print says to
+  run the diagnostics, the pilot or Resume. The Mac sign-in files, made
+  from the Windows ones, gain the step they lacked and say
+  `./paperpull`, as a checkout on a Mac runs it. The editable document
+  rules of ten apps point at the same command. A census over every
+  launcher, doc, rules file and script an app ships now fails on a
+  deleted launcher's name, where it read only the README and COMMANDS.txt
+  files.
 
 ### Security
 - **M&T presses a year heading only when nothing covers it, and once.**

@@ -12,7 +12,8 @@ echo Your Edge or Chrome will open. Then:
 echo   1. Sign in to Discover (do all the 2FA / verification yourself).
 echo   2. Go to your Documents / Statements area and open it.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
-echo   4. Then run:  diagnose.bat %~1   (a safe look, downloads nothing)
+echo   4. Then run:  paperpull discovercard diagnose   (a safe look, downloads nothing)
+if not "%~1"=="" echo      For this account, add  --account %~1
 echo.
 echo READ-ONLY: this tool only downloads statements.
 echo It NEVER pays your bill, sets up autopay, transfers a balance,

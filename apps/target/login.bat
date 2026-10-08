@@ -11,7 +11,8 @@ echo.
 echo A browser window will open. Then:
 echo   1. Sign in to Target (handle any code or puzzle yourself).
 echo   2. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
-echo   3. Then run run_pilot.bat %~1
+echo   3. Then run:  paperpull target pilot   (downloads the newest few)
+if not "%~1"=="" echo      For this account, add  --account %~1
 echo.
 rem This app's own Python when setup.bat made one. Otherwise, in a
 rem checkout, the one setup-all.bat made for every app in gui\.venv, once

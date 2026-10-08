@@ -382,18 +382,44 @@ def test_every_command_file_opens_on_a_mac_double_click():
     assert not crlf, "a .command stored without Unix line endings: " + ", ".join(crlf)
 
 
-def test_no_app_doc_still_points_at_a_deleted_launcher():
-    gone = re.compile(r"\b(run_pilot|run_all|resume|verify_documents|diagnose)\.(bat|command)\b")
-    stale = []
-    for f in (REPO / "apps").glob("*/*.md"):
+def _shipped_app_files():
+    """Every file an app ships that a person reads or runs, the launchers,
+    their banners, the docs, the editable rules and what the scripts print.
+    A checkout's own config.json and run output are not shipped."""
+    kinds = {".bat", ".command", ".md", ".txt", ".json", ".py"}
+    git = shutil.which("git")
+    if git:
+        listed = subprocess.run([git, "ls-files", "-z", "--", "apps"], cwd=REPO,
+                                capture_output=True, text=True)
+        if listed.returncode == 0 and listed.stdout:
+            return [REPO / p for p in listed.stdout.split("\0")
+                    if p and Path(p).suffix in kinds]
+    return [f for f in (REPO / "apps").glob("*/*") if f.suffix in kinds
+            and not (f.name.startswith("config.") and f.name != "config.example.json")]
+
+
+def test_no_app_file_still_points_at_a_deleted_launcher():
+    """run_pilot.bat and its siblings went for #23, when paperpull <app>
+    <command> replaced them. Thirteen login.bat banners still ended with
+    "Tell Claude you're signed in (or run run_pilot.bat)", 48 setup.bat
+    files and 40 scripts pointed at it too, and the old census read only
+    the .md and COMMANDS.txt files."""
+    gone = re.compile(r"\b(run_pilot|run_all|resume|verify_documents|diagnose)\.(bat|command)\b"
+                      r"|\brun_pilot\b|Tell Claude")
+    files = _shipped_app_files()
+    assert sum(f.suffix == ".bat" for f in files) > 100, len(files)
+    assert sum(f.suffix == ".command" for f in files) > 100, len(files)
+    # a checkout on a Mac has no paperpull on its path, README.md says ./paperpull
+    bare = re.compile(r"(?<![\w./])paperpull [a-z0-9]+ [a-z-]+")
+    stale, mac = [], []
+    for f in files:
         for i, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
             if gone.search(line):
-                stale.append("%s:%d" % (f.relative_to(REPO), i))
-    for f in (REPO / "apps").glob("*/COMMANDS.txt"):
-        for i, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-            if gone.search(line):
-                stale.append("%s:%d" % (f.relative_to(REPO), i))
-    assert not stale, "docs still name a deleted launcher: " + ", ".join(stale)
+                stale.append("%s:%d" % (f.relative_to(REPO).as_posix(), i))
+            if f.suffix == ".command" and line.startswith("echo ") and bare.search(line):
+                mac.append("%s:%d" % (f.relative_to(REPO).as_posix(), i))
+    assert not stale, "still names a deleted launcher: " + ", ".join(stale)
+    assert not mac, "a Mac banner without ./paperpull: " + ", ".join(mac)
 
 
 def test_the_packaged_app_defaults_to_documents_not_its_templates(tmp_path, monkeypatch):

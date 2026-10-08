@@ -30,5 +30,6 @@ echo 'A normal Chromium window will open. Then:'
 echo '1. Sign in to Armed Forces Mutual (do all the 2FA / verification yourself)'
 echo '2. Go to your Documents / Statements area and open it'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
+echo '4. Then run:  ./paperpull aafmaa diagnose   (a safe look, downloads nothing)'
 
 "$PY" aafmaa_docs.py --open-browser $CFG
