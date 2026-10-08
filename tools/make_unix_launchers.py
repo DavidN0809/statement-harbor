@@ -190,7 +190,7 @@ def build(app_dir: Path) -> list:
                 raise SystemExit("%s does not read the way review_names.bat does" % bat)
             out = app_dir / "review_names.command"
             out.write_text(REVIEW.replace("@SHARED@", SHARED)
-                                 .replace("@TITLE@", shell_quote(title.group(1).strip()))
+                                 .replace("@TITLE@", shell_quote(unescape_cmd(title.group(1).strip())))
                                  .replace("@SCRIPT@", script.group(1))
                                  .replace("@SLUG@", app_dir.name),
                            encoding="utf-8", newline="\n")

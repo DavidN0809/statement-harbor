@@ -331,6 +331,14 @@ did not read.
 - **The Mac sign-in and setup files no longer print a stray caret.** Nine
   of them showed the caret Windows needs before & and >, as in
   "Statements ^& Activity".
+- **The Windows sign-in files of ADP, AmFam, AT&T, Nelnet and Wells Fargo,
+  and AT&T's setup, print their whole instructions.** A bare & on a line
+  they print ends the line in Windows, so "Open your Statements &
+  Documents page" stopped after "Statements" and was followed by
+  "'Documents' is not recognized as an internal or external command", and
+  AT&T's title and steps said the same of "T". Each & is now written the
+  way Windows prints it, as PG&E and M&T always were, and a check reads
+  every Windows file the repository ships for another such line.
 - **A run whose documents page would not open no longer finishes clean.**
   In twenty document apps, when Discover could not open the documents
   page, even after checking the session, it said so and returned. Pilot
