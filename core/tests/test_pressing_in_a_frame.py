@@ -338,9 +338,10 @@ def test_in_a_frame_of_its_own_a_press_that_would_land_beside_the_control_is_not
     assert said(frame) == []
 
 
-@pytest.mark.parametrize("drawn, why, own", [("transform: scale(0.8)", "frame scaled", False),
-                                             ("transform: rotate(3deg)", "frame", False),
-                                             ("transform: rotate(3deg)", "frame", True)])
+@pytest.mark.parametrize("drawn, why, own", [
+    ("transform: scale(0.8)", "frame drawn at another size", False),
+    ("transform: rotate(3deg)", "frame", False),
+    ("transform: rotate(3deg)", "frame", True)])
 def test_a_frame_not_drawn_at_its_own_size_and_square_is_not_read(request, site, drawn, why,
                                                                    own):
     """A point does not carry across into a frame drawn at another size

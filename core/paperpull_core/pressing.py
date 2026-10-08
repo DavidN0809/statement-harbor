@@ -814,7 +814,7 @@ def _look_in_frame(page, locator, css: str, labels: bool, frame) -> dict:
         if not levels or not _place(levels):
             return {"state": "unread", "why": "frame"}
         if not all(_drawn_as(level) for level in levels[1:]):
-            return {"state": "unread", "why": "frame scaled"}
+            return {"state": "unread", "why": "frame drawn at another size"}
         mine = levels[-1]
         seen = {"state": "unread", "why": "no box"}
         for _ in range(3):
@@ -1008,12 +1008,13 @@ def covering_lines(what: str, cover: dict) -> list:
 
 # Why a control could not be read, in the words of LOOK_JS, FRAME_JS and
 # look. "frame" is a frame that could not be found or placed on the page,
-# "frame scaled" one drawn at another size than its own window, and "off the
-# control" a press Playwright would land beside the control, in a frame drawn
-# by a process of its own or a frame inside one.
+# "frame drawn at another size" one drawn at another size than its own
+# window, and "off the control" a press Playwright would land beside the
+# control, in a frame drawn by a process of its own or a frame inside one.
+# Every word of them is on paperpull_core.words's list, so they leave whole.
 _WHY = frozenset(("selector", "several", "none", "no box", "not read", "unknown state",
-                  "outside the window", "nothing at the point", "frame", "frame scaled",
-                  "off the control"))
+                  "outside the window", "nothing at the point", "frame",
+                  "frame drawn at another size", "off the control"))
 
 
 def judge(seen: dict, what: str, words, step: str = "press a control") -> None:
