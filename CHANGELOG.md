@@ -196,6 +196,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   is now found by the id it was listed and saved under. Where the
   provider's ids change and cannot say which of two was saved before, the
   one not yet saved is marked for manual review rather than guessed at.
+- **Review Names keeps the "(1 of 2)" of an order split into several
+  invoices, in every receipt app.** Target and Amazon save each invoice of
+  a split order with its part at the end of its name. A new name typed in
+  Review Names left the part out, so the first invoice was renamed as
+  though it were the whole order, and no Rename could put it back, since
+  Rename reads the part from the file's own name. The new name now keeps
+  the part, as Rename does.
 
 ## [0.45.0] - 2026-10-07
 

@@ -1298,7 +1298,13 @@ def review_names(app, ask, words: ReviewWords = WORDS,
             date = r.get("Purchase Date") or old_path.name[:10]
             doc_type = r.get("Document Type") or "Receipt"
             record = record_for(key, prog) if record_for else prog
-            new_name = build_pdf_filename(date, new_summary, doc_type, record=record)
+            # The "(1 of 2)" of an order split into several invoices, read
+            # from the file as Rename reads it. Left out, the first invoice
+            # was renamed as though it were the whole order, and no Rename
+            # could put it back, since the name it reads the part from had
+            # lost it.
+            new_name = build_pdf_filename(date, new_summary, doc_type, part=_part_of(r),
+                                          record=record)
             try:
                 # The file does not stand in its own way. Asked for a free
                 # name as though it were another file's, the summary it

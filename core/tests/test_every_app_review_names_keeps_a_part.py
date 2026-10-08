@@ -1,0 +1,232 @@
+"""A new name typed in Review Names keeps the "(1 of 2)" of an order split
+into several invoices.
+
+An order that came as several invoices is saved with its part at the end of
+each name, "2026-05-14 Target Unsure Item Invoice (1 of 2).pdf", by Target
+and by Amazon. Rename keeps it, reading the part from the file's own name
+(renaming._part_of), since only the file knows it. Review Names built the new
+name without it, so the first invoice of a split order was renamed as though
+it were the whole order, "2026-05-14 Target Garden Hose Invoice.pdf", and no
+later Rename could put it back, since the name it reads the part from had
+lost it.
+
+These run each receipt app's own review_names over an output folder on disk,
+with the typing stood in for, and then the app's Rename over what the review
+left. Every name, number and answer is invented.
+"""
+import argparse
+import ast
+import importlib
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from paperpull_core import renaming
+from paperpull_core.models import ONLINE, Item, Purchase, State
+
+REPO = Path(__file__).resolve().parents[2]
+
+
+def entry_of(app: Path):
+    found = sorted(app.glob("*_receipts.py"))
+    return found[0] if found else None
+
+
+APPS = sorted(d for d in (REPO / "apps").iterdir()
+              if d.is_dir() and entry_of(d)
+              and "def cmd_review_names" in entry_of(d).read_text(encoding="utf-8"))
+
+
+def names_parts(source: Path) -> bool:
+    """Whether a file names a document with a part, a call to
+    build_pdf_filename handing it part= anything but None."""
+    for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if name != "build_pdf_filename":
+            continue
+        for kw in node.keywords:
+            if kw.arg == "part" and not (isinstance(kw.value, ast.Constant)
+                                         and kw.value.value is None):
+                return True
+    return False
+
+
+# Every app that saves a document with a part in its name, found by what its
+# code does. Rename's own call in the core is not an app's.
+PARTED = sorted(d.name for d in (REPO / "apps").iterdir()
+                if d.is_dir() and any(names_parts(f) for f in d.glob("*.py")))
+
+
+def load(app: Path):
+    for name in [m for m in list(sys.modules)
+                 if m.endswith(("_docs", "_receipts", "_site")) or m == "storage"]:
+        del sys.modules[name]
+    sys.path.insert(0, str(app))
+    try:
+        return importlib.import_module(entry_of(app).stem)
+    finally:
+        sys.path.pop(0)
+
+
+@pytest.fixture(autouse=True)
+def default_names():
+    """Files named the default way, whatever a test before this one chose."""
+    from paperpull_core import storage
+    storage.set_filename_owner("")
+    storage.set_filename_patterns({})
+    yield
+    storage.set_filename_patterns({})
+
+
+def app_in(mod, out: Path):
+    """The app's own downloader over an output folder on disk, without its
+    __init__, which would want a config file and a console."""
+    storage = sys.modules["storage"]            # the app's own, loaded with it
+    inst = object.__new__(mod.App)
+    inst.config = {"max_path_length": 240, "min_pdf_bytes": 2000}
+    inst.args = argparse.Namespace(redownload=False, apply=False)
+    inst.paths = storage.Paths(out)
+    inst.paths.ensure()
+    backups = inst.paths.backups
+    inst.progress = storage.JsonStore(inst.paths.progress_json, backups)
+    inst.discovery = storage.JsonStore(inst.paths.discovery_json, backups)
+    inst.index_csv = storage.CsvFile(inst.paths.receipt_index_csv,
+                                     storage.RECEIPT_INDEX_COLUMNS, backups)
+    inst.order_csv = storage.CsvFile(inst.paths.order_history_csv,
+                                     storage.ORDER_HISTORY_COLUMNS, backups)
+    return inst
+
+
+def invoice(folder: Path, name: str) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / name
+    path.write_bytes(b"%PDF-1.4\n% invented invoice " + name.encode() + b"\n%%EOF\n")
+    return path
+
+
+def split_order(number: str = "ORDER-0001") -> Purchase:
+    return Purchase(purchase_type=ONLINE, purchase_date="2026-05-14", order_number=number,
+                    summary="Unsure Item", confidence="Low", document_type="Invoice",
+                    items=[Item(name="Invented Garden Item")])
+
+
+def name_of(purchase: Purchase, summary: str, part) -> str:
+    from paperpull_core.storage import build_pdf_filename
+    return build_pdf_filename(purchase.purchase_date, summary, "Invoice", part=part,
+                              record=purchase)
+
+
+def review_then_rename(mod, inst, monkeypatch, answers=("Garden Hose",)):
+    """The person types the new names in turn for the receipts offered,
+    then runs Rename with --apply. What was asked, how many files Rename
+    renamed, and what it said."""
+    asked = []
+    monkeypatch.setattr(mod, "ask",
+                        lambda prompt: asked.append(prompt) or answers[len(asked) - 1])
+    inst.cmd_review_names()
+    said = []
+    result = renaming.run_for(inst, apply_changes=True, say=said.append)
+    return asked, result.renamed, said
+
+
+def test_the_apps_that_name_a_part_have_review_names():
+    """Not passing for want of an app to look at. Target and Amazon save
+    each invoice of a split order with its part, and both are reviewed."""
+    assert {"amazon", "target"} <= set(PARTED), PARTED
+    assert set(PARTED) <= {a.name for a in APPS}, (PARTED, [a.name for a in APPS])
+
+
+@pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
+def test_a_new_name_keeps_the_part_of_a_split_order(app, tmp_path, monkeypatch):
+    """The first invoice of an order split in two, saved and marked for
+    review for its name, as each app's own run writes one down. The second
+    is beside it, named in the record's notes alone, as Target keeps it.
+    A new name keeps "(1 of 2)", the record and both CSVs follow it, the
+    second invoice is left as it is, and the Rename after it finds nothing
+    to change. An order that came whole, reviewed in the same run, is
+    given no part."""
+    mod = load(app)
+    inst = app_in(mod, tmp_path / "out")
+    folder = inst.paths.folder_for(ONLINE)
+    purchase = split_order()
+    first = invoice(folder, name_of(purchase, "Unsure Item", (1, 2)))
+    second = invoice(folder, name_of(purchase, "Unsure Item", (2, 2)))
+    assert first.name.endswith(" Unsure Item Invoice (1 of 2).pdf"), first.name
+    purchase.pdf_path, purchase.pdf_filename = str(first), first.name
+    inst._record_state(purchase, State.PDF_VERIFIED, notes="Also saved " + second.name,
+                       extra={"pdf_size": first.stat().st_size, "pdf_pages": 1,
+                              "downloaded_ok": True})
+    inst._write_csv_rows(purchase, receipt_status="Downloaded",
+                         processing_status="Review Needed")
+    inst._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
+                       notes="Low classification confidence")
+    second_bytes = second.read_bytes()
+    whole = split_order("ORDER-0002")
+    alone = invoice(folder, name_of(whole, "Unsure Item", None))
+    whole.pdf_path, whole.pdf_filename = str(alone), alone.name
+    inst._record_state(whole, State.PDF_VERIFIED, extra={
+        "pdf_size": alone.stat().st_size, "pdf_pages": 1, "downloaded_ok": True})
+    inst._write_csv_rows(whole, receipt_status="Downloaded", processing_status="Review Needed")
+    inst._record_state(whole, State.NEEDS_MANUAL_REVIEW, notes="Low classification confidence")
+
+    asked, renamed, said = review_then_rename(mod, inst, monkeypatch, ("Garden Hose", "Lamp"))
+
+    wanted = name_of(purchase, "Garden Hose", (1, 2))
+    lamp = name_of(whole, "Lamp", None)
+    assert wanted.endswith(" Garden Hose Invoice (1 of 2).pdf"), wanted
+    assert lamp.endswith(" Lamp Invoice.pdf"), lamp
+    assert len(asked) == 2
+    assert sorted(p.name for p in folder.iterdir()) == sorted([wanted, second.name, lamp])
+    assert second.read_bytes() == second_bytes
+    record = inst.progress.get(purchase.key)
+    assert (record["pdf_filename"], record["pdf_path"]) == (wanted, str(folder / wanted))
+    assert inst.progress.get(whole.key)["pdf_filename"] == lamp
+    assert [r["PDF Filename"] for r in inst.index_csv.read_all()] == [wanted, lamp]
+    assert {r["PDF Filename"] for r in inst.order_csv.read_all()} == {wanted, lamp}
+    assert renamed == 0, "Rename agrees with the names the review gave, %s" % said
+
+
+def test_target_keeps_the_part_of_an_invoice_it_saved(tmp_path, monkeypatch):
+    """Target's own run, from the invoice it placed to the rows it wrote,
+    for an order whose two invoices both name its item. Each is placed by
+    _place_invoice with the part Target printed on it, the order is filed by
+    _file_invoices, and its rows are written as process_one writes them for
+    a name it was unsure of. A new name for the order keeps "(1 of 2)", and
+    the next Rename and the next review leave it."""
+    mod = load(REPO / "apps" / "target")
+    inst = app_in(mod, tmp_path / "out")
+    inst.stats = {"new_files": [], "validation_failures": 0}
+    purchase = split_order("1000000000001")
+    walk = {"saved": [], "held": [], "missed": [], "count": 2, "tokens": []}
+    for i in (1, 2):
+        staged = invoice(tmp_path / "staged", "invoice-%d.pdf" % i)
+        checked = SimpleNamespace(ok=True, reason="", size_bytes=staged.stat().st_size,
+                                  page_count=1)
+        inst._place_invoice(staged, purchase, (i, 2), (i, 2), "", checked,
+                            "Invoice %d of 2 Invented Garden Item" % i, walk)
+    assert inst._file_invoices(purchase, walk) is True
+    inst._write_csv_rows(purchase, receipt_status="Downloaded",
+                         processing_status="Review Needed")
+    inst._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
+                       notes="Low classification confidence")
+    folder = inst.paths.invoices
+    placed = sorted(p.name for p in folder.iterdir())
+    assert placed == ["2026-05-14 Target Unsure Item Invoice (1 of 2).pdf",
+                      "2026-05-14 Target Unsure Item Invoice (2 of 2).pdf"], placed
+    assert [r["PDF Filename"] for r in inst.index_csv.read_all()] == [placed[0]]
+
+    asked, renamed, said = review_then_rename(mod, inst, monkeypatch)
+
+    assert len(asked) == 1
+    assert sorted(p.name for p in folder.iterdir()) == [
+        "2026-05-14 Target Garden Hose Invoice (1 of 2).pdf", placed[1]]
+    assert renamed == 0, "Rename agrees with the name the review gave, %s" % said
+    again = []
+    monkeypatch.setattr(mod, "ask", lambda prompt: again.append(prompt) or "Lamp")
+    inst.cmd_review_names()
+    assert again == [], "a receipt renamed is not offered again"
