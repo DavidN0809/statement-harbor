@@ -100,15 +100,66 @@ APPS = sorted(d for d in (REPO / "apps").iterdir()
 IDS = [d.name for d in APPS]
 
 
+def is_empty(value) -> bool:
+    return isinstance(value, ast.Constant) and not value.value
+
+
+def key_it_reads(value, fn):
+    """The key of a listed document that a document_id= argument reads, from
+    d.get("key"), d.get("key") or "", or a name the same method gives one of
+    those, and None when it reads something else."""
+    if isinstance(value, ast.BoolOp) and isinstance(value.op, ast.Or):
+        return key_it_reads(value.values[0], fn)
+    if (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
+            and value.func.attr == "get" and value.args
+            and isinstance(value.args[0], ast.Constant) and isinstance(value.args[0].value, str)):
+        return value.args[0].value
+    if isinstance(value, ast.Name):
+        for node in ast.walk(fn):
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name) and node.targets[0].id == value.id):
+                found = key_it_reads(node.value, fn)
+                if found:
+                    return found
+    return None
+
+
+def what_its_site_lists(app: Path) -> list:
+    """Each document the app's own site writes down for its record, a dict
+    with a title and a date, as {key: the value it is given}. Empty when
+    the site hands the record the provider's own answer, as USAA's does."""
+    listed = []
+    for site in sorted(app.glob("*_site.py")):
+        for node in ast.walk(ast.parse(site.read_text(encoding="utf-8-sig"))):
+            if isinstance(node, ast.Dict):
+                fields = {k.value: v for k, v in zip(node.keys, node.values)
+                          if isinstance(k, ast.Constant)}
+                if {"title", "date"} <= set(fields):
+                    listed.append(fields)
+    return listed
+
+
 def gives_the_providers_id(app: Path) -> bool:
     """An app that records a document under the provider's own id, found by
-    a Document it builds with a document_id that is not left empty."""
+    a Document it builds with a document_id that is not left empty, reading
+    a key its own site gives a value where the site writes the listed
+    documents itself. A Document handed an id here is not enough, since the
+    tests below would then hold the app to a download its own listing never
+    makes (test_an_app_whose_listing_gives_no_id_is_not_counted_as_keeping_one)."""
     tree = ast.parse(entry_of(app).read_text(encoding="utf-8-sig"))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and ast.unparse(node.func) == "Document":
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        for node in ast.walk(fn):
+            if not (isinstance(node, ast.Call) and ast.unparse(node.func) == "Document"):
+                continue
             for kw in node.keywords:
-                if kw.arg == "document_id" and not (
-                        isinstance(kw.value, ast.Constant) and not kw.value.value):
+                if kw.arg != "document_id" or is_empty(kw.value):
+                    continue
+                key = key_it_reads(kw.value, fn)
+                listed = what_its_site_lists(app) if key else []
+                if not listed or any(key in fields and not is_empty(fields[key])
+                                     for fields in listed):
                     return True
     return False
 
@@ -335,10 +386,27 @@ def test_there_are_apps_to_check():
     found nobody."""
     assert len(APPS) >= 61, IDS
     assert {"amfam", "citi", "target", "wellsfargo"} <= set(IDS)
-    # Fifteen, since AAFMAA, which gives a document no id, stopped keeping
-    # its View control's postback name as one.
-    assert len(WITH_IDS) >= 15 and {"capitalone", "chase", "vanguard"} <= {
+    # Eleven, since AAFMAA stopped keeping its View control's postback name
+    # as an id, and four apps whose listings give no id are no longer
+    # counted (test_an_app_whose_listing_gives_no_id_is_not_counted_as_keeping_one).
+    assert len(WITH_IDS) >= 11 and {"capitalone", "schwab", "usaa"} <= {
         d.name for d in WITH_IDS}, [d.name for d in WITH_IDS]
+
+
+def test_an_app_whose_listing_gives_no_id_is_not_counted_as_keeping_one():
+    """Four apps build a Document with a document_id their own listing never
+    gives them. Vanguard's listing hands the statement's id over as
+    statement_id and its record reads document_id. Chase's and U.S. Bank's
+    listings read rows that carry an empty documentId, and Navy Federal's
+    rows that carry none (the method of its own that reads one is never
+    called). So none of the four has kept an id, and
+    the tests here that handed them one held their downloads and Rename to
+    what never happens, a second file told apart by the end of an id where
+    it is given " (2)"."""
+    never = {"chase", "navyfederal", "usbank", "vanguard"}
+    assert never <= set(IDS), IDS
+    assert not never & {d.name for d in WITH_IDS}, [d.name for d in WITH_IDS]
+    assert not never & {d.name for d in RELISTS}, [d.name for d in RELISTS]
 
 
 @pytest.mark.parametrize("home", WITH_IDS, ids=[d.name for d in WITH_IDS], indirect=True)
@@ -837,7 +905,8 @@ def relists_with_a_new_id(app: Path):
     return None
 
 
-RELISTS = [d for d in APPS if relists_with_a_new_id(d)]
+# An app whose listing gives no id has none to write over another.
+RELISTS = [d for d in WITH_IDS if relists_with_a_new_id(d)]
 # A File names pattern without the summary, under which these apps'
 # statements of one day share a name, since their summaries carry the
 # account.
@@ -845,7 +914,7 @@ NO_SUMMARY = "{date:yyyy-mm-dd} {provider}"
 
 
 def test_there_are_apps_that_write_a_new_id_over_an_old_one():
-    assert {"capitalone", "schwab", "vanguard"} <= {d.name for d in RELISTS}, RELISTS
+    assert {"capitalone", "schwab"} <= {d.name for d in RELISTS}, RELISTS
 
 
 def listing(app, name: str):
@@ -858,7 +927,7 @@ def listing(app, name: str):
 
 @pytest.mark.parametrize("home", RELISTS, ids=[d.name for d in RELISTS], indirect=True)
 def test_an_id_a_later_listing_gives_never_moves_a_file_its_download_told_apart(home):
-    """Capital One, Schwab and Vanguard keep a document under its account,
+    """Capital One and Schwab keep a document under its account,
     date, title and place, and a later listing that gives it another id
     writes that over the one in discovery, where progress keeps the one its
     download told the file apart by. Rename read the newer one, so the

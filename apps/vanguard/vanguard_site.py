@@ -432,6 +432,11 @@ def list_documents(page, accounts: Optional[List[dict]] = None,
             "period": period,
             "title": title,
             "category": cat,
+            # Handed over as statement_id, which the record does not read,
+            # and not as document_id, the id a record keeps and a file's
+            # name can carry. Whether it stays the same from one listing to
+            # the next, and ends differently for each statement, has not been
+            # seen (tests/test_statement_id.py).
             "statement_id": s.get("statementId", ""),
             "statement_number": s.get("statementNumber", ""),
             "doc_type": "Statement",
