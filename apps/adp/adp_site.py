@@ -823,8 +823,9 @@ def open_tax_statement_check(page) -> bool:
     """Press the Tax Statements card's own "View statement", which is
     what starts ADP's identity check, so the person can answer it in the
     window that is already open. True when it was pressed, and False when
-    the page or the button could not be found or the button left the page
-    before it was pressed, with nothing pressed.
+    the page or the button could not be found, the button left the page
+    before it was pressed or the page has it turned off, with nothing
+    pressed.
 
     The button is found as the element itself (_VIEW_STATEMENT_JS), so the
     press and every check before it reach that one element through the
@@ -845,9 +846,17 @@ def open_tax_statement_check(page) -> bool:
         if button is None:
             log.info("the page shows no View statement for the tax statements")
             return False
-        outcome = pressing.press_once(
-            page, button, what="the View statement button of the Tax Statements card",
-            words=_words(), guard=is_safe_control, step="open the identity check")
+        try:
+            outcome = pressing.press_once(
+                page, button, what="the View statement button of the Tax Statements card",
+                words=_words(), guard=is_safe_control, step="open the identity check")
+        except pressing.TurnedOff:
+            # Turned off on the page, so nothing was pressed. The person is
+            # asked to open the check, as for a button that is not there, and
+            # a tax statement it does not bring is left for review and the
+            # next run (pressing.TurnedOff).
+            log.info("the View statement of the tax statements is turned off")
+            return False
         return outcome.how != pressing.GONE
     except Exception as e:
         log.info("could not open the tax statement check: %s", e)

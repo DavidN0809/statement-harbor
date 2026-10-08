@@ -348,3 +348,75 @@ def test_a_covered_label_is_not_pressed_either(show):
         pressing.check(page, page.locator("#pdf"), css="input", what="the PDF choice",
                        words=WORDS)
     assert pressed(page) == [] and not page.locator("#pdf").is_checked()
+
+
+# --- A control the page keeps turned off -----------------------------------------
+
+OFF_BUTTON = BUTTON.replace(' onclick=', ' disabled onclick=')
+OFF_COVER = ('<div class="cover" style="right: 0; bottom: 0; width: 300px; height: 120px;" '
+             'onclick="said(\'cover\')">Chat</div>')
+
+
+def _click_off(page, timeout):
+    pressing.click(page, page.locator("#go"), css="button", what="the button", words=WORDS,
+                   timeout=timeout)
+
+
+def test_a_turned_off_control_is_waited_for_press_ms_and_not_the_presses_own_time(
+        show, monkeypatch):
+    """A press given a long time, as one that waits for a download is, still
+    gives a control that stays turned off no longer than PRESS_MS. Nothing
+    is pressed, and nothing was tried, so the stop is no stop after a press."""
+    import time
+    monkeypatch.setattr(pressing, "PRESS_MS", 600)
+    page = show(OFF_BUTTON)
+    started = time.monotonic()
+    with pytest.raises(pressing.TurnedOff) as stop:
+        _click_off(page, 30000)
+    assert time.monotonic() - started < 10
+    assert pressed(page) == []
+    assert not stop.value.after_a_press
+    assert stop.value.facts == {"verdict": "off"}
+
+
+def test_a_control_the_page_turns_on_while_it_is_waited_for_is_pressed(show, monkeypatch):
+    monkeypatch.setattr(pressing, "PRESS_MS", 4000)
+    page = show(OFF_BUTTON + "<script>setTimeout(() => { "
+                "document.getElementById('go').disabled = false; }, 400);</script>")
+    _click_off(page, 8000)
+    assert pressed(page) == ["go"]
+
+
+def test_a_control_turned_off_after_it_read_as_on_is_left_by_what_playwright_says(
+        show, monkeypatch):
+    """It read as turned on, and stayed turned off for all of Playwright's
+    own wait. Playwright says its press never began, so nothing was
+    pressed."""
+    page = show(OFF_BUTTON)
+    monkeypatch.setattr(pressing, "_off_the_whole_wait", lambda *a, **k: False)
+    with pytest.raises(pressing.TurnedOff) as stop:
+        _click_off(page, 700)
+    assert pressed(page) == []
+    assert stop.value.after_a_press
+    assert stop.value.facts == {"verdict": "off", "error": "timeout"}
+
+
+def test_a_turned_off_control_under_a_cover_stops_the_run_as_covered(show, monkeypatch):
+    monkeypatch.setattr(pressing, "PRESS_MS", 600)
+    page = show(OFF_BUTTON + OFF_COVER)
+    with pytest.raises(pressing.Covered):
+        _click_off(page, 8000)
+    assert pressed(page) == []
+
+
+def test_a_hidden_turned_off_control_is_not_waited_for(show, monkeypatch):
+    """One that does not show is no turned off control that shows, so it is
+    read at once, and that it cannot be read stops the run as before."""
+    import time
+    monkeypatch.setattr(pressing, "PRESS_MS", 3000)
+    page = show(OFF_BUTTON.replace('position: fixed;', 'position: fixed; display: none;'))
+    started = time.monotonic()
+    with pytest.raises(pressing.Unread):
+        _click_off(page, 8000)
+    assert time.monotonic() - started < 2.5
+    assert pressed(page) == []

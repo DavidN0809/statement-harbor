@@ -1867,7 +1867,9 @@ def _press_once(page, link, arrived, seconds: float = 6.0, said: Optional[dict] 
 
     `said`, when given, records whether the press landed, whether the
     link's own click was the one that did it, and whether the click
-    raised after it had landed, for the journal."""
+    raised after it had landed, for the journal, and "gone" or "off" when
+    nothing was pressed because the link left the page or the page has it
+    turned off (pressing.TurnedOff)."""
     popups = []
     if said is None:
         said = {}
@@ -1880,10 +1882,15 @@ def _press_once(page, link, arrived, seconds: float = 6.0, said: Optional[dict] 
 
     page.on("popup", heard_tab)
     try:
-        outcome = pressing.press_once(
-            page, link, what="the bill's PDF control", words=_words(),
-            guard=lambda _now: is_safe_control(all_labels(link)), timeout=4000,
-            brought=lambda: bool(popups or arrived()))
+        try:
+            outcome = pressing.press_once(
+                page, link, what="the bill's PDF control", words=_words(),
+                guard=lambda _now: is_safe_control(all_labels(link)), timeout=4000,
+                brought=lambda: bool(popups or arrived()))
+        except pressing.TurnedOff:
+            log.info("the link is turned off on the page, so nothing was pressed")
+            said["off"] = True
+            return None
         if outcome.page_error is not None:
             log.info("the link's own click did not land either (%s)",
                      type(outcome.page_error).__name__)
@@ -2110,6 +2117,13 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                 # left for another run (pressing.press_once).
                 print("  [site] the link left the page before it was pressed, so nothing was pressed")
                 _trace("the link left the page before it was pressed")
+                return False
+            if press.get("off"):
+                # The page has the link turned off, so nothing was pressed
+                # and nothing this bill brings can come. The bill is left for
+                # review and the next run (pressing.TurnedOff).
+                print("  [site] the link is turned off on the page, so nothing was pressed")
+                _trace("the link is turned off on the page")
                 return False
 
             blob_url = None

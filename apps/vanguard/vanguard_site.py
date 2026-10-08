@@ -616,7 +616,9 @@ def download_document(page, account_id: str, charitable: bool,
     exact copy of the statement. Without `dl_dir` the browser is left where
     it is and only the download event is taken. A press that brought no
     download at all stops the run (pressing.no_answer), since pressing again,
-    here or on the next statement, could do something other than it did.
+    here or on the next statement, could do something other than it did. An
+    icon the page has turned off is not pressed, and nothing is, and its
+    statement is left for review and the next run (pressing.TurnedOff).
 
     A press whose download begins later than EVENT_WAIT_MS fails, and its
     event can arrive inside the next press's wait. When this press's own
@@ -698,6 +700,12 @@ def download_document(page, account_id: str, charitable: bool,
             failed = dl.failure() or ""   # returns once the download has finished
         except Exception as e:
             failed = str(e).splitlines()[0][:70] if str(e) else type(e).__name__
+    except pressing.TurnedOff:
+        # The page has the icon turned off, so nothing was pressed and no
+        # download was waited for. The statement is left for review and the
+        # next run, and the run goes on.
+        log.info("the download icon for %s is turned off, so nothing was pressed", date)
+        return False
     except Exception as e:
         log.info("no download began for %s (%s)", date,
                  str(e).splitlines()[0][:70])

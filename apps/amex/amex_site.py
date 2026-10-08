@@ -736,11 +736,14 @@ def download_document(page, category: str, date: str, out_path) -> bool:
     to the next document, so a press that had opened something else was
     followed by more presses, on whatever it had opened.
 
-    False only when the row's button is not on the page, and then nothing
-    was pressed for this document, or when the download came and could not
-    be saved. The dialog is left open once the statement is saved, for the
-    app to close once it has recorded the statement as saved, so a stop at
-    the close never loses a saved statement (close_file_type_dialog)."""
+    False only when the row's button is not on the page or the page has it
+    turned off, and then nothing was pressed for this document, or when the
+    download came and could not be saved. A turned off button leaves its
+    document for review and the next run, and the run goes on
+    (pressing.TurnedOff). The dialog is left open once the statement is
+    saved, for the app to close once it has recorded the statement as
+    saved, so a stop at the close never loses a saved statement
+    (close_file_type_dialog)."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     words = _words()
@@ -759,8 +762,12 @@ def download_document(page, category: str, date: str, out_path) -> bool:
     if btn is None or not _shows(btn):
         log.info("row download button not found for %s %s (sel=%s)", category, date, sel)
         return False
-    pressing.click(page, btn, css=sel, what=button, words=words,
-                   step="press a download button")
+    try:
+        pressing.click(page, btn, css=sel, what=button, words=words,
+                       step="press a download button")
+    except pressing.TurnedOff:
+        log.info("the row download button is turned off for %s %s", category, date)
+        return False
 
     if not _wait_for_dialog(page, DIALOG_WAIT_MS):
         log.info("file-type dialog did not open for %s %s", category, date)

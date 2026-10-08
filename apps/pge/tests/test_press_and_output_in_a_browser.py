@@ -144,6 +144,25 @@ def test_a_press_that_landed_and_raised_is_not_made_again(page, tmp_path):
     assert page.evaluate("window.presses") == 1
 
 
+def test_a_link_the_page_turned_off_leaves_its_bill_and_the_run_goes_on(page, tmp_path):
+    """The link is found by its row and its words, turned off or not. It is
+    not pressed, nothing is waited for or read from the page afterwards,
+    and the bill is left for review and the next run, where the run used
+    to stop at it every time (pressing.TurnedOff).
+
+    An anchor with no address is no link to Playwright, and Playwright
+    presses one marked aria-disabled all the same, so the link here says it
+    is one, as a link drawn that way would."""
+    page.set_content(ROW % "View Bill PDF" + ON_PRESS % ASK_SALESFORCE)
+    page.evaluate("const a = document.querySelector('a.pdf-link');"
+                  " a.setAttribute('role', 'link'); a.setAttribute('aria-disabled', 'true')")
+    ok, out, j = _download(page, tmp_path)
+    assert ok is False and not out.exists()
+    assert page.evaluate("window.presses") == 0
+    assert _results(j, "the link is turned off on the page") == [{}]
+    assert _results(j, "pressed the pdf control") == [], "the capture went on after the link"
+
+
 def test_an_uncovered_link_takes_an_ordinary_click(page, tmp_path):
     page.set_content(ROW % "View Bill PDF" + ON_PRESS % ASK_SALESFORCE)
     ok, out, j = _download(page, tmp_path)

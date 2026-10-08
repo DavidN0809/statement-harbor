@@ -382,10 +382,17 @@ def test_every_word_a_press_writes_into_a_failure_file_comes_through():
         return []
 
     tree = ast.parse((CORE / "paperpull_core" / "pressing.py").read_text(encoding="utf-8"))
-    stops = {"Stop", "no_answer"} | {
-        n.name for n in tree.body if isinstance(n, ast.ClassDef)
-        and any(ast.unparse(b) in ("Stop", "SystemExit") for b in n.bases)}
-    assert {"Covered", "Unread", "NotPressed", "NoAnswer", "Unsure", "Changed"} <= stops
+    # A stop of a stop, TurnedOff a NotPressed, is a stop too.
+    classes = {n.name: {ast.unparse(b) for b in n.bases}
+               for n in tree.body if isinstance(n, ast.ClassDef)}
+    stops = {"Stop", "no_answer"}
+    while True:
+        more = {name for name, bases in classes.items() if bases & (stops | {"SystemExit"})}
+        if more <= stops:
+            break
+        stops |= more
+    assert {"Covered", "Unread", "NotPressed", "NoAnswer", "Unsure", "Changed",
+            "TurnedOff"} <= stops
     found = set(pressing._WHY) | set(pressing._CHANGED)
     for node in ast.walk(tree):
         # A dict of facts, laid into a stop where it is built or kept in a

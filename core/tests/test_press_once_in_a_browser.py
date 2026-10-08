@@ -263,6 +263,107 @@ def test_a_control_the_page_turned_off_is_not_pressed_through_the_page(show):
     assert stop.value.facts["verdict"] == "off"
 
 
+# --- A control the page keeps turned off ------------------------------------------
+#
+# An app catches TurnedOff where it presses a document's own control, and
+# leaves the document. So it is raised only when nothing at all was pressed,
+# and each of these holds one of the reads that says so to one page.
+
+OFF = BUTTON.replace('type="button"', 'type="button" disabled')
+# Playwright's account of a press that waited for a control the page kept
+# turned off.
+OFF_ACCOUNT = NOT_MADE.replace("element is not stable", "element is not enabled")
+
+
+def test_a_control_turned_off_the_whole_time_is_left_with_nothing_pressed(show):
+    """Playwright waited for it the whole time and says only that, nothing
+    came, it heard no press, and it shows, turned off, with nothing over it.
+    TurnedOff is a NotPressed, so where no app catches it the run stops as
+    it did."""
+    page = show(OFF % "")
+    with pytest.raises(pressing.TurnedOff) as stop:
+        press(page, timeout=500)
+    assert presses(page) == 0
+    assert isinstance(stop.value, pressing.NotPressed)
+    assert stop.value.reason == "the control is turned off"
+    assert stop.value.facts == {"verdict": "off", "error": "timeout"}
+
+
+def test_a_turned_off_control_under_a_cover_stops_the_run_as_covered(show):
+    page = show(OFF % "" + COVER)
+    with pytest.raises(pressing.Covered) as stop:
+        press(page, timeout=500)
+    assert presses(page) == 0 and page.evaluate("window.coverPresses") == 0
+    assert stop.value.after_a_press
+
+
+def test_a_turned_off_control_whose_account_says_more_stops_the_run(show, monkeypatch):
+    """Playwright says the control is not enabled, and something no list
+    here knows besides. Whether its press began cannot be told, so the
+    control is not left as turned off."""
+    page = show(OFF % "")
+
+    def more(self, *args, **kwargs):
+        raise sync_api.TimeoutError(OFF_ACCOUNT + "    - something no list here knows\n")
+    monkeypatch.setattr(sync_api.Locator, "click", more)
+    with pytest.raises(pressing.NotPressed) as stop:
+        press(page)
+    assert not isinstance(stop.value, pressing.TurnedOff)
+    assert presses(page) == 0
+
+
+def test_a_file_that_came_while_a_turned_off_control_was_waited_for_stops_the_run(
+        show, tmp_path, monkeypatch):
+    page = show(OFF % "")
+    real = sync_api.Locator.click
+
+    def then_a_file(self, *args, **kwargs):
+        try:
+            return real(self, *args, **kwargs)
+        finally:
+            (tmp_path / "statement.pdf").write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(sync_api.Locator, "click", then_a_file)
+    with pytest.raises(pressing.NotPressed) as stop:
+        press(page, dl_dir=tmp_path, timeout=500)
+    assert not isinstance(stop.value, pressing.TurnedOff)
+
+
+def test_what_the_app_says_came_while_a_turned_off_control_was_waited_for_stops_the_run(show):
+    page = show(OFF % "")
+    with pytest.raises(pressing.NotPressed) as stop:
+        press(page, brought=lambda: True, timeout=500)
+    assert not isinstance(stop.value, pressing.TurnedOff)
+
+
+def test_a_turned_off_control_the_person_pressed_stops_the_run(show, monkeypatch):
+    """A control turned off by aria-disabled still takes a person's press,
+    which the page hears, and one came as Playwright gave up. That press is
+    not taken for nothing pressed, and nothing more is pressed."""
+    page = show((BUTTON % "").replace('type="button"', 'type="button" aria-disabled="true"'))
+    real = sync_api.Locator.click
+
+    def then_the_person(self, *args, **kwargs):
+        try:
+            return real(self, *args, **kwargs)
+        except sync_api.TimeoutError:
+            box = self.bounding_box()
+            self.page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+            raise
+    monkeypatch.setattr(sync_api.Locator, "click", then_the_person)
+    with pytest.raises(pressing.NotPressed) as stop:
+        press(page, timeout=500)
+    assert not isinstance(stop.value, pressing.TurnedOff)
+    assert presses(page) == 1, "only the person's press"
+
+
+def test_a_turned_off_control_that_could_not_be_listened_to_stops_the_run(show, monkeypatch):
+    page = show(OFF % "")
+    monkeypatch.setattr(pressing, "_HEAR_JS", "(el, word) => { throw new Error('no'); }")
+    with pytest.raises(pressing.NotPressed) as stop:
+        press(page, timeout=500)
+    assert not isinstance(stop.value, pressing.TurnedOff)
+
+
 def test_a_press_that_raised_with_no_account_of_itself_is_not_made_again(show, monkeypatch):
     """An error that is not Playwright's account of a press, the browser gone
     say. Nothing says the press was not made."""

@@ -34,7 +34,11 @@ So a press here takes three steps, and stops the run rather than guess.
 
 When something covers the control, the run stops with Covered. When the
 control could not be read, it stops with Unread, and when Playwright could
-not make the press, with NotPressed. A press that brought nothing it should
+not make the press, with NotPressed. A control that shows with nothing over
+it and that the page keeps turned off for as long as Playwright waits for
+it is not pressed, and nothing is, with TurnedOff, a NotPressed that an app
+catches where it presses a document's own control, to leave that document
+for review and the next run and go on. A press that brought nothing it should
 stops the run with NoAnswer, which the app raises itself. Each is a Stop,
 and a Stop is a SystemExit, so no `except Exception` between the press and
 the app's main() takes it for an ordinary failure and goes on to the next
@@ -143,6 +147,17 @@ class Unread(Stop):
 
 class NotPressed(Stop):
     """Playwright did not make the press."""
+
+
+class TurnedOff(NotPressed):
+    """The control shows with nothing over it and the page has turned it
+    off, so it was not pressed, and nothing was. The apps find a document's
+    control by its role and its name, which finds a turned off one too, and
+    a site can turn off the Download of one document it will not hand over
+    yet. An app catches this where it presses a document's own control and
+    leaves that document for review and the next run, so one such document
+    does not stop every run at the same place. Uncaught, it stops the run
+    like any NotPressed."""
 
 
 class NoAnswer(Stop):
@@ -1059,11 +1074,85 @@ def _stop_loading(page) -> None:
                 pass
 
 
-def _press(page, action, what: str, step: str) -> None:
+def _shown_and_off(el) -> Optional[bool]:
+    """Whether `el` shows and is turned off, read the way Playwright reads
+    both before a press (is_visible, is_enabled), so it reads turned off
+    exactly when Playwright's press would wait for it to turn on. False when
+    it is turned on or does not show, None when either cannot be read. A
+    Locator takes a timeout and an element handle does not."""
+    try:
+        if not el.is_visible():
+            return False
+    except Exception:
+        return None
+    for ask in (lambda: el.is_enabled(timeout=1000), lambda: el.is_enabled()):
+        try:
+            return not ask()
+        except TypeError:
+            continue
+        except Exception:
+            return None
+    return None
+
+
+def _off_the_whole_wait(page, el, ms: int) -> bool:
+    """Whether `el` shows and stays turned off from now until `ms` have
+    passed, read every quarter of a second. False at once when it is turned
+    on, does not show or cannot be read, and as soon as it turns on, so a
+    control the page turns on a moment later is pressed as it always was."""
+    import time
+    deadline = time.monotonic() + ms / 1000.0
+    while _shown_and_off(el) is True:
+        if time.monotonic() >= deadline:
+            return True
+        try:
+            page.wait_for_timeout(250)
+        except Exception:
+            return False
+    return False
+
+
+def _only_turned_off(error) -> bool:
+    """Whether Playwright's account of a press that raised says only that
+    it waited for the control and found it turned off, every line one of
+    _BEFORE_A_PRESS and one of them that the element is not enabled. Such a
+    press never began."""
+    lines = _account(str(error or ""))
+    return bool(lines) and "element is not enabled" in lines and all(
+        any(p.match(line) for p in _BEFORE_A_PRESS) for line in lines)
+
+
+def _leave_if_turned_off(page, el, css: str, what: str, words, step: str, facts: dict,
+                         after_a_press: bool) -> None:
+    """Raise TurnedOff when `el` shows and is turned off with nothing over
+    it in the middle of the window, read the way click reads it (look,
+    judge). Something over it, or a control that cannot be read there,
+    stops the run as it does for any press (Covered, Unread). Returns when
+    it does not read as showing and turned off, a control no longer on the
+    page among them, for the caller to go on its own way."""
+    if _shown_and_off(el) is not True:
+        return
+    seen = look(page, el, css) if css else {"state": "unread", "why": "not read"}
+    try:
+        judge(seen, what, words, step)
+    except Stop as stop:
+        stop.after_a_press = stop.after_a_press or after_a_press
+        raise
+    log.info("%s is turned off on the page, so nothing was pressed", what)
+    raise TurnedOff(step, "the control is turned off", [
+        "%s is turned off on the page, so nothing was pressed." % (what[:1].upper() + what[1:]),
+        AGAIN], {**facts, "verdict": "off"}, after_a_press=after_a_press)
+
+
+def _press(page, action, what: str, step: str, off: Optional[Callable[[str], None]] = None) -> None:
     """Playwright's own unforced press. Any error from it stops the run, and
     nothing is pressed again. That includes Playwright's own verdict that
     something else got the press, which it gives only when it is waited
     for, so the press is never made with no_wait_after.
+
+    When Playwright says only that it waited for a control that stayed
+    turned off, `off` is handed the error's kind first, and it may raise
+    TurnedOff.
 
     The same wait also covers what a press starts, a page loading or a
     download beginning, so an error can come after the press was made.
@@ -1087,6 +1176,8 @@ def _press(page, action, what: str, step: str) -> None:
                 "%s was pressed, and the page did not answer in time, so nothing more "
                 "is pressed." % (what[:1].upper() + what[1:]),
                 AGAIN], {"error": kind, "made": True}, after_a_press=True)
+        if off is not None and _only_turned_off(e):
+            off(kind)
         log.info("the press on %s did not go through (%s)", what, kind)
         raise NotPressed(step, "the press did not go through", [
             "Pressing %s did not go through, so nothing more is pressed." % what,
@@ -1140,10 +1231,19 @@ def click(page, locator, *, css: str, what: str, words, step: str = "press a con
     words, "the Download button for the statement of 2026-01-27". `words`
     is the app's word list, words_for(provider, site). `frame` is the
     Playwright frame the control is in, when it is not in the page's main
-    frame, and then the control and every frame around it are read."""
+    frame, and then the control and every frame around it are read.
+
+    A control that shows and is turned off is waited for, the way
+    Playwright waits for one, for PRESS_MS at most, even when the press
+    itself is given longer. When it stays turned off with nothing over it,
+    nothing is pressed (TurnedOff)."""
+    if _off_the_whole_wait(page, locator, min(timeout, PRESS_MS)):
+        _leave_if_turned_off(page, locator, css, what, words, step, {}, after_a_press=False)
     seen = look(page, locator, css, frame=frame)
     judge(seen, what, words, step)
-    _press(page, lambda: locator.click(timeout=timeout), what, step)
+    _press(page, lambda: locator.click(timeout=timeout), what, step,
+           off=lambda kind: _leave_if_turned_off(page, locator, css, what, words, step,
+                                                 {"error": kind}, after_a_press=True))
     after(page, seen, what, words, step, frame=frame)
 
 
@@ -1430,7 +1530,10 @@ def press_once(page, el, *, what: str, words, guard: Callable[[str], bool],
          it says was done is never made again (MADE). One it says something
          intercepts, one it began without saying how that ended, a control
          it says is not enabled, and an account in other words or none at
-         all each stop the run.
+         all each stop the run. A control it waited for and found turned
+         off the whole time is not pressed through the page either, and when
+         nothing came, it heard no press and it still shows, turned off,
+         with nothing over it, nothing was pressed at all (TurnedOff).
       2. Nothing came that a press brings. No tab opened, no download
          began, the tab began loading nothing new and stands at the same
          address, no file came into `dl_dir`, and the app's own `brought`
@@ -1556,6 +1659,23 @@ def press_once(page, el, *, what: str, words, guard: Callable[[str], bool],
                 "stops here.",
                 AGAIN], {"verdict": "unsure", "error": kind}, after_a_press=True)
         if said == "off":
+            # Turned off for the press's whole time. It is left as it is,
+            # with nothing pressed, only when Playwright never began the
+            # press, nothing came, and the control heard no press and still
+            # shows, turned off, with nothing over it (TurnedOff). Anything
+            # else stops the run.
+            came_by_app = False
+            if brought is not None:
+                try:
+                    came_by_app = bool(brought())
+                except Exception:
+                    came_by_app = True
+            if _only_turned_off(first) and before is not None and not anything_came() \
+                    and not came_by_app:
+                state = _ask(handle, _STATE_JS, _KEY)
+                if isinstance(state, dict) and state.get("heard") is False:
+                    _leave_if_turned_off(page, handle, css, what, words, step,
+                                         {"error": kind}, after_a_press=True)
             log.info("%s is not enabled on the page, so it is not pressed through the page", what)
             raise NotPressed(step, "the control is turned off", [
                 "%s is turned off on the page, so it was not pressed through the page "

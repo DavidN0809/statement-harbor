@@ -2182,11 +2182,20 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         # covered the control, its press never reached the page and nothing
         # it should bring came. What cannot be told stops the run, and the
         # control is never pressed twice (pressing.press_once).
-        outcome = pressing.press_once(
-            page, el, what="the control for this document", words=_words(),
-            guard=is_safe_control, check=check_again, dl_dir=dl_dir, timeout=CLICK_TIMEOUT_MS,
-            brought=lambda: bool(downloads or got or on_its_way()
-                                 or (_control_texts(page) - controls_before)))
+        try:
+            outcome = pressing.press_once(
+                page, el, what="the control for this document", words=_words(),
+                guard=is_safe_control, check=check_again, dl_dir=dl_dir, timeout=CLICK_TIMEOUT_MS,
+                brought=lambda: bool(downloads or got or on_its_way()
+                                     or (_control_texts(page) - controls_before)))
+        except pressing.TurnedOff:
+            # The page has turned the control off, so nothing was pressed and
+            # nothing this document brings can come. No second step is looked
+            # for, and the document is left for review and the next run while
+            # the run goes on (pressing.TurnedOff).
+            if trace is not None:
+                trace.append({"note": "the control is turned off on the page, so nothing was pressed"})
+            return False
         if trace is not None:
             if outcome.error is None:
                 trace.append({"note": "clicked", "control": redact(label)[:60]})
