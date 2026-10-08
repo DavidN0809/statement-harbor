@@ -901,15 +901,18 @@ class _Known:
     when one document alone has them and no record of that date and title
     names a file. Any other row is named from the row alone, a name that
     leaves out what a record would have added, and never one that says
-    another document's. A file that rows of the index give to two
-    documents, as when a deleted file's name was taken by a later download,
-    or whose record has another order number than its row, keeps its name,
-    since whose file it is cannot be told."""
+    another document's. A file that rows of the index or records give to
+    two purchases or documents keeps its name, since whose file it is
+    cannot be told. That is a deleted file's name taken by a later
+    download, whichever of the two kept its rows, and a record with
+    another order number than its row."""
 
     def __init__(self, app, rows=()):
         self.records = {}      # the app's key -> what it knows of that document
         self._saved = {}       # the app's key -> what its records naming a file said
         self._by_file = {}     # a file -> each key whose records name it -> their spellings
+        self._claims = {}      # the same with Target's invoices of an order as well
+        self._stands_for = {}  # a rename view's copy of a record -> the record's key
         self._by_key = {}      # a row key -> the keys whose records carry it
         self._keys = {}        # the app's key -> the row keys its records carry
         self._named = set()    # the keys whose records name a file at all
@@ -920,6 +923,11 @@ class _Known:
             data = getattr(store, "data", None)
             if not isinstance(data, dict):
                 continue
+            # Robinhood's and Newrez's rename views show a copy of a record
+            # dated as its row now is, under a key of its own, and Robinhood
+            # keeps a form it dated since under a new key. Each view says
+            # which key stands for which, so the two count as one document.
+            self._stands_for.update(getattr(store, "stand_ins", None) or {})
             for name, rec in data.items():
                 if not isinstance(rec, dict):
                     continue
@@ -927,7 +935,16 @@ class _Known:
                 merged.update({k: v for k, v in rec.items() if v not in (None, "")})
                 raw = str(rec.get("pdf_path") or "").strip()
                 where = self._file(raw)
+                # Target keeps each invoice of an order split into several in
+                # the record's invoices, and only one of them in pdf_path.
+                invoices = rec.get("invoices")
+                for e in (invoices if isinstance(invoices, list) else ()):
+                    file = str(e.get("file") or "").strip() if isinstance(e, dict) else ""
+                    if self._file(file):
+                        self._claims.setdefault(self._file(file), {}).setdefault(
+                            name, set()).add(file)
                 if where:
+                    self._claims.setdefault(where, {}).setdefault(name, set()).add(raw)
                     # A dict for its order, so a choice between keys is
                     # made the same way on every run.
                     self._by_file.setdefault(where, {}).setdefault(name, set()).add(raw)
@@ -969,22 +986,28 @@ class _Known:
         where = self._file(raw)
         if any(k != key and _one_file(r, raw) for r, k in self._rows_at.get(where, ())):
             return None
+        # A deleted file's name taken by a later download leaves two records
+        # naming the file, or a record whose order number is not its row's
+        # when the later one's record is gone. The later one's rows may never
+        # have reached the index, open in Excel through its run, and the row
+        # here was then the deleted one's, so the file was named for it.
+        owners = {self._owner(n) for n, spelled in self._claims.get(where, {}).items()
+                  if any(_one_file(s, raw) for s in spelled)}
+        if key[0] == "order":
+            owners.add(key)
+        if len(owners) > 1:
+            return None
         named = [n for n, spelled in self._by_file.get(where, {}).items()
                  if any(_one_file(s, raw) for s in spelled)]
         if named:
-            # Several records naming one file is a rename's own view at
-            # work. Robinhood and Newrez show it a copy of a record dated
-            # as the row now is, beside the record itself, and the copy is
-            # the one the row's own date and title name.
+            # Several records of one document naming one file is a rename's
+            # own view at work. Robinhood and Newrez show it a copy of a
+            # record dated as the row now is, beside the record itself, and
+            # the copy is the one the row's own date and title name.
             if len(named) > 1:
                 named = [n for n in named if n in self._by_key.get(key, ())]
             if len(named) != 1:
                 return {}
-            # A record with another order number than its row's is another
-            # purchase's, as when a deleted file's name was taken by a later
-            # purchase and the later one's record is gone.
-            if key[0] == "order" and key not in self._keys.get(named[0], ()):
-                return None
             return self._view(named[0], saved)
         # An order number names one purchase, whichever of its files a row
         # is. A date and a title name a document only when one document has
@@ -1021,6 +1044,18 @@ class _Known:
             if token and stem.endswith(" " + token.lower()):
                 ends.add(token)
         return ends.pop() if len(ends) == 1 else ""
+
+    def _owner(self, name: str):
+        """Whose record the app's key `name` holds, shaped as _record_key
+        shapes a receipt's row. A purchase is its order number, a document
+        its key, and a key a rename view says stands for another's record
+        that record's owner."""
+        seen = {name}
+        while self._stands_for.get(name, name) not in seen:
+            name = self._stands_for[name]
+            seen.add(name)
+        number = str((self.records.get(name) or {}).get("order_number") or "").strip()
+        return ("order", number) if number else ("key", name)
 
     def _view(self, name: str, saved: bool) -> dict:
         """The record under the app's key `name`, as record_for gives it."""

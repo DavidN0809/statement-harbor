@@ -112,6 +112,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   document apps alike, and the next plain run fetches it again. An American Family bill handed another
   bill's statement sends both bills to Manual Review, its own copy saved
   before included, as a first run does.
+- **Rename leaves the name of a file two purchases or documents name, in
+  every app.** Deleting files once they are imported elsewhere frees their
+  names, and a later purchase or document of the same day and summary is
+  saved under one. When the later one's rows never reached the index, open
+  in Excel through its run perhaps, its record and the deleted one's both
+  named the file, and Rename named it for the deleted one, a Walmart
+  receipt "2026-05-14 Unsure Purchase.pdf" offered "2026-05-14 Walmart Lamp
+  Receipt.pdf". A file the records of two purchases (two order numbers,
+  Target's invoices of an order included) or of two documents name now
+  keeps its name, whichever of the two kept its rows. Robinhood's and
+  Newrez's own records of one document under two keys still count as one.
+
 
 ### Security
 - **M&T presses a year heading only when nothing covers it, and once.**

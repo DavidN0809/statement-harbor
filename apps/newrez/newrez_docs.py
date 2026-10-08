@@ -155,10 +155,13 @@ class _Ledger:
 
 
 class _Records:
-    """Records as a rename reads them, which is only ever `.data`."""
+    """Records as a rename reads them, which is only ever `.data`, and the
+    key of the record each copy among them copies (`stand_ins`), so the two
+    are counted as one document and not as two naming one file."""
 
-    def __init__(self, data):
+    def __init__(self, data, stand_ins=None):
         self.data = data
+        self.stand_ins = dict(stand_ins or {})
 
 
 # What a saved statement's own date says, in the words the run and Rename
@@ -221,14 +224,18 @@ class _DatedByStatement:
         self.doubts: list = []
         months = _statement_months(app.progress, app.discovery)
         by_title: dict = {}
+        # The key of the record whose file each title's merged record names.
+        named_by: dict = {}
         for store in (app.progress, app.discovery):
-            for rec in (getattr(store, "data", None) or {}).values():
+            for name, rec in (getattr(store, "data", None) or {}).items():
                 if isinstance(rec, dict) and rec.get("title") and rec.get("date"):
                     by_title.setdefault(rec["title"], {}).update(
                         {k: v for k, v in rec.items() if v not in (None, "")})
+                    if rec.get("pdf_path"):
+                        named_by[rec["title"]] = name
         rows = app.index_csv.read_all()
         folders = app.paths.filing_folders()
-        copies = {}
+        copies, stand_ins = {}, {}
         for row in rows:
             rec = by_title.get((row.get("Document Title") or "").strip())
             if not rec or (row.get("Category") or "").strip() != doc_types.STATEMENT:
@@ -247,11 +254,14 @@ class _DatedByStatement:
                     if verdict in _DOUBTS:
                         self.doubts.append((Path(path).name, verdict))
             if date and date != rec["date"]:
-                copies["dated by statement:%s:%s" % (date, rec["title"])] = dict(rec, date=date)
+                copy = "dated by statement:%s:%s" % (date, rec["title"])
+                copies[copy] = dict(rec, date=date)
+                if rec["title"] in named_by:
+                    stand_ins[copy] = named_by[rec["title"]]
         self.index_csv = _Ledger(app.index_csv, rows)
         data = dict(getattr(app.discovery, "data", None) or {})
         data.update(copies)
-        self.discovery = _Records(data)
+        self.discovery = _Records(data, stand_ins)
 
 
 class App:

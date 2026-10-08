@@ -1176,10 +1176,10 @@ def test_a_file_two_bills_records_name_is_named_from_its_row(tmp_path, by_accoun
     assert _names(tmp_path) == {"1111": "2026-09-12 Testco Billing Statement 1111.pdf"}
 
 
-def test_a_copy_dated_as_its_row_is_the_record_the_row_takes(tmp_path, monkeypatch):
-    """Robinhood and Newrez show Rename a copy of a record dated as its row
-    now is, beside the record itself, both naming the one file. The copy is
-    the one the row's own date and title name."""
+def a_form_and_its_dated_copy(tmp_path, monkeypatch, declared):
+    """A tax form's record and a copy of it dated as its row now is, both
+    naming the one file, as Robinhood's rename view shows them, the copy
+    said to be the record's when `declared`. The names after a rename."""
     monkeypatch.setattr(storage, "_FILENAME_PATTERN", "{date} {provider} {summary}")
     name = "0000-00-00 Testco Form 1099.pdf"
     f = tmp_path / name
@@ -1191,9 +1191,29 @@ def test_a_copy_dated_as_its_row_is_the_record_the_row_takes(tmp_path, monkeypat
     copy = dict(undated, date="2025-12-31", summary="Form 1099 Tax Year 2025")
     app = _App(tmp_path, rows, progress={"Tax Document::Form 1099:": undated},
                discovery={"dated by form:2025-12-31:Form 1099": copy})
+    if declared:
+        app.discovery.stand_ins = {"dated by form:2025-12-31:Form 1099":
+                                   "Tax Document::Form 1099:"}
     renaming.run_for(app, apply_changes=True, say=lambda *a: None)
-    assert [p.name for p in tmp_path.glob("*.pdf")] == [
+    return [p.name for p in tmp_path.glob("*.pdf")]
+
+
+def test_a_copy_dated_as_its_row_is_the_record_the_row_takes(tmp_path, monkeypatch):
+    """Robinhood and Newrez show Rename a copy of a record dated as its row
+    now is, beside the record itself, both naming the one file, and say
+    whose copy it is. The copy is the one the row's own date and title
+    name."""
+    assert a_form_and_its_dated_copy(tmp_path, monkeypatch, declared=True) == [
         "2025-12-31 Testco Form 1099 Tax Year 2025.pdf"]
+
+
+def test_two_documents_records_naming_one_file_leave_it_its_name(tmp_path, monkeypatch):
+    """The same two records with nothing saying one copies the other are two
+    documents naming one file, as when a deleted file's name was taken by a
+    later download whose rows never reached the index. Whose file it is
+    cannot be told, and the row's date and title picked one of them."""
+    assert a_form_and_its_dated_copy(tmp_path, monkeypatch, declared=False) == [
+        "0000-00-00 Testco Form 1099.pdf"]
 
 
 def test_every_file_of_one_order_takes_the_orders_record(tmp_path, monkeypatch):

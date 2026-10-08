@@ -163,10 +163,14 @@ class _Ledger:
 
 
 class _Records:
-    """Records as a rename reads them, which is only ever `.data`."""
+    """Records as a rename reads them, which is only ever `.data`, and for
+    a key that stands for another's record, a copy dated as its row is or
+    a form's key from before it was dated, that other key (`stand_ins`), so
+    the two are counted as one document and not as two naming one file."""
 
-    def __init__(self, data):
+    def __init__(self, data, stand_ins=None):
         self.data = data
+        self.stand_ins = dict(stand_ins or {})
 
 
 class _DatedTaxForms:
@@ -194,15 +198,21 @@ class _DatedTaxForms:
         # The folders the app files in, the only place a rename may touch.
         self.paths = app.paths
         dated, undated = set(), {}
+        # A form dated since it was saved is kept under its dated key and
+        # names the key it had before, where discovery may still hold it.
+        # Both are the one form, and not two naming one file.
+        stand_ins = {}
         for store in (app.progress, app.discovery):
-            for rec in (getattr(store, "data", None) or {}).values():
+            for name, rec in (getattr(store, "data", None) or {}).items():
                 if not isinstance(rec, dict) or rec.get("category") != doc_types.TAX:
                     continue
+                if rec.get("undated_key") and rec["undated_key"] != name:
+                    stand_ins[rec["undated_key"]] = name
                 title = (rec.get("title") or "").strip()
                 if rec.get("date"):
                     dated.add((rec["date"], title))
                 elif store is app.progress:
-                    undated.setdefault(title, []).append(rec)
+                    undated.setdefault(title, []).append((name, rec))
         rows = app.index_csv.read_all()
         folders = app.paths.filing_folders()
         copies = {}
@@ -224,12 +234,14 @@ class _DatedTaxForms:
             if not (row.get("Period") or "").strip():
                 row["Period"] = f"Tax Year {year}"
             if (date, title) not in dated and len(undated.get(title, [])) == 1:
-                copies["dated by form:%s:%s" % (date, title)] = dict(
-                    undated[title][0], date=date, period=f"Tax Year {year}")
+                name, rec = undated[title][0]
+                copy = "dated by form:%s:%s" % (date, title)
+                copies[copy] = dict(rec, date=date, period=f"Tax Year {year}")
+                stand_ins[copy] = name
         self.index_csv = _Ledger(app.index_csv, rows)
         data = dict(getattr(app.discovery, "data", None) or {})
         data.update(copies)
-        self.discovery = _Records(data)
+        self.discovery = _Records(data, stand_ins)
 
 
 class App:
