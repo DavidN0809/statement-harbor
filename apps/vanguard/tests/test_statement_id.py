@@ -6,14 +6,15 @@ record keeps document_id empty. A download puts the end of a record's id
 in a file's name when another file has the name, and a File names
 pattern's {number} is the whole id. Nobody here has a Vanguard account,
 so whether the id stays the same from one listing to the next, and ends
-differently for each statement, has not been seen, and the contributor
-is being asked. Until then a second statement wanting a name another file
-has is told apart by " (2)", as in every app that keeps no id, and these
-tests say so, so that keeping the id is a change made on purpose.
+differently for each statement, has not been seen. Until it has, a second
+statement wanting a name another file has is told apart by " (2)", as in
+every app that keeps no id, and these tests say so, so that keeping the id
+is a change made on purpose.
 
-Each test runs Vanguard's own Discover, with only the page's own API
-answer stood in, and its own download_one up to the moment it asks
-unique_path for a name. Every account and id is invented."""
+Each test runs Vanguard's own Discover and its own download_one up to the
+moment it asks unique_path for a name. Stood in are the page's answer to
+the statements API, the page itself, ensure_statements and the session
+check. Every account and id is invented."""
 import json
 import sys
 from pathlib import Path

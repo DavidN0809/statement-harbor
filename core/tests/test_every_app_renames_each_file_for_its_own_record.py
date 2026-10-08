@@ -126,8 +126,9 @@ def key_it_reads(value, fn):
 
 def what_its_site_lists(app: Path) -> list:
     """Each document the app's own site writes down for its record, a dict
-    with a title and a date, as {key: the value it is given}. Empty when
-    the site hands the record the provider's own answer, as USAA's does."""
+    with a title and a date, as a mapping of each key to the value it is
+    given. Empty when the site hands the record the provider's own answer,
+    as USAA's does."""
     listed = []
     for site in sorted(app.glob("*_site.py")):
         for node in ast.walk(ast.parse(site.read_text(encoding="utf-8-sig"))):
@@ -139,16 +140,29 @@ def what_its_site_lists(app: Path) -> list:
     return listed
 
 
+def builds_a_document_with_an_id(app: Path) -> bool:
+    """An app that builds a Document with a document_id that is not left
+    empty, wherever the id comes from."""
+    tree = ast.parse(entry_of(app).read_text(encoding="utf-8-sig"))
+    return any(isinstance(node, ast.Call) and ast.unparse(node.func) == "Document"
+               and any(kw.arg == "document_id" and not is_empty(kw.value)
+                       for kw in node.keywords)
+               for node in ast.walk(tree))
+
+
 def gives_the_providers_id(app: Path) -> bool:
     """An app that records a document under the provider's own id, found by
     a Document it builds with a document_id that is not left empty, reading
     a key its own site gives a value where the site writes the listed
-    documents itself. A Document handed an id here is not enough, since the
-    tests below would then hold the app to a download its own listing never
-    makes (test_an_app_whose_listing_gives_no_id_is_not_counted_as_keeping_one)."""
+    documents itself. Where the key cannot be followed, as FedEx, Stripe and
+    UPS read an attribute of their own listed document, the app counts as
+    one that builds a Document with an id. A Document handed an id here is
+    not enough, since the tests below would then hold the app to a download
+    its own listing never makes
+    (test_an_app_whose_listing_gives_no_id_is_not_counted_as_keeping_one)."""
     tree = ast.parse(entry_of(app).read_text(encoding="utf-8-sig"))
     for fn in ast.walk(tree):
-        if not isinstance(fn, ast.FunctionDef):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for node in ast.walk(fn):
             if not (isinstance(node, ast.Call) and ast.unparse(node.func) == "Document"):
@@ -394,18 +408,24 @@ def test_there_are_apps_to_check():
 
 
 def test_an_app_whose_listing_gives_no_id_is_not_counted_as_keeping_one():
-    """Four apps build a Document with a document_id their own listing never
-    gives them. Vanguard's listing hands the statement's id over as
-    statement_id and its record reads document_id. Chase's and U.S. Bank's
-    listings read rows that carry an empty documentId, and Navy Federal's
-    rows that carry none (the method of its own that reads one is never
-    called). So none of the four has kept an id, and
-    the tests here that handed them one held their downloads and Rename to
-    what never happens, a second file told apart by the end of an id where
-    it is given " (2)"."""
+    """Four apps build a Document with a document_id, and the rule finds
+    that their own sites never give the key it reads a value. Vanguard's
+    site hands the statement's id over as statement_id where its record
+    reads document_id. Chase's and U.S. Bank's sites write their rows with
+    an empty documentId, and Navy Federal's with none (the method of its
+    own that reads one is never called). The tests here that handed the
+    four an id held their downloads and Rename to what never happens, a
+    second file told apart by the end of an id where it is given " (2)".
+
+    Every other app that builds a Document with an id is still counted, so
+    an app the rule leaves out by mistake fails here, rather than quietly
+    leaving the tests of an id."""
     never = {"chase", "navyfederal", "usbank", "vanguard"}
     assert never <= set(IDS), IDS
-    assert not never & {d.name for d in WITH_IDS}, [d.name for d in WITH_IDS]
+    with_ids = {d.name for d in WITH_IDS}
+    assert with_ids | never == {d.name for d in APPS if builds_a_document_with_an_id(d)}, (
+        sorted(with_ids))
+    assert not never & with_ids, sorted(with_ids)
     assert not never & {d.name for d in RELISTS}, [d.name for d in RELISTS]
 
 
