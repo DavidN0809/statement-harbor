@@ -415,6 +415,131 @@ def test_a_name_a_deleted_file_freed_is_never_given_its_old_document(home):
     assert home.browser.asked == 0, "Rename reached for a browser"
 
 
+def a_freed_name_taken(home: Home, app):
+    """A file deleted after it was imported elsewhere, and a later document
+    or purchase of that day and summary saved under the name it freed, each
+    written down by the app's own code. The file, and for each of the two
+    what tells its rows apart, the earlier first."""
+    if hasattr(home.mod, "Document"):
+        first, later = two_documents(home, titles=(TITLE, OTHER_TITLE))
+        path = downloaded(app, first)
+        path.unlink()
+        assert downloaded(app, later) == path, "the later document took another name"
+        return path, [("Document Title", first.title), ("Document Title", later.title)]
+    numbers = ["ORD" + a for a in ACCOUNTS]
+    path = purchased(home, app, numbers[0])
+    path.unlink()
+    assert purchased(home, app, numbers[1]) == path, "the later purchase took another name"
+    return path, [("Order or Receipt Number", n) for n in numbers]
+
+
+def rows_gone(app, column: str, value: str) -> None:
+    """Every row of one document or purchase taken out of the index and the
+    order history, as when the index was open in Excel through its run and
+    only its progress record was written."""
+    for csv in (app.index_csv, getattr(app, "order_csv", None)):
+        if csv is None:
+            continue
+        rows = csv.read_all()
+        kept = [r for r in rows if (r.get(column) or "").strip() != value]
+        assert len(kept) < len(rows) or csv is not app.index_csv, "no row to take out"
+        csv.rewrite(kept, backup=False)
+
+
+def keeps_its_name(home: Home, path: Path, said: str):
+    files = home.files()
+    assert list(files) == [body_of(ACCOUNTS[1])], said[-1500:]
+    assert files[body_of(ACCOUNTS[1])] == path, (
+        "%s renamed %r, which two documents' records name, to %r\n%s"
+        % (home.app.name, path.name, files[body_of(ACCOUNTS[1])].name, said[-1500:]))
+    app = home.build()
+    assert [Path(r["PDF Full Path"]) for r in app.index_csv.read_all()] == [path]
+    assert home.browser.asked == 0, "Rename reached for a browser"
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_freed_name_whose_later_owner_kept_only_its_record_keeps_its_name(home):
+    """The later one's rows never reached the index, and its record alone
+    says it holds the file. Two records then name the file, the row is the
+    deleted one's, and Rename named the later one's file for the deleted
+    one, the Walmart probe's "2026-05-14 Unsure Purchase.pdf" offered
+    "2026-05-14 Walmart Lamp Receipt.pdf". Whose file it is cannot be told,
+    so it keeps its name."""
+    app = home.build()
+    path, owners = a_freed_name_taken(home, app)
+    rows_gone(app, *owners[1])
+    saved(app)
+    home.set_pattern(PATTERN)
+    said = home.rename("--apply")
+    keeps_its_name(home, path, said)
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_freed_name_whose_first_owner_kept_only_its_record_keeps_its_name(home):
+    """The same with the deleted one's rows gone instead. Its record still
+    names the file, so the records say two documents hold it, and whose it
+    is cannot be told from them either."""
+    app = home.build()
+    path, owners = a_freed_name_taken(home, app)
+    rows_gone(app, *owners[0])
+    saved(app)
+    home.set_pattern(PATTERN)
+    said = home.rename("--apply")
+    keeps_its_name(home, path, said)
+
+
+def invoiced(home: Home, app, number: str, which: int) -> Path:
+    """One Target order split into two invoices, saved and written down as
+    its own _place_invoice and _file_invoices write one, its record naming
+    invoice `which` and the order's invoices both, and one index row for
+    that invoice. The first invoice's file."""
+    p = home.mod.Purchase(purchase_type=ONLINE, purchase_date=DATE, order_number=number,
+                          total="$%s.00" % number[-2:], summary="Household Goods",
+                          document_type="Invoice", confidence="High")
+    files = []
+    for part in (1, 2):
+        name = core_storage.build_pdf_filename(DATE, p.summary, "Invoice", part=(part, 2),
+                                               record=p)
+        path = core_storage.unique_path(app.paths.invoices, name,
+                                        app.config["max_path_length"],
+                                        distinguisher=number)
+        path.write_bytes(body_of("%s part %d" % (number[3:], part)))
+        files.append(path)
+    p.pdf_path, p.pdf_filename = str(files[which - 1]), files[which - 1].name
+    app._record_state(p, State.PDF_VERIFIED, extra={
+        "downloaded_ok": True, "receipt_count": 2,
+        "invoices": [{"file": str(f), "part": "%d of 2" % (k + 1), "number": "",
+                      "kept": True, "names": True, "size": 1, "pages": 1}
+                     for k, f in enumerate(files)]})
+    app._write_csv_rows(p, "Downloaded", State.COMPLETED.value)
+    return files[0]
+
+
+@pytest.mark.parametrize("home", [REPO / "apps" / "target"], ids=["target"], indirect=True)
+def test_a_freed_invoice_name_another_orders_invoices_name_keeps_its_name(home):
+    """Target keeps each invoice of an order split into several in its
+    record's invoices and only one of them in pdf_path and the order's
+    index row. A later order's first invoice took the name the deleted
+    order's first invoice freed, while the later order's record names its
+    second invoice, and its row never reached the index. Only the deleted
+    order's record named the file by pdf_path, so Rename named the later
+    order's invoice for the deleted order."""
+    app = home.build()
+    first = invoiced(home, app, "ORD" + ACCOUNTS[0], which=1)
+    for f in app.paths.invoices.glob("*.pdf"):
+        f.unlink()
+    assert invoiced(home, app, "ORD" + ACCOUNTS[1], which=2) == first
+    rows_gone(app, "Order or Receipt Number", "ORD" + ACCOUNTS[1])
+    saved(app)
+    home.set_pattern(PATTERN)
+    said = home.rename("--apply")
+    files = home.files()
+    assert files[body_of("%s part 1" % ACCOUNTS[1])] == first, (
+        "Target renamed the later order's invoice %r to %r\n%s"
+        % (first.name, files[body_of("%s part 1" % ACCOUNTS[1])].name, said[-1500:]))
+    assert home.browser.asked == 0, "Rename reached for a browser"
+
+
 def purchased(home: Home, app, number: str, body: bytes = b"") -> Path:
     """One purchase listed then downloaded, written down by the app's own
     code, of one day and one summary with the other, under its own order
