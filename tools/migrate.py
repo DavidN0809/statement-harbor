@@ -64,7 +64,7 @@ from pathlib import Path
 _CORE = Path(__file__).resolve().parents[1] / "core"
 if (_CORE / "paperpull_core").is_dir():
     sys.path.insert(0, str(_CORE))
-from paperpull_core.not_shown import DAYS_KEY, asked_again  # noqa: E402
+from paperpull_core.not_shown import DAYS_KEY, asked_again, set_aside  # noqa: E402
 
 SCHEMA = 1
 
@@ -286,8 +286,7 @@ def _merge(target: dict, incoming: dict, old_root: str,
         if inc.get("downloaded_ok") and not cur.get("downloaded_ok"):
             cur["downloaded_ok"] = True
             changed = True
-        if ((cur.get("state") not in TERMINAL or asked_again(cur))
-                and _done(dict(inc, downloaded_ok=False))):
+        if _takes_the_state(cur, inc):
             cur["state"] = inc["state"]
             # The state comes with what it was written with. A receipt set
             # aside is final in Meijer only with its days, and a note an
@@ -295,12 +294,36 @@ def _merge(target: dict, incoming: dict, old_root: str,
             if DAYS_KEY in inc:
                 cur[DAYS_KEY] = list(inc[DAYS_KEY] or [])
             if asked_again(cur):
-                cur["notes"] = str(inc.get("notes") or "")
+                cur["notes"] = _last_note_replaced(cur, inc)
             changed = True
         if changed:
             cur["imported_at"] = datetime.now().isoformat(timespec="seconds")
             updated += 1
     return added, updated
+
+
+def _takes_the_state(cur: dict, inc: dict) -> bool:
+    """Whether a record the target already had takes the incoming state.
+    Only one this install has not finished, and only for a state that
+    finishes it. A record an older version gave up on here is asked for
+    again, and takes a state only from a record that settled it, a save or
+    a receipt set aside. An export from before 0.45.0 carried no notes, so
+    its record of the same gave-up purchase looks finished without them."""
+    if not _done(dict(inc, downloaded_ok=False)):
+        return False
+    if cur.get("state") not in TERMINAL:
+        return True
+    return (asked_again(cur)
+            and (inc.get("state") != "No Receipt Available" or set_aside(inc)))
+
+
+def _last_note_replaced(cur: dict, inc: dict) -> str:
+    """The target's notes, its last one, written with the state it gives up,
+    swapped for the incoming last note. The notes before it stay."""
+    kept = str(cur.get("notes") or "").rsplit("; ", 1)
+    kept = kept[0] if len(kept) > 1 else ""
+    last = str(inc.get("notes") or "").rsplit("; ", 1)[-1].strip()
+    return "; ".join(n for n in (kept, last) if n)
 
 
 def do_import(archive: Path, root: Path, dry_run: bool = False,

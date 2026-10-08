@@ -151,7 +151,7 @@ def test_an_older_note_on_this_install_does_not_outlast_an_import_that_set_it_as
     migrate.export(tmp_path / "old", archive, minimal=True)
 
     gave_up = dict(p.to_dict(), state=State.NO_RECEIPT_AVAILABLE.value,
-                   notes="Kroger could not load this receipt")
+                   notes="Listed by an invented step; Kroger could not load this receipt")
     new = install(tmp_path / "new", app, {p.key: gave_up})
     assert not census.app_in(mod, new)._already_done(p), "asked for again before the import"
     assert migrate.do_import(archive, tmp_path / "new", assume_yes=True) == 0
@@ -159,3 +159,52 @@ def test_an_older_note_on_this_install_does_not_outlast_an_import_that_set_it_as
     done, said, rec = asked_after_the_move(mod, new, p)
     assert done, rec
     assert SAID in said, (said, rec)
+    assert rec["notes"] == "Listed by an invented step", "the notes before it stay"
+
+
+@pytest.mark.parametrize("name", ["kroger", "meijer"])
+def test_an_export_from_before_the_days_does_not_finish_a_receipt_asked_for_again(name,
+                                                                                tmp_path):
+    """The 0.44.0 tool's --minimal export carried no notes, so its record of
+    a receipt that version gave up on reads as No Receipt Available and
+    nothing more. This install has the same purchase with the words that
+    have it asked for again, and it is still asked for after the import."""
+    app = next(a for a in census.APPS if a.name == name)
+    mod = census.load(app)
+    p = census.purchase()
+    install(tmp_path / "old", app, {p.key: {"state": State.NO_RECEIPT_AVAILABLE.value,
+                                            "pdf_path": ""}})
+    archive = tmp_path / "history.ppz"
+    migrate.export(tmp_path / "old", archive, minimal=True)
+
+    note = "Listed by an invented step; Receipt page did not show a receipt"
+    new = install(tmp_path / "new", app, {p.key: dict(
+        p.to_dict(), state=State.NO_RECEIPT_AVAILABLE.value, notes=note)})
+    assert migrate.do_import(archive, tmp_path / "new", assume_yes=True) == 0
+
+    rec = census.app_in(mod, new).progress.get(p.key)
+    assert rec["notes"] == note, rec
+    assert not census.app_in(mod, new)._already_done(p), rec
+
+
+@pytest.mark.parametrize("state", [State.PDF_VERIFIED.value, State.COMPLETED.value])
+def test_a_receipt_saved_here_keeps_its_record_when_the_old_computer_set_it_aside(state,
+                                                                                   tmp_path):
+    """Saved on this computer, set aside on the old one. Nothing of the
+    set-aside record comes across, so the skip line still says it is done."""
+    app = next(a for a in census.APPS if a.name == "meijer")
+    mod = census.load(app)
+    p = set_aside(mod, install(tmp_path / "old", app))
+    archive = tmp_path / "history.ppz"
+    migrate.export(tmp_path / "old", archive, minimal=True)
+
+    saved = dict(census.purchase().to_dict(), state=state, downloaded_ok=True,
+                 notes="Saved by an invented step", **{not_shown.DAYS_KEY: []})
+    new = install(tmp_path / "new", app, {p.key: saved})
+    assert migrate.do_import(archive, tmp_path / "new", assume_yes=True) == 0
+
+    done, said, rec = asked_after_the_move(mod, new, p)
+    assert done, rec
+    assert said == OTHERWISE, said
+    assert (rec["state"], rec["notes"], rec[not_shown.DAYS_KEY]) == (
+        state, "Saved by an invented step", []), rec
