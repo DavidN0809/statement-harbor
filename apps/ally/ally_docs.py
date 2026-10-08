@@ -55,6 +55,10 @@ log = logging.getLogger("ally_docs")
 
 DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
 
+# What naming a statement from its own PDF changes in its record after the
+# list wrote it (App._name_from_contents).
+NAMED_FROM_THE_PDF = ("summary", "account")
+
 
 def ask(prompt: str) -> str:
     try:
@@ -74,6 +78,10 @@ class Document:
                  kind="statement", **kw):
         self.title = title
         self.account = account
+        # The account as Ally's list gave it. A statement named from its PDF
+        # takes the PDF's addressee as its account, and one listed without
+        # Ally's id is kept under this one all the same.
+        self.listed_account = kw.get("listed_account") or account
         self.category = category
         self.summary = summary
         self.date = date
@@ -107,14 +115,15 @@ class Document:
     def key(self) -> str:
         """Stable identity. Ally's API gives each document a durable
         documentId (UUID) - use it. Fall back to category:date:title:account
-        for anything discovered without one."""
+        for anything discovered without one, the account the list gave it,
+        which naming it from its PDF does not change."""
         if self.document_id:
             return f"id:{self.document_id}"
         # Keep the last four. Cutting to forty characters made two cards
         # of the same product collide, because the masked digits that say
         # which one it is sit at the end, and the second card's whole
         # history was then read as already downloaded and dropped.
-        acct = _account_component(sanitize_component(self.account or ""))
+        acct = _account_component(sanitize_component(self.listed_account or ""))
         return f"{self.category}:{self.date}:{sanitize_component(self.title)[:60]}:{acct}"
 
     def to_dict(self) -> dict:
@@ -642,8 +651,17 @@ class App:
         filename = build_pdf_filename(doc.date, summary, "", record=doc)
         if filename == out_path.name:
             return out_path
+        # Told apart as download_one tells a statement apart, by the last of
+        # its id, and Rename the same way. With nothing to tell it apart a
+        # second copy of one statement to one person was saved " (2)", and
+        # a file download_one had already told apart by its id was moved on
+        # to " (2)" by its own name.
         target = unique_path(out_path.parent, filename,
-                             self.config["max_path_length"])
+                             self.config["max_path_length"],
+                             distinguisher=(doc.document_id or "")[-6:],
+                             ignoring=out_path.name)
+        if target.name == out_path.name:
+            return out_path
         try:
             out_path.replace(target)
         except OSError as e:
@@ -868,7 +886,12 @@ class App:
         nothing is asked of the provider here (#43, #49). A preview
         unless --apply is given."""
         self.stats["mode"] = "rename"
-        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
+        # A statement is named from what its PDF says once it is saved
+        # (_name_from_contents), and only the run state has that. The
+        # listing's record still holds what the list said, and Rename
+        # offered every such file the list's name back.
+        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)),
+                         as_saved=NAMED_FROM_THE_PDF)
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"

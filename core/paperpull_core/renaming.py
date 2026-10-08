@@ -664,7 +664,8 @@ _AS_SAVED = ("order_number", "document_id")
 
 def run_for(app, apply_changes: bool = False, say=print,
             told_apart: Optional[Callable[[dict], str]] = None,
-            told_apart_before: Iterable[Callable[[dict], str]] = ()) -> Result:
+            told_apart_before: Iterable[Callable[[dict], str]] = (),
+            as_saved: Iterable[str] = ()) -> Result:
     """Rename this app's files to the names it would give them today.
 
     One function rather than forty-eight, because the ledger is the same
@@ -687,7 +688,14 @@ def run_for(app, apply_changes: bool = False, say=print,
     read as it was written down when the file was saved, and so is what
     tells it apart. An id a listing gives a document only after its file was
     saved never reaches that file's name.
+
+    `as_saved` are the fields an app's download changes after its listing
+    wrote them, as Ally names a statement from what its PDF says. Rename
+    reads those from the record as it was written down when the file was
+    saved, since the listing's record over it still holds what the list
+    said.
     """
+    as_saved = tuple(as_saved)
     # Every app holds its index as self.index_csv, and a receipt app holds
     # the order history as self.order_csv as well. That is the same in all
     # forty-eight, which is why this is one function rather than forty-eight.
@@ -738,8 +746,10 @@ def run_for(app, apply_changes: bool = False, say=print,
         # after a Discover, and two statements of one day, one title and one
         # account take each other's ids when the list comes back in another
         # order, so a file was named for the statement it does not hold.
+        # The fields an app names in `as_saved` are read the same way, as
+        # Ally names a statement from what its PDF says.
         saved = current.record_for(row, saved=True) or {}
-        record = dict(record, **{k: saved.get(k, "") for k in _AS_SAVED})
+        record = dict(record, **{k: saved.get(k, "") for k in (*_AS_SAVED, *as_saved)})
         summary = (record.get("summary") or "").strip() or _first(row, _SUMMARY_KEYS)
         return build_pdf_filename(_first(row, _DATE_KEYS), summary,
                                   _first(row, _TYPE_KEYS), part=_part_of(row),

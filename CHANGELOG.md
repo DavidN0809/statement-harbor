@@ -271,6 +271,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   since that press may still bring the PDF. Playwright waits as long as it
   always did, so a control the page turns on in that time is pressed as
   before.
+- **Ally's Rename keeps the name a statement's PDF gave it.** Ally names
+  each statement after the accounts and the addressee its PDF shows, but
+  Rename read the list's description over it and offered every such file
+  the list's less telling name back, "Account Statement - Trust" in place
+  of "Account Statement - Savings + Checking (Pat Sample)", which Apply
+  would have taken. Rename now reads those from the record as the file was
+  saved. A second copy of one statement to one person is told apart by the
+  end of its Ally id as other second copies are, not by " (2)". A statement
+  listed without Ally's id, as when the list is read from the page, is no
+  longer taken again on every run.
 
 ## [0.45.0] - 2026-10-07
 
