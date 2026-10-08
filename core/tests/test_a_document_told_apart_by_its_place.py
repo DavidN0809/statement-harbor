@@ -61,22 +61,45 @@ def whose(body: bytes) -> str:
 
 class Provider:
     """The list in the order the provider gives it, and a PDF for an id.
-    An id in `refused` answers an error, and taking an id in `stop_at`
-    stops the run there, as Stop does."""
+    A document in `refused` answers an error, and taking one in `stop_at`
+    stops the run there, as Stop does. `days` gives a document a day of its
+    own, DATE otherwise.
+
+    With `lasting` False the provider hands each document a new id in each
+    session (`new_session`), and an id from an earlier session is refused,
+    the way Schwab's README says its ids are not stable."""
 
     def __init__(self):
         self.ids = []
         self.refused = set()
         self.stop_at = set()
         self.asked = []
+        self.days = {}
+        self.lasting = True
+        self.session = 1
+
+    def new_session(self):
+        self.session += 1
+
+    def id_of(self, document: str) -> str:
+        return document if self.lasting else "%sV%d" % (document, self.session)
+
+    def day_of(self, document: str) -> str:
+        return self.days.get(document, DATE)
+
+    def listed(self):
+        return [(self.id_of(document), self.day_of(document)) for document in self.ids]
 
     def pdf(self, document_id: str):
         self.asked.append(document_id)
-        if document_id in self.stop_at:
+        document = document_id if self.lasting else document_id.split("V")[0]
+        if document_id != self.id_of(document):
+            return 404, b""
+        if document in self.stop_at:
             raise KeyboardInterrupt
-        if document_id in self.refused:
+        if document in self.refused:
             return 500, b""
-        return 200, pdf_of(document_id)
+        return 200, pdf_of(document)
 
 
 class CapitalOne(Provider):
@@ -95,8 +118,9 @@ class CapitalOne(Provider):
         if url == self.site.API["search"]:
             listed = [{"documentId": i, "documentType": self.site.TYPE_BANK_STATEMENT,
                        "documentCategory": "STATEMENT", "documentName": "Monthly Statement",
-                       "documentDate": DATE, "description": "360 Checking...1111",
-                       "account": {"accountReferenceId": "REF1111"}} for i in self.ids]
+                       "documentDate": day, "description": "360 Checking...1111",
+                       "account": {"accountReferenceId": "REF1111"}}
+                      for i, day in self.listed()]
         return {"status": 200, "body": {"documents": listed}}
 
 
@@ -119,8 +143,8 @@ class Schwab(Provider):
             body = {"documents": [
                 {"documentId": i, "documentName": "Confirm - EXAMPLE - Bought",
                  "type": self.site.TYPE_CONFIRMS, "onDemandDocumentType": "TradeConfirms",
-                 "date": "%s/%s/%s" % (DATE[5:7], DATE[8:], DATE[:4]),
-                 "accountDisplayName": "1111-1111"} for i in self.ids]}
+                 "date": "%s/%s/%s" % (day[5:7], day[8:], day[:4]),
+                 "accountDisplayName": "1111-1111"} for i, day in self.listed()]}
         return {"status": 200, "body": body}
 
 
@@ -172,6 +196,12 @@ class Home:
         return {key: whose(Path(rec["pdf_path"]).read_bytes())
                 for key, rec in sorted(progress.items())
                 if isinstance(rec, dict) and rec.get("downloaded_ok")}
+
+    def left_for_a_person(self) -> dict:
+        """The notes of every record marked for manual review, by key."""
+        progress = json.loads((self.out / "progress.json").read_text(encoding="utf-8"))
+        return {key: rec.get("notes", "") for key, rec in sorted(progress.items())
+                if isinstance(rec, dict) and rec.get("state") == "Needs Manual Review"}
 
 
 @pytest.fixture
@@ -262,3 +292,186 @@ def test_an_id_kept_for_a_document_is_never_another_documents(home):
     home.run("--resume")
     saved = home.on_disk()
     assert len(set(saved)) == len(saved), home.held()
+
+
+@each_app
+def test_a_document_listed_in_place_of_one_saved_is_downloaded_when_ids_last(home):
+    """A corrected statement listed instead of the one saved, on its day and
+    under its title. The ids of the other days' documents came back, which
+    says this provider's ids last, so an id no record keeps is a document
+    of its own."""
+    home.provider.days = {"ST0009": "2026-08-12"}
+    home.provider.ids = ["ST0009", "ST0001"]
+    home.run_all()
+    home.provider.ids = ["ST0009", "ST0002"]
+    home.run_all()
+    assert home.on_disk() == ["ST0001", "ST0002", "ST0009"], home.held()
+
+
+@each_app
+def test_an_archive_whose_ids_a_listing_swapped_takes_neither_document_twice(home):
+    """Before this, a listing in the other order wrote each document's id
+    over the other's record. Such an archive, the first saved and the second
+    failed, is listed again in its first order."""
+    home.provider.ids = ["ST0001", "ST0002"]
+    home.provider.refused = {"ST0002"}
+    home.run_all()
+    found = home.out / "discovery.json"
+    discovery = json.loads(found.read_text(encoding="utf-8"))
+    first, second = sorted(discovery)
+    discovery[first]["document_id"], discovery[second]["document_id"] = "ST0002", "ST0001"
+    found.write_text(json.dumps(discovery), encoding="utf-8")
+
+    home.provider.refused = set()
+    home.run_all()
+    assert home.on_disk() == ["ST0001", "ST0002"], home.held()
+    assert home.left_for_a_person() == {}
+
+
+# -- when the provider's ids do not last -------------------------------------
+#
+# Schwab's README says its ids are not stable. Here each session hands each
+# document a new id and refuses one from an earlier session. A document alone
+# on its day is still taken. Two alike, where which one was saved cannot be
+# told, are left for a person rather than guessed at.
+
+NOT_TOLD = "does not say which one this is"
+
+
+@each_app
+def test_two_documents_listed_together_are_each_taken_once_when_ids_do_not_last(home):
+    home.provider.lasting = False
+    home.provider.ids = ["ST0001", "ST0002"]
+    home.run_all()
+    assert home.on_disk() == ["ST0001", "ST0002"]
+
+    home.provider.new_session()
+    home.provider.ids = ["ST0002", "ST0001"]
+    home.run_all()
+    assert home.on_disk() == ["ST0001", "ST0002"]
+    assert home.left_for_a_person() == {}
+
+
+@each_app
+def test_a_document_alone_on_its_day_is_taken_once_when_its_id_did_not_last(home):
+    """Stopped before it, then Resume in a session that lists it under a new
+    id, and then a run that lists it under another."""
+    home.provider.lasting = False
+    home.provider.ids = ["ST0001"]
+    home.provider.stop_at = {"ST0001"}
+    home.run_all()
+    assert home.on_disk() == []
+
+    home.provider.stop_at = set()
+    home.provider.new_session()
+    home.run("--resume")
+    assert home.on_disk() == ["ST0001"]
+    progress = json.loads((home.out / "progress.json").read_text(encoding="utf-8"))
+    assert [rec["document_id"] for rec in progress.values()] == [
+        home.provider.id_of("ST0001")], "the record keeps an id it was not saved under"
+    home.provider.new_session()
+    home.run_all()
+    assert home.on_disk() == ["ST0001"]
+
+
+@each_app
+def test_a_new_document_beside_one_saved_is_left_for_a_person_when_ids_do_not_last(home):
+    home.provider.lasting = False
+    home.provider.ids = ["ST0001"]
+    home.run_all()
+
+    home.provider.new_session()
+    home.provider.ids = ["ST0002", "ST0001"]
+    said = home.run_all()
+    assert home.on_disk() == ["ST0001"]
+    left = home.left_for_a_person()
+    assert len(left) == 1 and NOT_TOLD in next(iter(left.values())), left
+    assert NOT_TOLD in said
+
+    for order in (["ST0001", "ST0002"], ["ST0002", "ST0001"]):
+        home.provider.new_session()
+        home.provider.ids = order
+        home.run_all()
+        home.run("--resume")
+    assert home.on_disk() == ["ST0001"]
+
+
+@each_app
+def test_a_failed_document_is_left_for_a_person_when_ids_do_not_last(home):
+    home.provider.lasting = False
+    home.provider.ids = ["ST0001", "ST0002"]
+    home.provider.refused = {"ST0002"}
+    home.run_all()
+
+    home.provider.refused = set()
+    home.provider.new_session()
+    home.provider.ids = ["ST0002", "ST0001"]
+    home.run_all()
+    assert home.on_disk() == ["ST0001"]
+    left = home.left_for_a_person()
+    assert len(left) == 1 and NOT_TOLD in next(iter(left.values())), left
+
+
+@each_app
+def test_resume_leaves_a_document_for_a_person_when_ids_do_not_last(home):
+    home.provider.lasting = False
+    home.provider.ids = ["ST0001", "ST0002"]
+    home.provider.stop_at = {"ST0002"}
+    home.run_all()
+
+    home.provider.stop_at = set()
+    home.provider.new_session()
+    home.provider.ids = ["ST0002", "ST0001"]
+    home.run("--resume")
+    assert home.on_disk() == ["ST0001"]
+    left = home.left_for_a_person()
+    assert len(left) == 1 and NOT_TOLD in next(iter(left.values())), left
+
+
+@each_app
+def test_resume_never_takes_the_one_still_listed_for_the_other_when_ids_do_not_last(home):
+    """Two alike, the first saved, Stop before the second. The day's list
+    then gives only one of them, under a new id, which is the one saved."""
+    home.provider.lasting = False
+    home.provider.ids = ["ST0001", "ST0002"]
+    home.provider.stop_at = {"ST0002"}
+    home.run_all()
+
+    home.provider.stop_at = set()
+    home.provider.new_session()
+    home.provider.ids = ["ST0001"]
+    home.run("--resume")
+    assert home.on_disk() == ["ST0001"]
+    left = home.left_for_a_person()
+    assert len(left) == 1 and NOT_TOLD in next(iter(left.values())), left
+
+
+# -- the numbering itself ------------------------------------------------------
+
+def test_with_no_id_kept_the_numbers_are_those_an_archive_already_has():
+    """told_apart numbers as stable_occurrences does whenever no id decides,
+    so every key an archive has stays."""
+    from paperpull_core.keys import stable_occurrences, told_apart
+    fields = ("doc_type", "title", "date")
+
+    def row(account, document_id="", doc_type="BANK", title="Monthly Statement",
+            date=DATE):
+        return {"doc_type": doc_type, "title": title, "date": date,
+                "account": account, "document_id": document_id}
+
+    def known(*pairs):
+        return {"k%d" % i: dict(row(account), occurrence=occurrence)
+                for i, (account, occurrence) in enumerate(pairs)}
+
+    cases = [
+        ([row("A"), row("B")], {}),
+        ([row("B"), row("A")], known(("A", 0), ("B", 1))),
+        ([row("A"), row("A"), row("A")], known(("A", 0), ("A", 1))),
+        ([row("A", "x1"), row("A", "x2")], known(("A", 0), ("A", 1))),
+        ([row("A"), row("B", doc_type="CARD"), row("A", date="2026-08-12")],
+         known(("A", 0))),
+    ]
+    for rows, existing in cases:
+        got = [occurrence for occurrence, _sure in told_apart(
+            rows, existing, fields=fields, kind_field="doc_type")]
+        assert got == stable_occurrences(rows, existing, fields=fields), (rows, existing)

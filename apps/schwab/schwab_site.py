@@ -530,21 +530,25 @@ def _write_if_pdf(data: bytes, out_path: Path) -> bool:
     return True
 
 
-def resolve_document(page, account_id: str, charitable: bool, doc_type: str,
-                     title: str, date: str, occurrence: int = 0) -> Optional[dict]:
+def listed_alike(page, account_id: str, charitable: bool, doc_type: str,
+                 title: str, date: str) -> List[dict]:
+    """Every document a fresh list for that day gives with this type, title
+    and account, in the order it gives them."""
     account = {"account_id": account_id, "charitable": charitable}
     day = mdy(date)
     docs = list_documents(page, [account], from_mdy=day, to_mdy=day)
     want_title = re.sub(r"\s+", " ", title or "").strip()
-    n = 0
+    out = []
     for doc in docs:
         d_type, d_title, d_date, d_display = document_descriptor(doc)
         if (d_type == doc_type and d_title == want_title and d_date == date
                 and account_id_from_display(d_display) == account_id):
-            if n == occurrence:
-                return doc
-            n += 1
-    return None
+            out.append(doc)
+    return out
+
+
+NOT_TOLD_APART = ("Another document of this day has the same type, title and "
+                  "account, and the list does not say which one this is")
 
 
 _DOWNLOAD_JS = """async ({url, headers, body}) => {
@@ -592,23 +596,38 @@ def fetch_pdf(page, doc: dict) -> Tuple[int, bytes]:
 
 def download_document(page, account_id: str, charitable: bool, doc_type: str,
                       title: str, date: str, out_path: Path,
-                      occurrence: int = 0, document_id_hint: str = "",
-                      on_demand_type_hint: str = "") -> bool:
-    doc = resolve_document(page, account_id, charitable, doc_type, title,
-                           date, occurrence)
-    if doc is None and document_id_hint:
+                      document_id: str = "", on_demand_type: str = "",
+                      alone: bool = False) -> Tuple[str, str]:
+    """Save the document whose record keeps `document_id` to out_path.
+
+    Answers the id of the document saved, and "" with why when none was.
+    The row of a fresh list carrying that id comes first, then that id as
+    the record keeps it, since the README says ids are not stable. A
+    document is never taken by its place among documents alike, since a
+    list in another order puts another one there. Only when the app knows
+    no other document alike (`alone`) and the list gives exactly one is
+    that one taken, the case of an id that did not last."""
+    alike = listed_alike(page, account_id, charitable, doc_type, title, date)
+    own = [doc for doc in alike
+           if document_id and (doc.get("documentId") or "") == document_id]
+    tries = list(own)
+    if not own and document_id:
         log.info("document %r (%s %s) not in the fresh list - trying the stored id",
                  title, doc_type, date)
-        doc = {"documentId": document_id_hint, "documentName": title,
-               "onDemandDocumentType": on_demand_type_hint, "type": doc_type}
-    if doc is None:
-        log.info("document %r (%s %s) could not be resolved", title, doc_type, date)
-        return False
-    status, data = fetch_pdf(page, doc)
-    if status == 200 and _write_if_pdf(data, out_path):
-        return True
-    log.info("download answered %s (%d bytes) for %r", status, len(data or b""), title)
-    return False
+        tries.append({"documentId": document_id, "documentName": title,
+                      "onDemandDocumentType": on_demand_type, "type": doc_type})
+    if not own and alone and len(alike) == 1:
+        tries.append(alike[0])
+    for doc in tries:
+        status, data = fetch_pdf(page, doc)
+        if status == 200 and _write_if_pdf(data, out_path):
+            return doc.get("documentId") or "", ""
+        log.info("download answered %s (%d bytes) for %r", status, len(data or b""), title)
+    if not own and any(doc not in tries for doc in alike):
+        log.info("document %r (%s %s) could not be told apart among %d alike",
+                 title, doc_type, date, len(alike))
+        return "", NOT_TOLD_APART
+    return "", ""
 
 
 _READ_UI_JS = """() => {

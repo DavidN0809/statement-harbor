@@ -122,7 +122,8 @@ def test_this_app_no_longer_numbers_by_the_order_it_was_given(app):
     """The old loop counted as it walked. A new one written that way is the
     way this comes back, and it reads perfectly reasonably."""
     src = (app / ("%s_docs.py" % app.name)).read_text(encoding="utf-8")
-    assert "stable_occurrences" in src, \
+    # told_apart numbers as stable_occurrences does, the provider's id first.
+    assert "stable_occurrences" in src or "told_apart" in src, \
         "%s numbers documents by the order the provider answered in" % app.name
     assert "seen[pair] = occ + 1" not in src
 

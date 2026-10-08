@@ -16,7 +16,8 @@ from paperpull_core import browser as browser_launcher
 import schwab_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
-from paperpull_core.keys import stable_occurrences as _stable_occurrences
+from paperpull_core.keys import told_apart as _told_apart
+from paperpull_core.keys import twins as _twins
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
 from paperpull_core import failure
 from paperpull_core import listing
@@ -325,7 +326,7 @@ class App:
         labels = self.config.get("account_labels") or {}
         return labels.get(account) or account
 
-    def _record_schwab_doc(self, d: dict, charitable_ids: set) -> int:
+    def _record_schwab_doc(self, d: dict, charitable_ids: set, sure: bool = True) -> int:
         title = re.sub(r"\s+", " ", (d.get("title") or "")).strip()
         if doc_types.should_skip(title, self.rules):
             self.stats["skipped_out_of_scope"] += 1
@@ -376,6 +377,11 @@ class App:
                        document_id=d.get("document_id") or "",
                        occurrence=int(d.get("occurrence", 0) or 0),
                        href=site.URLS["documents"])
+        if not sure:
+            # Which of the documents alike this row is cannot be told, so
+            # its id is kept for no record, and a new record has none to
+            # download by (paperpull_core.keys.told_apart).
+            doc.document_id = ""
         existing = self.discovery.get(doc.key)
         if existing is None:
             rec = doc.to_dict()
@@ -419,11 +425,14 @@ class App:
         # a different order next time would hand one document the other's
         # number, and the one already downloaded would be skipped as done
         # while the other arrived beside it. A number already given stays
-        # with the document it was given to.
-        for d, occ in zip(raw, _stable_occurrences(
-                raw, self.discovery.data, fields=("doc_type", "title", "date"))):
+        # with the document it was given to, found by the id it was saved
+        # under before its place, and a row that cannot be told apart from
+        # one saved is not taken for it (paperpull_core.keys.told_apart).
+        for d, (occ, sure) in zip(raw, _told_apart(
+                raw, self.discovery.data, fields=("doc_type", "title", "date"),
+                kind_field="doc_type", saved=self.progress.data)):
             d["occurrence"] = occ
-            n_new += self._record_schwab_doc(d, charitable_ids)
+            n_new += self._record_schwab_doc(d, charitable_ids, sure)
 
         self.discovery.save()
         # The whole list is in, and only now may a Resume that carries on
@@ -549,12 +558,25 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             site.ensure_statements(page)
-        saved = site.download_document(page, doc.account_id, doc.charitable,
-                                       doc.doc_type, doc.title, doc.date,
-                                       out_path, occurrence=doc.occurrence,
-                                       document_id_hint=doc.document_id,
-                                       on_demand_type_hint=doc.on_demand_type)
-        if not saved:
+        # The document is the one under the id its record keeps, never
+        # whichever stands in its place among documents alike, since a list
+        # in another order puts another one there.
+        alone = _twins(doc.to_dict(), self.discovery.data,
+                       fields=("doc_type", "title", "date")) == 1
+        taken, why = site.download_document(page, doc.account_id, doc.charitable,
+                                            doc.doc_type, doc.title, doc.date, out_path,
+                                            document_id=doc.document_id,
+                                            on_demand_type=doc.on_demand_type,
+                                            alone=alone)
+        if not taken and why:
+            # Refused rather than guessed, so nothing is saved twice and no
+            # document is marked done while another is never taken.
+            self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
+            self._write_row(doc, "Not told apart", "Needs Manual Review")
+            self.stats["manual_review"] += 1
+            print(f"  !! {why}. Marked for manual review.")
+            return
+        if not taken:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF (see the log)")
             self._write_row(doc, "Capture failed", "Needs Manual Review")
@@ -562,6 +584,7 @@ class App:
             self.stats["manual_review"] += 1
             print("  Could not capture this document - marked for manual review.")
             return
+        doc.document_id = taken
 
 
         # Some tax forms arrive as a ZIP holding the PDF. One PDF and nothing

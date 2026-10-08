@@ -516,35 +516,37 @@ def _extract_multipart_pdf(data: bytes) -> bytes:
     return rest[:end] if end >= 0 else rest
 
 
-def resolve_document(page, doc_type: str, title: str, date: str,
-                     account_desc: str, account_ref: str,
-                     occurrence: int = 0) -> Optional[dict]:
+def listed_alike(page, doc_type: str, title: str, date: str,
+                 account_desc: str, account_ref: str) -> List[dict]:
+    """Every document a fresh list gives with this type, title, date and
+    account, in the order it gives them."""
     want = document_descriptor(doc_type, title, date, account_desc)
-    n = 0
     if doc_type in EASE_DATASETS:
+        out = []
         for d in ease_search(page, account_ref, doc_type):
             _c, d_date, _p, d_title = classify_ease_document(d, doc_type)
             if document_descriptor(doc_type, d_title, d_date, account_desc) == want:
-                if n == occurrence:
-                    return {"document_id": d.get("documentId") or "",
-                            "dataset_id": d.get("datasetId") or ""}
-                n += 1
-        return None
+                out.append({"document_id": d.get("documentId") or "",
+                            "dataset_id": d.get("datasetId") or ""})
+        return out
     categories = ["STATEMENT"] if doc_type in (TYPE_BANK_STATEMENT,
                                                TYPE_CARD_STATEMENT) \
         else ["TAX", "LETTER"]
+    out = []
     for d in search_documents(page, categories):
         if (d.get("documentType") or "").strip() != doc_type:
             continue
         _c, d_date, _p, d_title = classify_document(d)
         if document_descriptor(doc_type, d_title, d_date,
                                d.get("description") or "") == want:
-            if n == occurrence:
-                return {"document_id": d.get("documentId") or "",
+            out.append({"document_id": d.get("documentId") or "",
                         "dataset_id": d.get("datasetId") or "",
-                        "raw_url": ((d.get("_links") or {}).get("rawURL") or "")}
-            n += 1
-    return None
+                        "raw_url": ((d.get("_links") or {}).get("rawURL") or "")})
+    return out
+
+
+NOT_TOLD_APART = ("Another document of this day has the same type, title and "
+                  "account, and the list does not say which one this is")
 
 
 def fetch_pdf(page, doc_type: str, account_ref: str, rec: dict) -> Tuple[int, bytes]:
@@ -577,23 +579,37 @@ def fetch_pdf(page, doc_type: str, account_ref: str, rec: dict) -> Tuple[int, by
 
 def download_document(page, doc_type: str, title: str, date: str,
                       account_desc: str, account_ref: str, out_path: Path,
-                      occurrence: int = 0, document_id_hint: str = "",
-                      dataset_id_hint: str = "") -> bool:
-    rec = resolve_document(page, doc_type, title, date, account_desc,
-                           account_ref, occurrence)
-    if rec is None and document_id_hint:
+                      document_id: str = "", dataset_id: str = "",
+                      alone: bool = False) -> Tuple[str, str]:
+    """Save the document whose record keeps `document_id` to out_path.
+
+    Answers the id of the document saved, and "" with why when none was.
+    The row of a fresh list carrying that id comes first, then that id as
+    the record keeps it, since ids are opaque and may not last. A document
+    is never taken by its place among documents alike, since a list in
+    another order puts another one there. Only when the app knows no other
+    document alike (`alone`) and the list gives exactly one is that one
+    taken, the case of an id that did not last."""
+    alike = listed_alike(page, doc_type, title, date, account_desc, account_ref)
+    own = [row for row in alike if document_id and row["document_id"] == document_id]
+    tries = list(own)
+    if not own and document_id:
         log.info("document %r (%s %s) not in the fresh list - trying the stored id",
                  title, doc_type, date)
-        rec = {"document_id": document_id_hint, "dataset_id": dataset_id_hint}
-    if rec is None:
-        log.info("document %r (%s %s) could not be resolved", title, doc_type, date)
-        return False
-    status, data = fetch_pdf(page, doc_type, account_ref, rec)
-    if status == 200 and _write_if_pdf(data, out_path):
-        return True
-    log.info("download answered %s (%d bytes) for %r", status,
-             len(data or b""), title)
-    return False
+        tries.append({"document_id": document_id, "dataset_id": dataset_id})
+    if not own and alone and len(alike) == 1:
+        tries.append(alike[0])
+    for rec in tries:
+        status, data = fetch_pdf(page, doc_type, account_ref, rec)
+        if status == 200 and _write_if_pdf(data, out_path):
+            return rec["document_id"], ""
+        log.info("download answered %s (%d bytes) for %r", status,
+                 len(data or b""), title)
+    if not own and any(row not in tries for row in alike):
+        log.info("document %r (%s %s) could not be told apart among %d alike",
+                 title, doc_type, date, len(alike))
+        return "", NOT_TOLD_APART
+    return "", ""
 
 
 _READ_UI_JS = """() => {

@@ -119,28 +119,38 @@ def stable_occurrences(rows, existing=None, fields=("title", "date")):
     nobody has seen takes a new number, the lowest one still free. An
     archive that already exists therefore keeps every key it has.
     """
-    def tidy(value):
-        # The stored record has been through the app's own cleanup and the
-        # raw row has not, so both sides are tidied before being compared.
-        return re.sub(r"\s+", " ", str(value or "")).strip()
+    return _numbered(list(rows), existing, fields, {})
 
-    def what_it_is(item):
-        return tuple(tidy(item.get(f, "")) for f in fields) + (tidy(item.get("account")),)
 
-    rows = list(rows)
+def _tidy(value):
+    # The stored record has been through the app's own cleanup and the raw
+    # row has not, so both sides are tidied before being compared.
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _what_it_is(item, fields):
+    return tuple(_tidy(item.get(f, "")) for f in fields) + (_tidy(item.get("account")),)
+
+
+def _group_of(item, fields):
+    return tuple(_tidy(item.get(f, "")) for f in fields)
+
+
+def _numbered(rows, existing, fields, taken):
+    """stable_occurrences, with the numbers `taken` already holds for each
+    group given to no row here."""
     known = {}
     for record in (existing or {}).values():
         if not isinstance(record, dict):
             continue
-        what = what_it_is(record)
+        what = _what_it_is(record, fields)
         if what not in known:
             known[what] = record.get("occurrence", 0) or 0
 
-    taken = {}
     out = [None] * len(rows)
     for i, row in enumerate(rows):
-        group = tuple(tidy(row.get(f, "")) for f in fields)
-        what = what_it_is(row)
+        group = _group_of(row, fields)
+        what = _what_it_is(row, fields)
         if what in known:
             occurrence = known.pop(what)
             if occurrence not in taken.setdefault(group, set()):
@@ -150,11 +160,129 @@ def stable_occurrences(rows, existing=None, fields=("title", "date")):
     for i, row in enumerate(rows):
         if out[i] is not None:
             continue
-        group = tuple(tidy(row.get(f, "")) for f in fields)
-        used = taken.setdefault(group, set())
+        used = taken.setdefault(_group_of(row, fields), set())
         occurrence = 0
         while occurrence in used:
             occurrence += 1
         used.add(occurrence)
         out[i] = occurrence
     return out
+
+
+def twins(record, existing, fields=("title", "date")) -> int:
+    """How many known records are what this one is, itself included, so one
+    when nothing known is alike."""
+    what = _what_it_is(record, fields)
+    return sum(1 for known in (existing or {}).values()
+               if isinstance(known, dict) and _what_it_is(known, fields) == what)
+
+
+def told_apart(rows, existing=None, fields=("title", "date"), id_field="document_id",
+               kind_field=None, saved=None):
+    """Number the rows as stable_occurrences does, the provider's id first,
+    and say of each row whether its number surely names that document.
+
+    Capital One and Schwab keep a document under its account, type, title
+    and date, and number two documents alike in all of those by place. A
+    place says nothing once a list comes back in another order, or with a
+    new one ahead of one already saved. The one saved was then numbered as
+    the new one and taken twice, and the new one never.
+
+    So a row the provider lists under the id a record keeps takes that
+    record's number. The id a record keeps is the one it was saved under,
+    from `saved` (the app's progress) when it was saved, else the one in
+    `existing` (discovery). When ids come back for a kind of document
+    (`kind_field`), a row no record answers to is a new document. It takes
+    the number of a record alike that was never saved, or else a number no
+    record alike holds.
+
+    The rest are numbered by place as stable_occurrences numbers them, which
+    is sure when no record alike is left over, when none left over was
+    saved, or when one row and one record are left over. Otherwise which
+    row is the saved one cannot be told, so the row is not sure, and the
+    app writes nothing of it over a record and downloads nothing for it.
+
+    Answers (occurrence, sure) for each row, in order.
+    """
+    rows = list(rows)
+    records = {key: record for key, record in (existing or {}).items()
+               if isinstance(record, dict)}
+    saved = saved or {}
+
+    def is_saved(key):
+        record = saved.get(key)
+        return isinstance(record, dict) and bool(record.get("downloaded_ok"))
+
+    def id_of(key):
+        if is_saved(key) and _tidy(saved[key].get(id_field)):
+            return _tidy(saved[key].get(id_field))
+        return _tidy(records[key].get(id_field))
+
+    def kind_of(row):
+        return _tidy(row.get(kind_field)) if kind_field else ""
+
+    alike = {}
+    for key, record in records.items():
+        alike.setdefault(_what_it_is(record, fields), []).append(key)
+    for keys in alike.values():
+        # A saved record is offered its id first, so an id a record not yet
+        # saved holds from before never takes the saved one's document.
+        keys.sort(key=lambda key: not is_saved(key))
+
+    out = [None] * len(rows)
+    taken = {}
+    matched = set()
+    for i, row in enumerate(rows):
+        ident = _tidy(row.get(id_field))
+        if not ident:
+            continue
+        group = _group_of(row, fields)
+        for key in alike.get(_what_it_is(row, fields), ()):
+            occurrence = records[key].get("occurrence", 0) or 0
+            if (key in matched or id_of(key) != ident
+                    or occurrence in taken.setdefault(group, set())):
+                continue
+            taken[group].add(occurrence)
+            matched.add(key)
+            out[i] = occurrence
+            break
+    lasting = {kind_of(rows[i]) for i in range(len(rows)) if out[i] is not None}
+
+    rest = [i for i in range(len(rows)) if out[i] is None]
+    left = {what: [key for key in keys if key not in matched]
+            for what, keys in alike.items()}
+    new = [i for i in rest if left.get(_what_it_is(rows[i], fields))
+           and kind_of(rows[i]) in lasting]
+    placed = [i for i in rest if i not in new]
+    news = {_what_it_is(rows[i], fields) for i in new}
+    unmatched = {key: records[key] for key in records if key not in matched
+                 and _what_it_is(records[key], fields) not in news}
+    for i, occurrence in zip(placed, _numbered([rows[i] for i in placed],
+                                               unmatched, fields, taken)):
+        out[i] = occurrence
+    for i in new:
+        # A record left over and never saved is filled first, since nothing
+        # it holds can be taken twice, and one an earlier listing gave the
+        # wrong id is so given the right one. Otherwise a number no record
+        # of its kind holds.
+        used = taken.setdefault(_group_of(rows[i], fields), set())
+        over = left[_what_it_is(rows[i], fields)]
+        held = {records[key].get("occurrence", 0) or 0 for key in over}
+        spare = sorted(records[key].get("occurrence", 0) or 0
+                       for key in over if not is_saved(key))
+        free = [occurrence for occurrence in spare if occurrence not in used]
+        occurrence = free[0] if free else 0
+        while not free and (occurrence in used or occurrence in held):
+            occurrence += 1
+        used.add(occurrence)
+        out[i] = occurrence
+
+    sure = [True] * len(rows)
+    for i in placed:
+        what = _what_it_is(rows[i], fields)
+        over = left.get(what, [])
+        rows_over = [j for j in placed if _what_it_is(rows[j], fields) == what]
+        if (over and any(is_saved(key) for key in over)
+                and not (len(over) == 1 and len(rows_over) == 1)):
+            sure[i] = False
+    return list(zip(out, sure))
