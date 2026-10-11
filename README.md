@@ -98,6 +98,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`kroger`](apps/kroger) | Kroger (Pick 'n Save, Metro Market, Fred Meyer, Ralphs and the rest) | Receipts, in-store, fuel, pickup and delivery | **Confirmed by [@jpfieber](https://github.com/jpfieber) on [#41](https://github.com/rheeloaded/paperpull/issues/41).** Each receipt names its banner, Metro Market or Fred Meyer, for a file name pattern. Purchase-history API and receipt page, nothing clicked, real Edge/Chrome |
 | [`github`](apps/github) | GitHub | Payment receipts (Pro, Copilot, Actions, Sponsors and the rest) | **Confirmed by [@jpfieber](https://github.com/jpfieber) on [#43](https://github.com/rheeloaded/paperpull/issues/43).** Receipt links fetched or printed, nothing clicked |
 | [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms | **Confirmed by [@watling777](https://github.com/watling777)**, whose run saved every statement on both of his accounts, a credit card's named as one ([#35](https://github.com/rheeloaded/paperpull/issues/35)) |
+| [`ibkr`](apps/ibkr) | Interactive Brokers | Monthly Activity Statements | **Contributed by [@tylerverry](https://github.com/tylerverry), 60 of 61 months saved on a full run.** The Statements page's own Activity Statement dialog, Monthly chosen and each month's own Download PDF button pressed once, and nothing else is clicked. Regional hosts `.com`, `.co.uk` and `.ie` |
 | [`meijer`](apps/meijer) | Meijer | Order receipts, in-store digital receipts where mPerks lists them | **Untested, built without an account. Have one? [Help test it](apps/meijer/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). Nothing clicked |
 | [`myecp`](apps/myecp) | MILITARY STAR (Exchange Credit Program) | Card statements | **Built on the maintainer's own account, 25 statements back to 2023.** The MyECP statements list and download from inside the page, nothing clicked |
 | [`mypay`](apps/mypay) | DFAS myPay | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
@@ -667,8 +668,9 @@ found a bug and diagnosed it to the line.
   health insurer.
 - [@appchamp](https://github.com/appchamp), the PG&E app.
 - [@tylerverry](https://github.com/tylerverry), the Vanguard app, built
-  and run against five accounts back to 2020, and the Nelnet app, run
-  against a student loan account back to 2019.
+  and run against five accounts back to 2020, the Nelnet app, run against
+  a student loan account back to 2019, and the Interactive Brokers app,
+  run against five years of monthly statements.
 - [@marecabo](https://github.com/marecabo), Amazon's legal invoice PDFs on
   the German store.
 - [@watling777](https://github.com/watling777), the tester behind AT&T,
