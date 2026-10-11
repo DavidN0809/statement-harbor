@@ -32,10 +32,36 @@ def slug(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "", name).lower() or "account2"
 
 
+def _port_of(url: str) -> int | None:
+    m = re.search(r":(\d+)", url or "")
+    return int(m.group(1)) if m else None
+
+
+def ports_in_use(app_dirs) -> set:
+    """Every debugging port a config of these apps names, each app's
+    config.json and config.example.json and every account's
+    config.<name>.json. Two apps on one port attach to each other's browser,
+    and so to the wrong account's session."""
+    used = set()
+    for app_dir in app_dirs:
+        for path in Path(app_dir).glob("config*.json"):
+            try:
+                cfg = json.loads(path.read_text(encoding="utf-8-sig"))
+            except (OSError, ValueError):
+                continue
+            port = _port_of(cfg.get("cdp_url") if isinstance(cfg, dict) else "")
+            if port:
+                used.add(port)
+    return used
+
+
 def make_config(app_dir: Path, name: str, port_offset: int = 10,
-                owner: str = "") -> Path | None:
+                owner: str = "", taken: set | None = None) -> Path | None:
     """Write config.<name>.json for one app. Returns its path, or None when
-    the app has no config.json yet (it has not been set up)."""
+    the app has no config.json yet (it has not been set up). The new port is
+    the app's own plus `port_offset`, moved up past any port in `taken`,
+    which then holds it too, so a second account never lands on another
+    app's port (E-ZPass's 9274 plus 10 was Interactive Brokers' 9284)."""
     base = app_dir / "config.json"
     if not base.is_file():
         return None
@@ -54,11 +80,17 @@ def make_config(app_dir: Path, name: str, port_offset: int = 10,
         cfg["output_dir"] = str(out.parent / f"{out.name} - {name}")
     cfg["profile_dir"] = str(Path(cfg["output_dir"]) /
                              Path(cfg.get("profile_dir") or "browser-profile").name)
-    if cfg.get("cdp_url"):
-        m = re.search(r":(\d+)", cfg["cdp_url"])
-        if m:
-            cfg["cdp_url"] = cfg["cdp_url"].replace(
-                m.group(1), str(int(m.group(1)) + port_offset))
+    base = _port_of(cfg.get("cdp_url"))
+    if base:
+        # The panel's Add a person asks for one app with no set of its own,
+        # so the apps beside it are read here.
+        taken = taken if taken is not None else ports_in_use(
+            list(paperpull.list_apps(Path(app_dir).parent)) + [app_dir])
+        port = base + port_offset
+        while port in taken or port == base:
+            port += 1
+        taken.add(port)
+        cfg["cdp_url"] = re.sub(r":%d\b" % base, ":%d" % port, cfg["cdp_url"], count=1)
 
     dest = app_dir / f"config.{slug(name)}.json"
     dest.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
@@ -71,8 +103,12 @@ def add_account(app_dirs: list[Path], name: str, port_offset: int = 10,
     owner = owner or name.title()
     print(f"Creating '{name}' account configs (holder: {owner}):\n")
     made = []
+    # Every port the apps beside these already use, the ones not asked for
+    # included, so one app's second account is never another app's port.
+    neighbors = paperpull.list_apps(Path(app_dirs[0]).parent) if app_dirs else []
+    taken = ports_in_use(list(neighbors) + list(app_dirs))
     for app_dir in app_dirs:
-        dest = make_config(app_dir, name, port_offset, owner)
+        dest = make_config(app_dir, name, port_offset, owner, taken)
         if not dest:
             print(f"  skip (no config.json, run setup first): {app_dir.name}")
             continue
@@ -104,7 +140,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--owner", default="",
                     help="account holder's display name (default: the label, capitalized)")
     ap.add_argument("--port-offset", type=int, default=10,
-                    help="added to each app's debugging port (default 10)")
+                    help="added to each app's debugging port, then moved past any port "
+                         "another app or account uses (default 10)")
     args = ap.parse_args(argv)
 
     root = paperpull.apps_root(args.root)

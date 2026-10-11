@@ -25,6 +25,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   while the list was noted as read whole, and Resume never went back for
   it. Every year the picker offers now has to answer, and otherwise the
   run says the list was not read whole.
+- **A second person's account no longer takes another app's browser port.**
+  Add a person, and `add-account`, gave the new account its app's port
+  plus 10, so a second E-ZPass account landed on Interactive Brokers' port
+  and a second PayPal account on Coinbase's, and the two browsers attached
+  to each other's signed-in session. The new port now moves past any port
+  another app or account already uses.
 
 ## [0.46.0] - 2026-10-11
 

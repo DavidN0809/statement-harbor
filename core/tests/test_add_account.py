@@ -46,6 +46,47 @@ def test_the_second_account_shares_nothing_with_the_first(tmp_path):
     assert (chase / "config.json").read_text(encoding="utf-8") == before
 
 
+def _port(app_dir, name="spouse"):
+    return add_account._port_of(json.loads(
+        (app_dir / ("config.%s.json" % name)).read_text(encoding="utf-8"))["cdp_url"])
+
+
+def test_a_second_account_never_takes_another_apps_port(tmp_path):
+    """E-ZPass's 9274 plus 10 was Interactive Brokers' 9284, so the second
+    account's browser and IBKR's attached to each other."""
+    ezpass = _install(tmp_path, "E-ZPass Statements", "ezpassva_docs.py",
+                      dict(_config(tmp_path, "E-ZPass Statements"), cdp_url="http://127.0.0.1:9274"))
+    _install(tmp_path, "Interactive Brokers Statements", "ibkr_docs.py",
+             dict(_config(tmp_path, "Interactive Brokers Statements"), cdp_url="http://127.0.0.1:9284"))
+    assert add_account.main(["spouse", "--app", "E-ZPass Statements", "--root", str(tmp_path)]) == 0
+    assert _port(ezpass) == 9285
+
+
+def test_the_panels_add_a_person_reads_the_apps_beside_it(tmp_path):
+    """The panel calls make_config for one app with no set of ports of its
+    own, and the apps beside it are still read."""
+    ezpass = _install(tmp_path, "E-ZPass Statements", "ezpassva_docs.py",
+                      dict(_config(tmp_path, "E-ZPass Statements"), cdp_url="http://127.0.0.1:9274"))
+    _install(tmp_path, "Interactive Brokers Statements", "ibkr_docs.py",
+             dict(_config(tmp_path, "Interactive Brokers Statements"), cdp_url="http://127.0.0.1:9284"))
+    add_account.make_config(ezpass, "spouse", owner="Jane Doe")
+    assert _port(ezpass) == 9285
+
+
+def test_two_apps_given_accounts_in_one_run_take_two_ports(tmp_path):
+    """One app's second account is also never another's, nor the port an
+    account made earlier in the same run took."""
+    first = _install(tmp_path, "Alpha Statements", "alpha_docs.py",
+                     dict(_config(tmp_path, "Alpha Statements"), cdp_url="http://127.0.0.1:9300"))
+    second = _install(tmp_path, "Beta Statements", "beta_docs.py",
+                      dict(_config(tmp_path, "Beta Statements"), cdp_url="http://127.0.0.1:9310"))
+    (second / "config.example.json").write_text(json.dumps({"cdp_url": "http://127.0.0.1:9320"}),
+                                                encoding="utf-8")
+    assert add_account.main(["spouse", "--root", str(tmp_path)]) == 0
+    ports = {_port(first), _port(second)}
+    assert ports.isdisjoint({9300, 9310, 9320}) and len(ports) == 2, ports
+
+
 def test_every_app_under_the_root_gets_one_and_an_unset_up_app_is_skipped(tmp_path, capsys):
     _install(tmp_path, "Chase Statements", "chase_docs.py", _config(tmp_path, "Chase Statements"))
     _install(tmp_path, "Ally Statements", "ally_docs.py")           # no config.json yet
