@@ -57,7 +57,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from paperpull_core import pressing
@@ -70,7 +70,6 @@ from paperpull_core.capture import take_download as _take_download
 from paperpull_core.capture import clear_copies as _clear_copies
 from paperpull_core.controls import (AUTH_CONTROL_RE, SETTINGS_CONTROL_RE,
                                      is_forbidden_context as _core_forbidden)
-from paperpull_core.controls import escape_for_locator
 
 log = logging.getLogger("ibkr_docs.site")
 
@@ -253,7 +252,13 @@ def parse_date(text: str) -> str:
 
 # ---------------------------------------------------------------- navigation
 
-REGIONAL_HOST_RE = re.compile(r"(^|\.)interactivebrokers\.[a-z.]+$", re.I)
+# An Interactive Brokers domain is interactivebrokers. and a country's ending
+# (.com, .de, .co.uk, .com.au), with at most one name in front. Anything after
+# that ending, as in www.interactivebrokers.com.example.test, is another
+# site, and is never suggested for the list.
+REGIONAL_HOST_RE = re.compile(
+    r"^(?:[a-z0-9-]+\.)?interactivebrokers\.(?:com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$",
+    re.I)
 
 
 def regional_host_problem(url: str) -> Optional[str]:
@@ -547,27 +552,44 @@ ACCOUNT_ID_RE = re.compile(r"\b((?:DU|U|F|I)\d{6,9})\b")
 
 def read_account_id(page) -> str:
     """The account the Statements page is showing, from the first account
-    number in its heading area. Empty when none reads."""
+    number on it, which is the one in its heading. Empty when none reads.
+
+    The whole page is read. Reading only its first 1,200 characters left the
+    number unread whenever a notice sat above the heading, and the months
+    were then filed again under a bare "Account" (review of #77)."""
     try:
-        text = page.evaluate("() => (document.body.innerText || '').slice(0, 1200)")
+        text = page.evaluate("() => document.body.innerText || ''")
     except Exception:
         return ""
     m = ACCOUNT_ID_RE.search(text or "")
     return m.group(1) if m else ""
 
 
-def collect_statement_periods(page, keep=None) -> List[dict]:
+def collect_statement_periods(page, keep=None) -> Optional[List[dict]]:
     """The months the Date select offers under Monthly, as
     {label, code, year, month, account_id}. `keep`, when given, says which
     options a scoped run wants (paperpull_core.scope.period_filter); the
-    options it refuses are not returned. The dialog is closed again."""
+    options it refuses are not returned. The dialog is closed again.
+
+    None when the months could not be read: the dialog would not open, it
+    showed no Date select of months, or the page named no account. An empty
+    list is only ever a list read whole that held nothing a run wants, so a
+    Discover never notes a list it did not read (review of #77)."""
     if not open_activity_dialog(page):
-        return []
+        log.info("the Activity Statement dialog did not open, so no month was read")
+        return None
     account_id = read_account_id(page)
+    if not account_id:
+        log.info("no account number reads on the Statements page")
+        close_dialog(page)
+        return None
     out: List[dict] = []
     try:
         sel = month_select(page)
-        labels = _select_options(sel) if sel is not None else []
+        if sel is None:
+            log.info("the dialog showed no Date select of months")
+            return None
+        labels = _select_options(sel)
         values = []
         try:
             values = sel.evaluate("s => [...s.options].map(o => o.value)") if sel is not None else []
@@ -605,10 +627,14 @@ def classify_document(doc: dict) -> Tuple[str, str, str, str]:
             f"Activity Statement - {label}")
 
 
-def list_documents(page, keep=None) -> List[dict]:
-    """Every month the account offers, shaped for the engine."""
+def list_documents(page, keep=None) -> Optional[List[dict]]:
+    """Every month the account offers, shaped for the engine, or None when
+    the months could not be read (collect_statement_periods)."""
+    periods = collect_statement_periods(page, keep=keep)
+    if periods is None:
+        return None
     out: List[dict] = []
-    for s in collect_statement_periods(page, keep=keep):
+    for s in periods:
         cat, date_iso, period, title = classify_document(s)
         acct = s.get("account_id") or ""
         out.append({
@@ -627,7 +653,7 @@ def list_documents(page, keep=None) -> List[dict]:
     return out
 
 
-def collect_documents(page, keep=None) -> List[dict]:
+def collect_documents(page, keep=None) -> Optional[List[dict]]:
     return list_documents(page, keep=keep)
 
 
@@ -637,6 +663,21 @@ def collect_documents(page, keep=None) -> List[dict]:
 # it is asked for, so this is long.
 EVENT_WAIT_MS = 90000
 NAMED_MONTHS_RE = re.compile(r"_((?:19|20)\d{2}(?:0[1-9]|1[0-2]))_((?:19|20)\d{2}(?:0[1-9]|1[0-2]))\.pdf$", re.I)
+
+
+NAMED_ACCOUNT_RE = re.compile(
+    r"^([A-Z]{1,2}\d{6,9})_(?:19|20)\d{2}(?:0[1-9]|1[0-2])_(?:19|20)\d{2}(?:0[1-9]|1[0-2])\.pdf$",
+    re.I)
+
+
+def named_account_matches(suggested: str, account_id: str) -> bool:
+    """False only when the file's own name says it is another account's than
+    the one the record is for. A name in some other shape, or a record that
+    knows no account, says nothing and passes."""
+    m = NAMED_ACCOUNT_RE.match(suggested or "")
+    if not m or not account_id:
+        return True
+    return m.group(1).upper() == account_id.strip().upper()
 
 
 def named_month_matches(suggested: str, code: str) -> bool:
@@ -733,6 +774,11 @@ def download_document(page, account_id: str, doc_type: str, title: str,
         # Another month's file under this month's press. Not taken.
         log.warning("the file named %r is not the statement for %s, not taken",
                     (dl.suggested_filename or "")[:60], code)
+    elif dl is not None and not named_account_matches(dl.suggested_filename or "", account_id):
+        # Another account's statement, as when the page shows an account
+        # other than the one this month was listed for. Not taken.
+        log.warning("the file named %r is not this account's statement for %s, not taken",
+                    redact_label(dl.suggested_filename or "")[:60], code)
     elif dl is not None:
         for _ in range(20):
             took = _take_download(dl, staging, before, out_path)

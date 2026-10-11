@@ -9,6 +9,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Interactive Brokers, the 63rd app, monthly Activity Statements
+  (#77).** The Statements page's own Activity Statement dialog, with
+  Monthly chosen, offers every month back to the one the account opened,
+  and each month is saved by pressing the dialog's Download PDF button once
+  with that month chosen, after its label passes the guard. Nothing else is
+  pressed, and nothing is asked of Interactive Brokers directly. A file
+  whose own name says it is for another month or another account is not
+  taken. Sign-in lands on the person's regional domain, and .com, .co.uk
+  and .ie are known. Contributed by tylerverry, whose full run saved 60 of
+  61 months back to 2021, the last on a supervised retry. Before merging,
+  a dialog that would not open, or a page that named no account, was made
+  to stop Discover where it used to note an empty list as read, the
+  account number was read from the whole page so a notice above the
+  heading no longer filed every month again under a bare "Account", and a
+  lookalike address is never suggested for the list of domains.
+
 ### Fixed
 - **USAA's Discover could miss most of the list from 0.26.0 on.** USAA's
   documents page asks USAA for its whole list as it loads, and the app

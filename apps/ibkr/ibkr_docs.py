@@ -1,4 +1,4 @@
-"""Interactive Brokers statements, tax forms, letters and trade confirmations."""
+"""Interactive Brokers monthly Activity Statements."""
 from __future__ import annotations
 
 import argparse
@@ -422,6 +422,15 @@ class App:
 
         raw = site.collect_documents(
             page, keep=scope.period_filter(self.args, self.config))
+        if raw is None:
+            print("Could not read the months on your Interactive Brokers Statements page.")
+            print("The Activity Statement dialog did not open there, or the page showed no")
+            print("account number, so nothing was listed. Open Performance & Reports, then")
+            print("Statements, in the browser, and try again. If it keeps happening, run")
+            print("--diagnose and attach its file to an issue.")
+            # Nothing was read, so the run stops rather than note an empty
+            # list as read whole (review of #77, paperpull_core.listing).
+            raise SystemExit(0)
         log.info("Interactive Brokers: %d document(s) across all accounts", len(raw))
         n_new = 0
         # Which of several documents sharing a type, a title, a date and an
@@ -871,6 +880,8 @@ class App:
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
             stmts = site.collect_statement_periods(page)
+            info["months_read"] = stmts is not None
+            stmts = stmts or []
             kinds, by_account, samples = {}, {}, []
             for s in stmts:
                 cat, date, period, _title = site.classify_document(s)
