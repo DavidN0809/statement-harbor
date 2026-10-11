@@ -625,8 +625,8 @@ def _reaches_first_month(docs: List[RawDoc], first: str, today: _date) -> None:
     """Raise ListStopped unless the oldest month listed is the month of the
     account's first transaction, `first` (YYYY-MM-DD), or an earlier one.
     Every complete month since then has its statement, so a list that stops
-    short of that month lost the months after where it stopped, and a list
-    that read every row as changed would read as none at all."""
+    short of that month has lost every month past where it stopped, and one
+    that lists no month at all has lost them all."""
     if not first:
         raise ListStopped("Coinbase did not say when the account's first transaction was, so "
                           "the statements list cannot be checked whole")
