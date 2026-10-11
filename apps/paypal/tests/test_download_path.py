@@ -31,6 +31,9 @@ class _Store:
         self.data = data or {}
         self.written = {}
 
+    def get(self, key, default=None):
+        return self.data.get(key, default)
+
     def update(self, key, value, *a, **kw):
         self.written.setdefault(key, {}).update(value)
 

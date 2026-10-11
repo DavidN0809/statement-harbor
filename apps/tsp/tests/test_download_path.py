@@ -23,6 +23,9 @@ from paperpull_core.testkit import StrictDelivery, sample_pdf
 
 
 class _Store:
+    def get(self, *a, **kw):
+        return None
+
     def update(self, *a, **kw):
         pass
 

@@ -321,10 +321,17 @@ def written_down(holders, name: str) -> bool:
         if name in params:
             annotation = params[name].annotation
             return annotation is not None and ast.unparse(annotation) in RECORD_CLASSES
+        # A local name given such a record first, as "rec = dict(record, ...)"
+        # is, so the same record can be shown to saved_copy.holds as well.
+        aliases = {target.id for node in ast.walk(fn) if isinstance(node, ast.Assign)
+                   for target in node.targets
+                   if isinstance(target, ast.Name) and _built_from(node.value, name)}
         for node in ast.walk(fn):
             if isinstance(node, ast.Call):
                 at = RECORDERS.get(ast.unparse(node.func))
-                if at is not None and len(node.args) > at and _built_from(node.args[at], name):
+                if at is not None and len(node.args) > at and (
+                        _built_from(node.args[at], name)
+                        or any(_built_from(node.args[at], alias) for alias in aliases)):
                     return True
     return False
 

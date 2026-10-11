@@ -902,7 +902,8 @@ def test_download_attempt_carries_fixed_words_and_no_page_text(tmp_path, monkeyp
     app = _app(SimpleNamespace(url="https://card.apple.com/savings/Dana?account=123456789"), tmp_path)
     app._dl_dir = tmp_path / "dl"
     app.paths = SimpleNamespace(diagnostics=tmp_path, folder_for=lambda category: tmp_path)
-    app.progress = app.discovery = SimpleNamespace(update=lambda *a, **k: None)
+    app.progress = app.discovery = SimpleNamespace(update=lambda *a, **k: None,
+                                                   get=lambda *a, **k: None)
     app.index_csv = SimpleNamespace(append_rows=lambda rows: None)
     monkeypatch.setattr(app, "check_session", lambda page: None)
     monkeypatch.setattr(app, "write_failure", lambda *a, **k: None)
