@@ -886,7 +886,7 @@ def _record_key(row: dict):
     return ("doc", _first(row, _DATE_KEYS), (row.get("Document Title") or "").strip())
 
 
-_PART = re.compile(r"\((\d+) of (\d+)\)\.pdf$", re.IGNORECASE)
+_PART = re.compile(r"\((\d+) of (\d+)\)", re.IGNORECASE)
 
 # The " (2)" unique_path puts after a name, and after what told it apart, when
 # both are taken.
@@ -896,9 +896,25 @@ _NUMBERED = re.compile(r" \(\d+\)$")
 def _part_of(row: dict):
     """The "(1 of 3)" a file was given when its order came as several
     invoices. Only the file knows it, and dropping it would rename the
-    first of a split order as though it were the whole."""
-    m = _PART.search((row.get("PDF Filename") or "").strip())
-    return (int(m.group(1)), int(m.group(2))) if m else None
+    first of a split order as though it were the whole.
+
+    The part ends the name, or is followed only by what unique_path adds
+    when the name is taken, the row's own order number, a " (2)", or both.
+    Read only at the very end, the part of a file a download or Review
+    Names told apart was lost, "... Invoice (1 of 2) 1234.pdf" renamed to
+    "... Invoice.pdf". Anything else after it is not a part."""
+    name = (row.get("PDF Filename") or "").strip()
+    stem, ext = os.path.splitext(name)
+    found = list(_PART.finditer(stem)) if ext.lower() == ".pdf" else []
+    if not found:
+        return None
+    last = found[-1]
+    rest = _NUMBERED.sub("", stem[last.end():]).lower()
+    number = (row.get("Order or Receipt Number") or "").strip()
+    told = sanitize_component(number).strip(" .").lower() if number else ""
+    if rest and not (told and rest == " " + told):
+        return None
+    return (int(last.group(1)), int(last.group(2)))
 
 
 def _key_of_record(rec: dict):
@@ -1354,8 +1370,14 @@ def review_names(app, ask, words: ReviewWords = WORDS,
                 # name as though it were another file's, the summary it
                 # already had moved it to "... (2).pdf", and the next Rename
                 # offered to move it back.
+                # A name another order's file has is told apart by the order
+                # number, as a download and Rename tell it. Told apart by
+                # " (2)", the next Rename moved the file again, and the first
+                # invoice of a split order lost its part on the way.
                 new_path = unique_path(old_path.parent, new_name,
                                        app.config["max_path_length"],
+                                       distinguisher=(r.get("Order or Receipt Number")
+                                                      or "").strip(),
                                        ignoring=old_path.name)
                 if new_path.name != old_path.name:
                     # unique_path compares names in one case, so a folder

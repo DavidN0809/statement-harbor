@@ -31,6 +31,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and a second PayPal account on Coinbase's, and the two browsers attached
   to each other's signed-in session. The new port now moves past any port
   another app or account already uses.
+- **Review Names and Rename agree on a name another order's file already
+  has, and keep the part of a split order.** Review Names told such a file
+  apart with " (2)" where a download and Rename add the order number, so
+  the next Rename moved it again, and the first invoice of an order that
+  came as two lost its "(1 of 2)" on the way. An invoice a download had
+  told apart by its order number lost its part in both commands. Review
+  Names now adds the order number as the others do, and a part followed by
+  the order number or a " (2)" is kept.
 
 ## [0.46.0] - 2026-10-11
 
