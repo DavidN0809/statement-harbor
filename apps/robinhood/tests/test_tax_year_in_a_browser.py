@@ -317,6 +317,23 @@ def test_the_retirement_page_is_known_by_a_heading_of_its_own(show):
         assert site.names_account(page, "Crypto") is True, "the crypto page is told apart by its list"
 
 
+def test_a_title_shown_twice_is_said_and_a_hidden_twin_is_not(show):
+    """Two IRAs can each list a statement of the same month under one
+    title, and the second was dropped as the first without a word. A copy
+    of a control the page keeps hidden is not a second statement."""
+    link = statement_link("January 2022")
+    page = show("<main><h1>Retirement</h1><h2>Traditional IRA</h2>%s"
+                "<h2>Roth IRA</h2>%s</main>" % (link, link), url=RETIREMENT)
+    docs = site.collect_download_docs(page)
+    assert [d.title for d in docs] == ["January 2022 Monthly Statement"]
+    assert docs.repeated == ["January 2022 Monthly Statement"]
+    page = show("<main><h1>Retirement</h1>%s<div hidden>%s</div></main>" % (link, link),
+                url=RETIREMENT)
+    docs = site.collect_download_docs(page)
+    assert [d.title for d in docs] == ["January 2022 Monthly Statement"]
+    assert docs.repeated == []
+
+
 def test_a_download_pdf_in_a_box_of_several_forms_is_pressed_for_none(show, tmp_path):
     """A control whose own label names no form is read by its own card,
     and a box that holds another form's control is no form's card."""

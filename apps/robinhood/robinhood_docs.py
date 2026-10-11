@@ -577,6 +577,13 @@ class App:
         # first (#62). The individual page gives no account, so every key
         # and name saved before stays as it was. Anything else a statements
         # page lists is the tax page's own document and keeps that key.
+        #
+        # The retirement page gives every statement it lists the one account
+        # "Retirement", whichever IRA it is. Nothing on its rows is read for
+        # an account of its own, since nobody has yet seen what the page
+        # shows for two IRAs. Two of the same month and title would be one
+        # key, so a retirement page that shows a title twice is not read at
+        # all (cmd_discover, site.SHARED_PAGES).
         account = site.account_for(source_url) if category == doc_types.STATEMENT else ""
         if account and account.lower() not in summary.lower():
             summary = f"{account} {summary}"
@@ -709,6 +716,19 @@ class App:
                            "saved from it.")
                 continue
             docs = site.collect_download_docs(page, tax_page=(url == site.TAX_URL))
+            # Two retirement accounts can each list a statement of the same
+            # month under the same title, and the second was dropped as the
+            # first without a word. Until what such a page shows is known,
+            # it is not read, and the list is not called whole.
+            if account in site.SHARED_PAGES and getattr(docs, "repeated", None):
+                self._note(f"The {label} page lists a statement title more than once, "
+                           f"which can be two {account.lower()} accounts, a traditional "
+                           "and a Roth IRA say. This app cannot tell their statements "
+                           "apart yet, so the page was not read and nothing was saved "
+                           "from it. Please say on the Robinhood issue on GitHub how "
+                           "that page shows them.")
+                short = True
+                continue
             before = n_new
             for r in docs:
                 n_new += self._record_rawdoc(r, url)

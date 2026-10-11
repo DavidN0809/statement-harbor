@@ -604,6 +604,14 @@ def document_source_urls() -> List[Tuple[str, str]]:
     return pairs
 
 
+# The account pages that may list more than one account of their kind. A
+# person can hold a traditional and a Roth IRA, and both are on the
+# retirement page, with nothing this app reads yet to tell a statement of
+# one from the same month's of the other. Such a page that shows a title
+# twice is not read (cmd_discover).
+SHARED_PAGES = {"Retirement"}
+
+
 def account_for(source_url: str) -> str:
     """The account a statements page belongs to. "" for the individual
     investing page, and for any page that is not a statements page."""
@@ -842,6 +850,7 @@ _PAGE_JS_LIB = r"""
 _COLLECT_JS = r"""(readYears) => {""" + _PAGE_JS_LIB + r"""
   const out = [];
   const seen = new Set();
+  const shownKeys = new Set();
   for (const el of document.querySelectorAll("a[download], a, button, [role=button]")) {
     const own = ((el.innerText||'') + ' ' + (el.getAttribute('aria-label')||'')).trim();
     const hasDlAttr = el.hasAttribute('download');
@@ -874,8 +883,18 @@ _COLLECT_JS = r"""(readYears) => {""" + _PAGE_JS_LIB + r"""
       try { year = taxYearOf(el) || ''; } catch (e) { year = ''; }
     }
     const key = title.toLowerCase() + (year ? '|' + year : '');
-    if (seen.has(key)) continue;
+    // A title shown again is one document, as before. A second control of
+    // it that shows beside one that shows is passed on as a repeat, so a
+    // page that lists two accounts' statements under one title is not read
+    // as one account's. A hidden twin of a control that shows is no repeat.
+    const shown = el.getClientRects().length > 0;
+    if (seen.has(key)) {
+      if (shown && shownKeys.has(key)) out.push({title: title.slice(0, 160), is_pdf, year, repeat: true});
+      if (shown) shownKeys.add(key);
+      continue;
+    }
     seen.add(key);
+    if (shown) shownKeys.add(key);
     out.push({title: title.slice(0, 160), is_pdf, year});
   }
   return out;
@@ -904,15 +923,28 @@ def tax_year_of(title: str, year, today=None) -> str:
     return year
 
 
-def collect_download_docs(page, tax_page: bool = False) -> List[RawDoc]:
+class Listed(list):
+    """The documents a page lists, and in `repeated` each title it showed
+    on a second control beside one that shows, once."""
+
+    def __init__(self, docs=(), repeated=()):
+        super().__init__(docs)
+        self.repeated = list(repeated)
+
+
+def collect_download_docs(page, tax_page: bool = False) -> Listed:
     """Every downloadable PDF document on the current page (skips CSV-only
     items like the tax transactions export).
 
     `tax_page` is True only for the tax documents page, the one page where
     what surrounds a tax form is read for its year. A form a statements
     page lists is dated by its title alone, as it always was, because the
-    years around it there are statement years."""
+    years around it there are statement years.
+
+    A title shown twice is one document, as it always was, and is said in
+    `repeated` as well, for a page that may list two accounts."""
     docs: List[RawDoc] = []
+    repeated: List[str] = []
     try:
         items = page.evaluate(_COLLECT_JS, bool(tax_page))
     except Exception:
@@ -922,6 +954,10 @@ def collect_download_docs(page, tax_page: bool = False) -> List[RawDoc]:
             continue
         title = _html.unescape(it.get("title", "")).strip()
         if not title:
+            continue
+        if it.get("repeat"):
+            if title not in repeated:
+                repeated.append(title)
             continue
         date_text, _ = parse_period_date(title)
         # A tax form whose own title names no date is filed at the end of
@@ -937,7 +973,7 @@ def collect_download_docs(page, tax_page: bool = False) -> List[RawDoc]:
     # undated one would press the first control of that title, whatever its
     # year, and save a second copy of it as 0000-00-00.
     dated = {d.title for d in docs if d.tax_year}
-    return [d for d in docs if d.date_text or d.title not in dated]
+    return Listed([d for d in docs if d.date_text or d.title not in dated], repeated)
 
 
 _CONTROLS_SEL = "a[download], a, button, [role='button']"

@@ -203,9 +203,11 @@ class _Tab:
         return self.headings.get(self.url) if js == site._HEADINGS_JS else None
 
 
-def _run(tmp_path, monkeypatch, listings, stops=(), **tab):
+def _run(tmp_path, monkeypatch, listings, stops=(), repeated=None, **tab):
     """Discover over made-up pages. `stops` are the pages whose View More
-    stops before the end of their list."""
+    stops before the end of their list, and `repeated` the titles a page
+    shows twice."""
+    repeated = dict(repeated or {})
     app = _app(tmp_path)
     app.config.update(delay_min_seconds=0, delay_max_seconds=0)
     app.stats = {"mode": "all", "started": "", "ended": "", "discovered": 0,
@@ -217,8 +219,9 @@ def _run(tmp_path, monkeypatch, listings, stops=(), **tab):
     page = _Tab(**tab)
     app.page = lambda: page
     app.check_session = lambda page: False
-    monkeypatch.setattr(site, "collect_download_docs", lambda page, **kw: [
-        site.RawDoc(title=t, date_text=d, text=t) for t, d in listings.get(page.url, [])])
+    monkeypatch.setattr(site, "collect_download_docs", lambda page, **kw: site.Listed(
+        [site.RawDoc(title=t, date_text=d, text=t) for t, d in listings.get(page.url, [])],
+        repeated.get(page.url, [])))
     monkeypatch.setattr(site, "expand_all", lambda page: page.url not in stops)
     monkeypatch.setattr(site, "scroll_full_page", lambda page, **kw: None)
     app.cmd_discover(quiet=True)
@@ -288,6 +291,24 @@ def test_a_retirement_page_that_names_its_account_is_read(tmp_path, monkeypatch)
     assert by_page[RETIREMENT].account == "Retirement"
     assert by_page[RETIREMENT].summary == "Retirement Monthly Statement"
     assert app.stats["crypto_refused"] == 0
+
+
+def test_a_retirement_page_that_shows_a_title_twice_is_not_read(tmp_path, monkeypatch):
+    """Two IRAs can each list a statement of the same month under one
+    title, and the second was dropped as the first without a word."""
+    same = [(TITLE, "2022-01-31")]
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: same, RETIREMENT: same},
+               repeated={RETIREMENT: [TITLE]}, headings={RETIREMENT: ["Retirement"]})
+    assert [d.account for d in _docs(app).values()] == [""], "one IRA's statements were kept"
+    assert any("lists a statement title more than once" in n for n in app.stats["notes"])
+    assert listing.last(app) == listing.STOPPED
+
+
+def test_another_page_that_shows_a_title_twice_is_read_as_before(tmp_path, monkeypatch):
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2022-01-31")]},
+               repeated={INDIVIDUAL: [TITLE]})
+    assert [d.account for d in _docs(app).values()] == [""]
+    assert listing.last(app) == listing.COMPLETE
 
 
 # -- a list cut short is never called whole -------------------------------------
