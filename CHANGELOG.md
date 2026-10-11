@@ -59,6 +59,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Walmart places such an online order by its order page, all as Run All
   does. A scoped Resume with nothing to do now says everything in scope is
   complete, not every purchase.
+- **PaperPull Server's Status tab, both spreadsheets and the sample work.**
+  The server image carried only one of the scripts the panel runs from its
+  tools folder, so the Status tab said status.py was not found, neither
+  spreadsheet would build and "see the sample" failed. The image now
+  carries all of them, and a test fails when the panel names a script the
+  image leaves out.
+- **PaperPull Server no longer looks in the data folder for the panel's own
+  scripts.** With its own copy missing, the panel went on to look for the
+  Status tab's and the spreadsheets' scripts in the data folder, which is
+  often a shared folder other people can write to, and ran what it found
+  there inside the container. On the server it now looks only beside the
+  panel. The desktop still looks beside the installs too, where older
+  layouts kept them.
 
 ## [0.46.0] - 2026-10-11
 

@@ -83,6 +83,11 @@ COPY core /opt/paperpull/core
 # environment of their own (gui/app.py, _is_packaged).
 COPY apps /opt/paperpull/templates/apps
 COPY gui /opt/paperpull/gui
+# The scripts the panel runs from tools/ beside its own folder, for the
+# Status tab, both spreadsheets and the sample. The panel never takes them
+# from the data folder here, which anybody who may write to the share can fill.
+COPY tools/status.py tools/export_purchases.py tools/export_transactions.py \
+     tools/make_sample.py /opt/paperpull/tools/
 COPY tools/add_account.py /opt/paperpull/tools/add_account.py
 COPY packaging/paperpull.ico /opt/paperpull/packaging/paperpull.ico
 COPY server/entrypoint.sh server/chrome.sh server/start.sh server/selftest.py \

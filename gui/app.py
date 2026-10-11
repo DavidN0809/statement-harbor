@@ -712,6 +712,29 @@ def api_apps():
             "apps": apps, "refreshed": refreshed}
 
 
+# -- the panel's tools ---------------------------------------------------------
+#
+# The Status tab, both spreadsheets, the sample and Add a person each run a
+# script from tools/, loaded by its path. In a checkout, in the desktop
+# package and in the server image it sits in tools/ beside the panel's own
+# folder (server/build.py and server/Dockerfile carry every one the panel
+# names, and gui/tests/test_every_panel_tool_reaches_the_server.py fails on
+# one they leave out). Older desktop layouts kept some of them beside the
+# installs instead, and the desktop still looks there for those.
+#
+# PaperPull Server never does. There the apps root is the shared folder,
+# which anybody who may write to the share can fill, and a script found
+# there would run inside the container that holds every signed-in browser
+# profile.
+
+def _tool_places(name: str) -> tuple:
+    """Where tools/<name> may be, in the order looked."""
+    own = HERE.parent / "tools" / name
+    if server_mode.enabled():
+        return (own,)
+    return (own, apps_root() / name, apps_root().parent / name, HERE.parent / name)
+
+
 # -- how current each archive is ---------------------------------------------
 
 def _status_module():
@@ -727,10 +750,7 @@ def _status_module():
     if _STATUS_MOD is not None:
         return _STATUS_MOD or None
     import importlib.util
-    for cand in (HERE.parent / "tools" / "status.py",
-                 apps_root() / "status.py",
-                 apps_root().parent / "status.py",
-                 HERE.parent / "status.py"):
+    for cand in _tool_places("status.py"):
         try:
             if not cand.is_file():
                 continue
@@ -751,10 +771,7 @@ def _export_module():
     if _EXPORT_MOD is not None:
         return _EXPORT_MOD or None
     import importlib.util
-    for cand in (HERE.parent / "tools" / "export_purchases.py",
-                 apps_root() / "export_purchases.py",
-                 apps_root().parent / "export_purchases.py",
-                 HERE.parent / "export_purchases.py"):
+    for cand in _tool_places("export_purchases.py"):
         try:
             if not cand.is_file():
                 continue
@@ -823,10 +840,7 @@ def _transactions_tool() -> Optional[Path]:
     """tools/export_transactions.py, wherever this deployment keeps it. It
     runs as a subprocess rather than in-process, because reading hundreds
     of PDFs takes minutes and the page wants to watch it happen."""
-    for cand in (HERE.parent / "tools" / "export_transactions.py",
-                 apps_root() / "export_transactions.py",
-                 apps_root().parent / "export_transactions.py",
-                 HERE.parent / "export_transactions.py"):
+    for cand in _tool_places("export_transactions.py"):
         if cand.is_file():
             return cand
     return None
@@ -1586,9 +1600,7 @@ def _account_module():
     if _ACCOUNT_MOD is not None:
         return _ACCOUNT_MOD or None
     import importlib.util
-    for cand in (HERE.parent / "tools" / "add_account.py",
-                 apps_root() / "add_account.py",
-                 apps_root().parent / "add_account.py"):
+    for cand in _tool_places("add_account.py"):
         try:
             if not cand.is_file():
                 continue

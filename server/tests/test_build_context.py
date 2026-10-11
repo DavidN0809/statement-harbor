@@ -30,6 +30,11 @@ import build  # noqa: E402
     "apps/walmart/category_rules.json",
     "packaging/paperpull.ico",
     "server/Dockerfile", "server/entrypoint.sh", "server/chrome.sh",
+    "tools/add_account.py",                     # Add a person
+    "tools/status.py",                          # the Status tab
+    "tools/export_purchases.py",                # the purchases spreadsheet
+    "tools/export_transactions.py",             # the transactions workbook
+    "tools/make_sample.py",                     # the sample archive
 ])
 def test_what_the_image_needs_is_chosen(path):
     assert build.selected([path]) == [path]
@@ -43,6 +48,8 @@ def test_what_the_image_needs_is_chosen(path):
     "apps/walmart/setup.command",
     "docs/panel.png",                           # not a place the image needs
     "tools/run_all_tests.py",
+    "tools/worktree.py",
+    "tools/release.sh",
     ".github/workflows/tests.yml",
     "packaging/build_windows.py",
     "apps/walmart/In-Store/2026-01-01 Walmart Receipt.pdf",    # never tracked, still refused
@@ -52,6 +59,18 @@ def test_what_the_image_needs_is_chosen(path):
 ])
 def test_what_it_does_not_need_is_left_out(path):
     assert build.selected([path]) == []
+
+
+def test_tools_are_named_one_script_at_a_time():
+    """tools/ also holds the release and test machinery, which no image
+    needs, so the image takes only the scripts the panel runs, each one a
+    file git tracks. gui/tests/test_every_panel_tool_reaches_the_server.py
+    holds the list to the scripts the panel names."""
+    named = [a for a in build.ALLOWED if a.startswith("tools")]
+    assert named and "tools/" not in named
+    tracked = set(build.tracked(REPO))
+    for path in named:
+        assert path in tracked, path
 
 
 # -- the folder Docker is handed -----------------------------------------------------
