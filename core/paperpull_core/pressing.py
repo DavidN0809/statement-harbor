@@ -53,6 +53,20 @@ by the box Playwright reports for its locator. Both have to agree on
 exactly one element, so the element read is the element Playwright
 presses.
 
+A control inside a frame is read the same way in a world of this module's
+own inside that frame, by the box Playwright reports carried into the
+frame's own coordinates. Then the frame has to be the thing on top in the
+document around it at the point to be pressed, and that document's frame
+in its own, up to the page's main frame, as Playwright checks a frame
+before its own press. Anything on top of a frame covers the control inside
+it. Right after the press, unless the control heard the browser's own click
+at the point pressed, anything on top of a frame there stops the run, since
+Playwright watches for its press only in the control's own document. A
+frame that cannot be placed on the page, or one drawn at another size than
+its own window, stops the run unread. In a frame drawn by a process of its
+own, or a frame inside one, the point read is the one Playwright's press
+lands on, which is off the middle by the frame's border and padding.
+
 What covered a control is said only through the word list in
 paperpull_core.words, never as the page wrote it.
 
@@ -197,12 +211,17 @@ def stop_run(app, stop: Stop) -> None:
 # What sits on top of a control
 # ---------------------------------------------------------------------------
 
-# Runs in this module's own world. Returns a state, "inside", "label",
-# "covered" or "unread", and nothing from the page but what describes a
-# covering element, which is shaped before anything else sees it.
-LOOK_JS = r"""(args) => {
-  const FRAMES = new Set(['iframe', 'frame', 'object', 'embed']);
-  const near = (a, b) => Math.abs(a - b) <= 1;
+# What both reads of what sits on top of something share, the read of a
+# control and the read of the frame it is in.
+#
+# topAt is the topmost element at a point, read root by root through the
+# shadow roots around `target` the way Playwright reads it before a press
+# (expectHitTarget). chainOf is every element from that one up to `target`,
+# and whether `target` was reached, so the point is on it or inside it.
+# coverOf says what covers `target`, the topmost element and the widget it
+# belongs to, the outermost element over the point that is not around
+# `target`.
+_ON_TOP_JS = r"""const FRAMES = new Set(['iframe', 'frame', 'object', 'embed']);
   const parentOrHost = (e) => e.parentElement ||
     (e.parentNode && e.parentNode.nodeType === 11 ? e.parentNode.host : null);
   const rootOf = (e) => {
@@ -210,6 +229,65 @@ LOOK_JS = r"""(args) => {
     while (n.parentNode) n = n.parentNode;
     return (n.nodeType === 11 || n.nodeType === 9) ? n : null;
   };
+  const topAt = (target, point) => {
+    const roots = [];
+    for (let p = target; p;) {
+      const root = rootOf(p);
+      if (!root) break;
+      roots.push(root);
+      if (root.nodeType === 9) break;
+      p = root.host;
+    }
+    let hit = null;
+    for (let i = roots.length - 1; i >= 0; i--) {
+      const root = roots[i];
+      const all = root.elementsFromPoint(point.x, point.y);
+      const single = root.elementFromPoint(point.x, point.y);
+      if (single && all[0] && parentOrHost(single) === all[0]) {
+        const st = getComputedStyle(single);
+        if (st && st.display === 'contents') all.unshift(single);
+      }
+      if (all[0] && all[0].shadowRoot === root && all[1] === single) all.shift();
+      const inner = all[0];
+      if (!inner) break;
+      hit = inner;
+      if (i && inner !== roots[i - 1].host) break;
+    }
+    return hit;
+  };
+  const chainOf = (hit, target) => {
+    const chain = [];
+    let h = hit;
+    while (h && h !== target) { chain.push(h); h = h.assignedSlot || parentOrHost(h); }
+    return {chain: chain, reached: h === target};
+  };
+  const describe = (e) => ({
+    tag: e.localName || '',
+    role: e.getAttribute('role') || '',
+    label: (e.getAttribute('aria-label') || e.getAttribute('title') || e.getAttribute('alt') ||
+            (e.innerText || e.textContent || '')).trim().slice(0, 80),
+  });
+  const coverOf = (target, chain) => {
+    let widget = chain[0];
+    for (let t = target; t; t = parentOrHost(t)) {
+      const k = chain.indexOf(t);
+      if (k !== -1) { widget = chain[Math.max(k - 1, 0)]; break; }
+    }
+    const upto = chain.indexOf(widget);
+    const pinned = chain.slice(0, upto + 1).some((e) => {
+      const st = getComputedStyle(e);
+      return !!st && (st.position === 'fixed' || st.position === 'sticky');
+    });
+    return {state: 'covered', top: describe(chain[0]), widget: describe(widget),
+            pinned: pinned, same: widget === chain[0]};
+  };"""
+
+# Runs in this module's own world. Returns a state, "inside", "label",
+# "covered" or "unread", and nothing from the page but what describes a
+# covering element, which is shaped before anything else sees it.
+LOOK_JS = r"""(args) => {
+  %s
+  const near = (a, b) => Math.abs(a - b) <= 1;
 
   // The control, by the caller's selector, through every open shadow root,
   // and by the box Playwright reported for its locator.
@@ -256,33 +334,22 @@ LOOK_JS = r"""(args) => {
   // it before a press (expectHitTarget).
   const target = (el.matches('input, textarea, select') || el.isContentEditable) ? el
     : (el.closest('button, [role=button], a, [role=link]') || el);
-  const roots = [];
-  for (let p = target; p;) {
-    const root = rootOf(p);
-    if (!root) break;
-    roots.push(root);
-    if (root.nodeType === 9) break;
-    p = root.host;
+
+  // In a frame drawn by a process of its own, or a frame inside one,
+  // Playwright carries its point across from where that frame's element
+  // begins, its border included, rather than from its window, so its press
+  // lands args.shift away from the middle. That is the point read, and it
+  // has to fall on the control.
+  if (args.shift) {
+    point = {x: point.x + args.shift.x, y: point.y + args.shift.y};
+    where.point = point;
+    const on = [...target.getClientRects()].some((r) =>
+      point.x >= r.left && point.x <= r.right && point.y >= r.top && point.y <= r.bottom);
+    if (!on) return Object.assign({state: 'unread', why: 'off the control'}, where);
   }
-  let hit = null;
-  for (let i = roots.length - 1; i >= 0; i--) {
-    const root = roots[i];
-    const all = root.elementsFromPoint(point.x, point.y);
-    const single = root.elementFromPoint(point.x, point.y);
-    if (single && all[0] && parentOrHost(single) === all[0]) {
-      const st = getComputedStyle(single);
-      if (st && st.display === 'contents') all.unshift(single);
-    }
-    if (all[0] && all[0].shadowRoot === root && all[1] === single) all.shift();
-    const inner = all[0];
-    if (!inner) break;
-    hit = inner;
-    if (i && inner !== roots[i - 1].host) break;
-  }
+  const hit = topAt(target, point);
   if (!hit) return Object.assign({state: 'unread', why: 'nothing at the point'}, where);
-  const chain = [];
-  let h = hit;
-  while (h && h !== target) { chain.push(h); h = h.assignedSlot || parentOrHost(h); }
+  const {chain, reached} = chainOf(hit, target);
 
   // Every frame at the point before the press, on top or under it, and the
   // control itself, kept in this world for the read after the press
@@ -301,8 +368,31 @@ LOOK_JS = r"""(args) => {
     };
     walk(document);
     globalThis.__paperpullBefore = {x: point.x, y: point.y, frames: frames, control: target};
+    // For a control in a frame, an ear in this world at the frame's window,
+    // ahead of the page's own listeners, for a click the browser itself sends
+    // at the point to be pressed, along a path through the control or a label
+    // of its own (HEARD_JS). A click anywhere else, the person's say, is not
+    // the press. It takes itself away once args.ear milliseconds have passed,
+    // or when a control is listened for again.
+    if (args.ear) {
+      if (typeof globalThis.__paperpullDeaf === 'function') globalThis.__paperpullDeaf();
+      globalThis.__paperpullHeard = false;
+      const own = new Set([target, ...(target.labels || [])]);
+      const at = {x: point.x, y: point.y};
+      const ear = (e) => {
+        if (!e.isTrusted) return;
+        if (Math.abs(e.clientX - at.x) > 2 || Math.abs(e.clientY - at.y) > 2) return;
+        let path = [];
+        try { path = e.composedPath(); } catch (x) {}
+        if (path.some((n) => own.has(n))) globalThis.__paperpullHeard = true;
+      };
+      addEventListener('click', ear, true);
+      const deaf = () => removeEventListener('click', ear, true);
+      globalThis.__paperpullDeaf = deaf;
+      setTimeout(deaf, args.ear);
+    }
   };
-  if (h === target) { remember(); return Object.assign({state: 'inside'}, where); }
+  if (reached) { remember(); return Object.assign({state: 'inside'}, where); }
 
   // A form control under its own label is pressed through the label.
   if (args.labels && target.labels) {
@@ -314,27 +404,9 @@ LOOK_JS = r"""(args) => {
     }
   }
 
-  // Covered. What is on top, and the widget it belongs to, the outermost
-  // element over the point that is not around the control.
-  let widget = chain[0];
-  for (let t = target; t; t = parentOrHost(t)) {
-    const k = chain.indexOf(t);
-    if (k !== -1) { widget = chain[Math.max(k - 1, 0)]; break; }
-  }
-  const upto = chain.indexOf(widget);
-  const pinned = chain.slice(0, upto + 1).some((e) => {
-    const st = getComputedStyle(e);
-    return !!st && (st.position === 'fixed' || st.position === 'sticky');
-  });
-  const describe = (e) => ({
-    tag: e.localName || '',
-    role: e.getAttribute('role') || '',
-    label: (e.getAttribute('aria-label') || e.getAttribute('title') || e.getAttribute('alt') ||
-            (e.innerText || e.textContent || '')).trim().slice(0, 80),
-  });
-  return Object.assign({state: 'covered', top: describe(chain[0]), widget: describe(widget),
-                        pinned: pinned, same: widget === chain[0]}, where);
-}"""
+  // Covered. What is on top, and the widget it belongs to.
+  return Object.assign(coverOf(target, chain), where);
+}""" % _ON_TOP_JS
 
 # Runs in this module's own world right after a press, at the point LOOK_JS
 # found, without scrolling. Playwright's own check at the press cannot see
@@ -383,6 +455,124 @@ AFTER_JS = r"""(args) => {
   return {state: 'covered', top: about, widget: about, pinned: pinned, same: true};
 }"""
 
+# Runs in this module's own world in the document that holds a frame, with
+# the frame's own element there (`owner`, the iframe say) and the point
+# being pressed in that document's own coordinates. The frame has to be the
+# topmost element at the point, as Playwright checks it before a press
+# (_checkFrameIsHitTarget), or what is on top covers the control inside it.
+# The elements at the point and the frame's element are kept in this world
+# for the read after the press (FRAME_AFTER_JS).
+FRAME_JS = r"""(owner, args) => {
+  %s
+  const p = args.point;
+  if (!owner || !owner.isConnected) return {state: 'unread', why: 'none'};
+  const hit = topAt(owner, p);
+  if (!hit) return {state: 'unread', why: 'nothing at the point'};
+  const {chain, reached} = chainOf(hit, owner);
+  if (!reached) return coverOf(owner, chain);
+  const all = new Set(), roots = new Set();
+  const walk = (root) => {
+    if (roots.has(root)) return;
+    roots.add(root);
+    for (const e of root.elementsFromPoint(p.x, p.y)) {
+      all.add(e);
+      if (e.shadowRoot) walk(e.shadowRoot);
+    }
+  };
+  walk(document);
+  globalThis.__paperpullFrameBefore = {x: p.x, y: p.y, all: all, owner: owner};
+  return {state: 'inside'};
+}""" % _ON_TOP_JS
+
+# The size of a frame's own window, read in its own world.
+WINDOW_JS = r"""() => ({width: innerWidth, height: innerHeight})"""
+
+# Whether the control LOOK_JS last read in this world heard a click the
+# browser itself sent, read in the control's own frame after the press.
+HEARD_JS = r"""() => ({heard: globalThis.__paperpullHeard === true})"""
+
+# How long the ear of a control in a frame listens, longer than any press.
+EAR_MS = 60000
+
+# Runs in this module's own world in a document that holds the control's
+# frame, right after a press the control did not hear (HEARD_JS), at the
+# point FRAME_JS read, without scrolling. Playwright watches for the press
+# only in the control's own document, and it takes a press that never came
+# there for one that went through, so anything on top of the frame here can
+# have taken it. So
+# whatever is on top at the point stops the run unless it is the frame's
+# own element, or it was at the point before the press and the frame has
+# left the point since.
+FRAME_AFTER_JS = r"""(owner, args) => {
+  %s
+  const p = args.point;
+  let top = document.elementFromPoint(p.x, p.y);
+  while (top && top.shadowRoot) {
+    const inner = top.shadowRoot.elementFromPoint(p.x, p.y);
+    if (!inner || inner === top) break;
+    top = inner;
+  }
+  if (!top || top === owner) return {state: 'clear'};
+  const before = globalThis.__paperpullFrameBefore;
+  const stillThere = () => {
+    const roots = new Set();
+    const walk = (root) => {
+      if (roots.has(root)) return false;
+      roots.add(root);
+      for (const e of root.elementsFromPoint(p.x, p.y)) {
+        if (e === owner) return true;
+        if (e.shadowRoot && walk(e.shadowRoot)) return true;
+      }
+      return false;
+    };
+    return walk(document);
+  };
+  if (before && before.x === p.x && before.y === p.y && before.owner === owner
+      && before.all.has(top) && !stillThere())
+    return {state: 'clear'};
+  return coverOf(owner, chainOf(top, owner).chain);
+}""" % _ON_TOP_JS
+
+
+def _in_world(session, frame_id: str, js: str, args: dict, element=None) -> Optional[dict]:
+    """What `js` answers, run in this module's own world in the frame
+    `frame_id` that `session` reaches, or None when it could not be asked.
+    With `element`, the backend node id of an element of that frame, `js`
+    is handed the element first and `args` second."""
+    from .failure import error_kind
+    found = None
+    try:
+        world = session.send("Page.createIsolatedWorld",
+                             {"frameId": frame_id, "worldName": WORLD})
+        if element is None:
+            answer = session.send("Runtime.evaluate", {
+                "expression": "(%s)(%s)" % (js, json.dumps(args)),
+                "contextId": world["executionContextId"],
+                "returnByValue": True})
+        else:
+            found = session.send("DOM.resolveNode", {
+                "backendNodeId": element,
+                "executionContextId": world["executionContextId"]})["object"]["objectId"]
+            answer = session.send("Runtime.callFunctionOn", {
+                "functionDeclaration": js,
+                "objectId": found,
+                "arguments": [{"objectId": found}, {"value": args}],
+                "returnByValue": True})
+    except Exception as e:
+        log.info("the page could not be asked what covers a control (%s)", error_kind(e))
+        return None
+    finally:
+        if found is not None:
+            try:
+                session.send("Runtime.releaseObject", {"objectId": found})
+            except Exception:
+                pass
+    if not isinstance(answer, dict) or answer.get("exceptionDetails"):
+        log.info("the page could not be asked what covers a control (it raised)")
+        return None
+    value = (answer.get("result") or {}).get("value")
+    return value if isinstance(value, dict) else None
+
 
 def _in_own_world(page, js: str, args: dict) -> Optional[dict]:
     """What `js` answers, run in this module's own world in the page's main
@@ -392,25 +582,341 @@ def _in_own_world(page, js: str, args: dict) -> Optional[dict]:
     try:
         session = page.context.new_cdp_session(page)
         frame = session.send("Page.getFrameTree")["frameTree"]["frame"]["id"]
-        world = session.send("Page.createIsolatedWorld", {"frameId": frame, "worldName": WORLD})
-        answer = session.send("Runtime.evaluate", {
-            "expression": "(%s)(%s)" % (js, json.dumps(args)),
-            "contextId": world["executionContextId"],
-            "returnByValue": True})
     except Exception as e:
         log.info("the page could not be asked what covers a control (%s)", error_kind(e))
+        _detach([session])
         return None
+    try:
+        return _in_world(session, frame, js, args)
     finally:
+        _detach([session])
+
+
+def _detach(sessions) -> None:
+    for session in sessions:
         if session is not None:
             try:
                 session.detach()
             except Exception:
                 pass
-    if not isinstance(answer, dict) or answer.get("exceptionDetails"):
-        log.info("the page could not be asked what covers a control (it raised)")
+
+
+# ---------------------------------------------------------------------------
+# A control inside a frame
+# ---------------------------------------------------------------------------
+
+class _Level:
+    """One frame on the way from a page's main frame down to a control's
+    frame. `session` is the DevTools session that reaches it and `node` its
+    entry in that session's frame tree. `owner` is the backend node id of
+    its element in its parent, None for the main frame, and `own` is true
+    for a frame drawn by a process of its own, which has a session of its
+    own.
+
+    Each session places what it draws from the top left of the window of
+    the frame it began at, its root. `origin` is where this frame's window
+    begins on the page's window, and `pw` where Playwright takes it to
+    begin when it reports a box, which for a frame of its own is where the
+    frame's element begins, its border included (crPage _framePosition).
+    `root_origin` and `root_pw` are the same for the root of this frame's
+    session, and `size` is the size its parent draws its window at."""
+
+    def __init__(self, frame, session, node, owner=None, own=False):
+        self.frame = frame
+        self.session = session
+        self.node = node
+        self.owner = owner
+        self.own = own
+        self.origin = self.pw = self.root_origin = self.root_pw = (0.0, 0.0)
+        self.size = None
+
+    @property
+    def id(self) -> str:
+        return self.node["frame"]["id"]
+
+
+def _address(frame_entry: dict) -> str:
+    """A frame's address as Playwright says it, its fragment included."""
+    return str(frame_entry.get("url") or "") + str(frame_entry.get("urlFragment") or "")
+
+
+def _same_box(a, b: dict) -> bool:
+    """Whether (x, y, width, height) and a box Playwright reports agree to
+    a pixel."""
+    try:
+        return all(abs(float(u) - float(v)) <= 1 for u, v in zip(
+            a, (b["x"], b["y"], b["width"], b["height"])))
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _child_of(parent, child) -> Optional[dict]:
+    """Which of the frames `parent`'s process draws inside it `child` is,
+    as its entry in the frame tree. The one whose element sits where
+    Playwright says the child's element does, and when several do, the one
+    of those with the child's address and name. None unless that is
+    exactly one. Where the element sits is what tells it, since a frame's
+    own script can rename it, and a frame its parent wrote into keeps an
+    address in Playwright that the frame tree no longer gives."""
+    try:
+        element = child.frame_element()
+    except Exception:
         return None
-    value = (answer.get("result") or {}).get("value")
-    return value if isinstance(value, dict) else None
+    try:
+        box = element.bounding_box()
+    except Exception:
+        box = None
+    finally:
+        try:
+            element.dispose()
+        except Exception:
+            pass
+    if not box:
+        return None
+    px, py = parent.root_pw
+    found = []
+    for node in parent.node.get("childFrames") or []:
+        try:
+            owner = parent.session.send("DOM.getFrameOwner", {"frameId": node["frame"]["id"]})
+            model = parent.session.send("DOM.getBoxModel",
+                                        {"backendNodeId": owner["backendNodeId"]})["model"]
+        except Exception:
+            continue
+        border = _rectangle(model.get("border"))
+        if border is not None and _same_box(
+                (border[0] + px, border[1] + py, border[2], border[3]), box):
+            found.append(node)
+    if len(found) > 1:
+        found = [n for n in found if _address(n["frame"]) == child.url
+                 and str(n["frame"].get("name") or "") == (child.name or "")]
+    return found[0] if len(found) == 1 else None
+
+
+def _levels(page, frame, opened: list) -> Optional[list]:
+    """Every frame from the page's main frame down to `frame`, as _Level,
+    or None when any of them could not be told. A frame its parent's
+    process draws is found among its parent's children by where its
+    element sits (_child_of). Every session opened is put in `opened`, for
+    the caller to detach."""
+    chain = []
+    f = frame
+    try:
+        while f is not None:
+            chain.append(f)
+            f = f.parent_frame
+    except Exception:
+        return None
+    chain.reverse()
+    if chain[0] != page.main_frame:
+        return None
+    session = page.context.new_cdp_session(page)
+    opened.append(session)
+    levels = [_Level(chain[0], session, session.send("Page.getFrameTree")["frameTree"])]
+    for child in chain[1:]:
+        parent = levels[-1]
+        try:
+            own = page.context.new_cdp_session(child)
+        except Exception:
+            # Playwright has a session only for a frame drawn by a process
+            # of its own, and says so for any other.
+            own = None
+        if own is not None:
+            opened.append(own)
+            node = own.send("Page.getFrameTree")["frameTree"]
+        else:
+            # Where every frame so far sits, for where its children do.
+            if not _place(levels):
+                return None
+            node = _child_of(parent, child)
+            if node is None:
+                return None
+        owner = parent.session.send("DOM.getFrameOwner", {"frameId": node["frame"]["id"]})
+        levels.append(_Level(child, own or parent.session, node, owner["backendNodeId"],
+                             own is not None))
+    return levels
+
+
+def _rectangle(quad) -> Optional[tuple]:
+    """A box the DevTools protocol gives as four corners, as (x, y, width,
+    height), or None when it is not drawn square to the window, a frame
+    turned or skewed, whose points cannot be carried across."""
+    if not isinstance(quad, list) or len(quad) != 8:
+        return None
+    x1, y1, x2, y2, x3, y3, x4, y4 = (float(v) for v in quad)
+    flat = (abs(y1 - y2) < 0.01 and abs(y3 - y4) < 0.01
+            and abs(x1 - x4) < 0.01 and abs(x2 - x3) < 0.01)
+    return (x1, y1, x2 - x1, y4 - y1) if flat and x2 > x1 and y4 > y1 else None
+
+
+def _place(levels) -> bool:
+    """Where each frame's window begins on the page's window, read now, the
+    page's scrolling included. False when a frame's element could not be
+    read or is not drawn square to the window."""
+    for parent, level in zip(levels, levels[1:]):
+        try:
+            model = parent.session.send("DOM.getBoxModel", {"backendNodeId": level.owner})["model"]
+        except Exception:
+            return False
+        content, border = _rectangle(model.get("content")), _rectangle(model.get("border"))
+        if content is None or border is None:
+            return False
+        ox, oy = parent.root_origin
+        px, py = parent.root_pw
+        level.origin = (ox + content[0], oy + content[1])
+        level.size = (content[2], content[3])
+        if level.own:
+            level.pw = (px + border[0], py + border[1])
+            level.root_origin, level.root_pw = level.origin, level.pw
+        else:
+            level.pw = (px + content[0], py + content[1])
+            level.root_origin, level.root_pw = parent.root_origin, parent.root_pw
+    return True
+
+
+def _drawn_as(level) -> bool:
+    """Whether a frame's window is the size its parent draws it at, so
+    that a point carries across between them. A frame scaled by its parent
+    is not."""
+    window = _in_world(level.session, level.id, WINDOW_JS, {})
+    if level.size is None or not isinstance(window, dict):
+        return False
+    try:
+        return (abs(float(window["width"]) - level.size[0]) <= 1
+                and abs(float(window["height"]) - level.size[1]) <= 1)
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _look_in_frame(page, locator, css: str, labels: bool, frame) -> dict:
+    """look() for a control inside a frame. The control is read in the
+    frame's own world as look reads one in the page's main frame, by the
+    caller's selector and Playwright's box for it, which is carried into
+    the frame's own coordinates, then brought to the middle of the window,
+    which scrolls the frames around it too. Then each frame on the way up
+    has to be the thing on top in its parent at the point that will be
+    pressed, read in its parent's own world. What covers a frame covers
+    the control. The points read in each parent go back with the answer as
+    "frame_points", for after().
+
+    The point is where Playwright's press will land. In a frame drawn by a
+    process of its own, or a frame inside one, Playwright carries its point
+    across from where that frame's element begins rather than its window,
+    so the press lands off the middle by the frame's border and padding,
+    and that point is the one read, in the frame and in each frame around
+    it. An ear for the press is set on the control, and the ids of the
+    frames found go back as "frame_ids", both for after()."""
+    opened: list = []
+    try:
+        try:
+            levels = _levels(page, frame, opened)
+        except Exception:
+            levels = None
+        if not levels or not _place(levels):
+            return {"state": "unread", "why": "frame"}
+        if not all(_drawn_as(level) for level in levels[1:]):
+            return {"state": "unread", "why": "frame drawn at another size"}
+        mine = levels[-1]
+        seen = {"state": "unread", "why": "no box"}
+        for _ in range(3):
+            box = _box(locator)
+            if not box:
+                return {"state": "unread", "why": "no box"}
+            if not _place(levels):
+                return {"state": "unread", "why": "frame"}
+            inside = {"x": box["x"] - mine.pw[0], "y": box["y"] - mine.pw[1],
+                      "width": box["width"], "height": box["height"]}
+            args = {"css": css, "box": inside, "labels": bool(labels), "ear": EAR_MS}
+            shift = (mine.pw[0] - mine.origin[0], mine.pw[1] - mine.origin[1])
+            if shift != (0, 0):
+                args["shift"] = {"x": shift[0], "y": shift[1]}
+            seen = _in_world(mine.session, mine.id, LOOK_JS, args)
+            if seen is None:
+                return {"state": "unread", "why": "not read"}
+            if seen.get("state") != "unread" or seen.get("why") not in ("none", "several"):
+                break
+        if seen.get("state") not in ("inside", "label"):
+            return seen
+        # Where the frame is once the control was brought to the middle.
+        if not _place(levels):
+            return {"state": "unread", "why": "frame"}
+        point = seen.get("point") or {}
+        try:
+            x, y = float(point["x"]) + mine.origin[0], float(point["y"]) + mine.origin[1]
+        except (KeyError, TypeError, ValueError):
+            return {"state": "unread", "why": "not read"}
+        points = []
+        for parent, child in reversed(list(zip(levels, levels[1:]))):
+            at = {"x": x - parent.origin[0], "y": y - parent.origin[1]}
+            on = _in_world(parent.session, parent.id, FRAME_JS, {"point": at},
+                           element=child.owner)
+            if on is None:
+                return {"state": "unread", "why": "not read"}
+            if on.get("state") != "inside":
+                return dict(on, over_the_frame=True)
+            points.append(at)
+        return dict(seen, frame_points=points,
+                    frame_ids=[[level.id, level.owner, level.own] for level in levels])
+    finally:
+        _detach(opened)
+
+
+def _levels_again(page, frame, ids, opened: list) -> Optional[list]:
+    """The frames _look_in_frame found, from the page's main frame down to
+    `frame`, reached again by the ids it kept ("frame_ids"), so that a
+    frame hidden or turned since the look is still read where it was. None
+    when the frames on the way are no longer the ones the look found."""
+    chain = []
+    f = frame
+    while f is not None:
+        chain.append(f)
+        f = f.parent_frame
+    chain.reverse()
+    if not isinstance(ids, list) or len(ids) != len(chain) or chain[0] != page.main_frame:
+        return None
+    levels = []
+    for f, (frame_id, owner, own) in zip(chain, ids):
+        if not levels or own:
+            session = page.context.new_cdp_session(f if levels else page)
+            opened.append(session)
+        else:
+            session = levels[-1].session
+        levels.append(_Level(f, session, {"frame": {"id": frame_id}}, owner, own))
+    return levels
+
+
+def _after_in_frame(page, seen: dict, frame) -> Optional[dict]:
+    """after() for a control inside a frame. When the control heard the
+    browser's own click at the point pressed, the press was the control's,
+    and nothing that came over it afterwards, a loading cover say, took it.
+    Otherwise what the point now shows in the control's own frame is read
+    as for one in the page's main frame, and then in each frame around it,
+    where anything on top of the frame stops the run. The frames are those
+    the look found, by their ids, wherever they are drawn now. A cover as
+    AFTER_JS or FRAME_AFTER_JS says it, or None."""
+    opened: list = []
+    try:
+        try:
+            levels = _levels_again(page, frame, seen.get("frame_ids"), opened)
+        except Exception:
+            levels = None
+        if not levels:
+            return None
+        mine = levels[-1]
+        heard = _in_world(mine.session, mine.id, HEARD_JS, {})
+        if heard and heard.get("heard") is True:
+            return None
+        now = _in_world(mine.session, mine.id, AFTER_JS, {"point": seen.get("point")})
+        if now and now.get("state") == "covered":
+            return now
+        ups = list(reversed(list(zip(levels, levels[1:]))))
+        for (parent, child), at in zip(ups, seen.get("frame_points") or []):
+            now = _in_world(parent.session, parent.id, FRAME_AFTER_JS, {"point": at},
+                            element=child.owner)
+            if now and now.get("state") == "covered":
+                return dict(now, over_the_frame=True)
+        return None
+    finally:
+        _detach(opened)
 
 
 def _box(locator) -> Optional[dict]:
@@ -429,7 +935,7 @@ def _box(locator) -> Optional[dict]:
         return None
 
 
-def look(page, locator, css: str, labels: bool = False) -> dict:
+def look(page, locator, css: str, labels: bool = False, frame=None) -> dict:
     """What sits on top of the control once it is in the middle of the
     window, as a dict whose "state" is "inside", "label", "covered" or
     "unread". Raw words from the page are in it, so it goes through
@@ -437,7 +943,14 @@ def look(page, locator, css: str, labels: bool = False) -> dict:
 
     The box is read again when the page did not show exactly one element of
     `css` in it, since a page can move between two reads. Nothing has been
-    scrolled or pressed then."""
+    scrolled or pressed then.
+
+    `frame` is the Playwright frame the control is in, when that is not
+    the page's main frame. The control is then read in that frame, and
+    each frame around it has to be on top in its own parent at the point
+    (_look_in_frame)."""
+    if frame is not None and frame.parent_frame is not None:
+        return _look_in_frame(page, locator, css, labels, frame)
     seen = {"state": "unread", "why": "no box"}
     for _ in range(3):
         box = _box(locator)
@@ -493,9 +1006,15 @@ def covering_lines(what: str, cover: dict) -> list:
     ]
 
 
-# Why a control could not be read, in the words of LOOK_JS and look.
+# Why a control could not be read, in the words of LOOK_JS, FRAME_JS and
+# look. "frame" is a frame that could not be found or placed on the page,
+# "frame drawn at another size" one drawn at another size than its own
+# window, and "off the control" a press Playwright would land beside the
+# control, in a frame drawn by a process of its own or a frame inside one.
+# Every word of them is on paperpull_core.words's list, so they leave whole.
 _WHY = frozenset(("selector", "several", "none", "no box", "not read", "unknown state",
-                  "outside the window", "nothing at the point"))
+                  "outside the window", "nothing at the point", "frame",
+                  "frame drawn at another size", "off the control"))
 
 
 def judge(seen: dict, what: str, words, step: str = "press a control") -> None:
@@ -507,10 +1026,11 @@ def judge(seen: dict, what: str, words, step: str = "press a control") -> None:
     if state == "covered":
         cover = described(seen, words)
         log.info("refused to press %s, %s", what, covering_lines(what, cover)[1])
+        facts = {"over_it": cover["widget"], "topmost": cover["top"], "fixed": cover["pinned"]}
+        if seen.get("over_the_frame"):
+            facts["over_the_frame"] = True
         raise Covered(step, "something on the page is over the control",
-                      covering_lines(what, cover),
-                      {"over_it": cover["widget"], "topmost": cover["top"],
-                       "fixed": cover["pinned"]})
+                      covering_lines(what, cover), facts)
     why = str(seen.get("why") or "")
     why = why if why in _WHY else "other"
     log.info("refused to press %s, it could not be read (%s)", what, why)
@@ -573,7 +1093,8 @@ def _press(page, action, what: str, step: str) -> None:
             AGAIN], {"error": kind}, after_a_press=True)
 
 
-def after(page, seen: dict, what: str, words, step: str = "press a control") -> None:
+def after(page, seen: dict, what: str, words, step: str = "press a control",
+          frame=None) -> None:
     """Right after a press, the point it was made at is read once more,
     without scrolling, and a frame on top there stops the run (Covered),
     unless it was at the point before the press and the control has left the
@@ -581,35 +1102,49 @@ def after(page, seen: dict, what: str, words, step: str = "press a control") -> 
     frame can have taken the press. When the point cannot be read now,
     nothing stops. A press that took the tab to a new document is read in
     that document, where nothing from before the press is kept, so any frame
-    on top there stops the run."""
+    on top there stops the run.
+
+    For a control inside `frame`, nothing stops when the control heard the
+    browser's own click at the point pressed. Otherwise the point is read
+    in that frame the same way, and then in each frame around it, where
+    anything at all on top of the frame stops the run (_after_in_frame),
+    since Playwright watches for its press only in the control's own
+    document."""
     point = seen.get("point") if isinstance(seen, dict) else None
     if not isinstance(point, dict):
         return
-    now = _in_own_world(page, AFTER_JS, {"point": point})
+    if frame is not None and frame.parent_frame is not None:
+        now = _after_in_frame(page, seen, frame)
+    else:
+        now = _in_own_world(page, AFTER_JS, {"point": point})
     if not now or now.get("state") != "covered":
         return
     cover = described(now, words)
     lines = covering_lines(what, cover)
     lines[0] = ("Something came over %s as it was pressed, and the press may have gone "
                 "to it, so nothing more is pressed." % what)
-    log.info("a frame came over %s as it was pressed, %s", what, lines[1])
-    raise Covered(step, "something on the page came over the control", lines,
-                  {"over_it": cover["widget"], "fixed": cover["pinned"],
-                   "after_the_press": True}, after_a_press=True)
+    log.info("something came over %s as it was pressed, %s", what, lines[1])
+    facts = {"over_it": cover["widget"], "fixed": cover["pinned"], "after_the_press": True}
+    if now.get("over_the_frame"):
+        facts["over_the_frame"] = True
+    raise Covered(step, "something on the page came over the control", lines, facts,
+                  after_a_press=True)
 
 
 def click(page, locator, *, css: str, what: str, words, step: str = "press a control",
-          timeout: int = PRESS_MS) -> None:
+          timeout: int = PRESS_MS, frame=None) -> None:
     """Press `locator` once, with nothing on top of it, or stop the run.
 
     `css` is a selector the control matches, which with the locator's box
     finds it in this module's own world. `what` names it in the run's own
     words, "the Download button for the statement of 2026-01-27". `words`
-    is the app's word list, words_for(provider, site)."""
-    seen = look(page, locator, css)
+    is the app's word list, words_for(provider, site). `frame` is the
+    Playwright frame the control is in, when it is not in the page's main
+    frame, and then the control and every frame around it are read."""
+    seen = look(page, locator, css, frame=frame)
     judge(seen, what, words, step)
     _press(page, lambda: locator.click(timeout=timeout), what, step)
-    after(page, seen, what, words, step)
+    after(page, seen, what, words, step, frame=frame)
 
 
 def _is_checked(locator) -> Optional[bool]:

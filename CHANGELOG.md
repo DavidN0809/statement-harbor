@@ -78,6 +78,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
   A file saved before keeps its name until Rename is run, which offers the
   new name in a preview first.
 
+### Security
+- **M&T presses a year heading only when nothing covers it, and once.**
+  M&T's statements list opens one year at a time, and the app pressed each
+  collapsed year's heading through the page with nothing checking what was
+  drawn over it, since the core could check what covers a control only in
+  a page's main frame and the list sits in a frame. The core now reads a
+  control inside a frame in that frame, then checks that the frame is the
+  thing on top in the page at the point to be pressed, as Playwright checks
+  before its own press. Right after the press, unless the control heard the
+  browser's own click at that point, the point is read once more, so a
+  loading cover put up once the press went through does not stop the run.
+  M&T presses each heading that way, with Playwright's own press.
+  Something over a heading, inside the frame or over the frame in the
+  page, stops the run before anything is pressed, and so does a heading
+  that cannot be checked, with the reason said in PaperPull's own words and
+  the failure file written. The words held to the forbidden list are now
+  those of the heading pressed, where a second call used to find the
+  heading again, and a heading pressed once is not pressed again, the same
+  element or one the page draws anew with the same id and words. The
+  heading is gone from the reviewed list of presses made through a page
+  script, where two links PG&E makes itself to save a PDF remain.
+
 ## [0.45.0] - 2026-10-07
 
 A receipt whose page did not show it is fetched on the next run, in
