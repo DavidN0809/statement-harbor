@@ -77,6 +77,12 @@ STOPS = {
     ("coinbase", "_press_load_more", "click", "load more of the list"): (1,
         "a control of the whole list, read as showing and turned on before it is pressed, "
         "and a list shown in full leaves only the statement not shown"),
+    ("ibkr", "open_activity_dialog", "click", "open the Activity Statement dialog"): (1,
+        "the Activity Statement row's Run opens the dialog every month's statement is "
+        "made in, so a turned off Run would leave every statement"),
+    ("ibkr", "download_document", "click", "press the download button"): (1,
+        "the dialog's own Download PDF, once the row's Run opened the dialog and the "
+        "month was chosen, so a press was made for the document already"),
     ("pge", "goto_page_number", "press_once", ""): (1,
         "the history's page picker, a step to the page a bill is on and every bill "
         "after it"),

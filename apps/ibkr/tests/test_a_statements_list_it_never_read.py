@@ -260,8 +260,10 @@ def run_discover(tmp_path, attached, server, capsys, *flags):
     except SystemExit as e:
         ended = ("exit", e.code)
     said = " ".join(capsys.readouterr().out.split())
-    whole = json.loads((tmp_path / "out" / "last-listing.json").read_text(
-        encoding="utf-8"))["complete"]
+    # None when no run has left a note, as a run scoped to a year leaves none
+    # of its own (listing.read_whole).
+    note = tmp_path / "out" / "last-listing.json"
+    whole = json.loads(note.read_text(encoding="utf-8"))["complete"] if note.exists() else None
     found = tmp_path / "out" / "discovery.json"
     records = json.loads(found.read_text(encoding="utf-8")) if found.exists() else {}
     return ended, said, whole, records
@@ -314,13 +316,21 @@ def test_a_paper_advisor_account_number_reads(tmp_path, attached, server, capsys
     assert {r["account_id"] for r in records.values()} == {"DF1234567"}
 
 
-def test_a_year_that_keeps_no_month_is_a_list_read_whole(tmp_path, attached, server, capsys):
-    """A scoped run whose years hold no month read the list and kept none of
-    it, which is not a list it did not read."""
+def test_a_year_that_keeps_no_month_ends_clean_and_leaves_the_list_as_it_was(
+        tmp_path, attached, server, capsys):
+    """A scoped run whose years hold no month read its part and kept none of
+    it, which is not a list it did not read, so it ends clean. It read only
+    part of the history, so it leaves the list noted as the last run of all
+    of it left it (listing.read_whole), no note at first and whole after a
+    whole listing."""
     ended, said, whole, records = run_discover(tmp_path, attached, server, capsys,
                                                "--year", "2020")
-    assert ended == ("returned", 0) and whole is True, said[-1500:]
+    assert ended == ("returned", 0) and whole is None, said[-1500:]
     assert records == {}
+    run_discover(tmp_path, attached, server, capsys)
+    ended, said, whole, _records = run_discover(tmp_path, attached, server, capsys,
+                                                "--year", "2020")
+    assert ended == ("returned", 0) and whole is True, said[-1500:]
 
 
 def test_a_notice_above_the_heading_lists_no_month_twice(tmp_path, attached, server, capsys):
