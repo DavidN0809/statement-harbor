@@ -7,7 +7,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.46.0] - 2026-10-11
+
+Three new apps. Interactive Brokers is the 63rd, with monthly Activity
+Statements from tylerverry, and Coinbase, with monthly statements and tax
+documents, and Optum Bank, with HSA statements and tax forms, come from
+JasperDale420, each reviewed and repaired before it went in. Robinhood
+takes its documents page by page and reads the retirement page, also
+from JasperDale420. A checkout runs every app on one environment that
+setup-all builds once (#65). A document whose Download the site has
+turned off is left for review while the run goes on, nothing more is
+pressed after a press that may have been made, and a control a press
+reveals is pressed only where that press put it. Download again keeps a
+saved record when it saves nothing, Capital One and Schwab take each
+document by its own id, and Rename leaves a shared file its name and
+keeps each file named for the id it was saved under. PaperPull Server no
+longer runs a Mac's hidden copy of an app and clears the browser locks a
+stopped container left.
 
 ### Added
 - **Interactive Brokers, the 63rd app, monthly Activity Statements
