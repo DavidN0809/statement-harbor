@@ -384,7 +384,8 @@ def test_every_document_app_is_covered():
     """Every document app, found by what it does. Not a check that passes
     because it found nobody."""
     assert len(APPS) >= 48, IDS
-    assert {"capitalone", "schwab", "wellsfargo", "paypal", "robinhood", "dominion"} <= set(IDS)
+    assert {"capitalone", "schwab", "wellsfargo", "paypal", "robinhood", "dominion",
+            "coinbase"} <= set(IDS)
     assert {"capitalone", "schwab"} <= {d.name for d in RELISTS}
     assert all({State.NEEDS_MANUAL_REVIEW, State.FAILED, State.PDF_SAVED}
                <= states_written(d) for d in APPS)

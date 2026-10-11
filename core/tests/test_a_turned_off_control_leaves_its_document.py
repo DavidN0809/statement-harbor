@@ -74,6 +74,9 @@ STOPS = {
     ("amex", "download_document", "click", "press the dialog download"): (1,
         "the dialog's own Download, once the row's Download opened the dialog, so a "
         "press was made for the document already"),
+    ("coinbase", "_press_load_more", "click", "load more of the list"): (1,
+        "a control of the whole list, read as showing and turned on before it is pressed, "
+        "and a list shown in full leaves only the statement not shown"),
     ("pge", "goto_page_number", "press_once", ""): (1,
         "the history's page picker, a step to the page a bill is on and every bill "
         "after it"),
@@ -90,6 +93,7 @@ STOPS = {
 LEAVES = {
     ("amex", "download_document"),
     ("amfam", "_catch_pdf"), ("applecard", "_catch_pdf"), ("att", "_catch_pdf"),
+    ("coinbase", "_catch_statement"),
     ("etrade", "_catch_pdf"), ("golden1", "_catch_pdf"), ("nelnet", "_catch_pdf"),
     ("newrez", "_catch_pdf"), ("pge", "_press_once"), ("sba", "_catch_pdf"),
     ("smud", "_catch_pdf"), ("statefarm", "_catch_pdf"), ("vanguard", "download_document"),
@@ -466,6 +470,10 @@ def _vanguard(monkeypatch):
     return call
 
 
+def _coinbase(site, page, out, staging, trace):
+    return site._catch_statement(page, staging, "June 2026", out, trace)
+
+
 def _pge(site, page, out, staging, trace):
     said: dict = {}
     got = site._press_once(page, page.query_selector("#get"), lambda: False, said=said)
@@ -486,6 +494,12 @@ def _amex_button(off: bool) -> str:
             'onclick="window.presses++">Download</button>' % (" disabled" if off else ""))
 
 
+def _coinbase_button(off: bool) -> str:
+    return ('<button id="get" type="button" class="ctl" data-testid="statements-pdf-v2"%s '
+            'onclick="window.presses++; fetch(\'/statement.pdf\');">PDF</button>'
+            % (" disabled" if off else ""))
+
+
 def _pge_link(off: bool) -> str:
     return ('<a id="get" class="ctl" href="#"%s onclick="window.presses++; return false;">'
             'View Bill PDF</a>' % (' aria-disabled="true"' if off else ""))
@@ -501,6 +515,8 @@ def _how(app: str, function: str, monkeypatch):
     if (app, function) == ("vanguard", "download_document"):
         return "vanguard_site", _vanguard(monkeypatch), _vanguard_icon, \
             "%s</td><td>08/31/2026" % VG_ACCOUNT
+    if (app, function) == ("coinbase", "_catch_statement"):
+        return "coinbase_site", _coinbase, _coinbase_button, "June 2026"
     if (app, function) == ("pge", "_press_once"):
         return "pge_site", _pge, _pge_link, "June 30, 2026"
     return None
