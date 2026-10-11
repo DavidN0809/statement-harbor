@@ -238,7 +238,7 @@ class Download(unittest.TestCase):
 class Persisted(unittest.TestCase):
     def test_every_stored_url_goes_through_persistable(self):
         src = (HERE / "optum_docs.py").read_text(encoding="utf-8")
-        self.assertEqual(src.count("persistable("), 1 + 7, "def + seven call sites (href twice)")
+        self.assertEqual(src.count("persistable("), 1 + 5, "def + five call sites (href twice)")
         self.assertEqual(docs.persistable("https://x/a.pdf?sig=1#f"), "https://x/a.pdf")
 
     def test_discovery_keeps_the_path_and_the_download_gets_it(self):

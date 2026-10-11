@@ -38,9 +38,11 @@ SAFETY (this is a health savings account that can pay bills and move money):
   time. There is no code here that closes a banner, submits a form or
   confirms a dialog.
 
-HOSTS: exact, no subdomain wildcard. account.optumbank.com only for the
-landing, the forms page, a product's statements page and a document's own
-PDF path (ALLOWED_PATH_RE); www.optumbank.com only for the sign-in landing.
+HOSTS: exact, no subdomain wildcard. account.optumbank.com for the
+landing, the forms page and each product's statements page, every one
+opened by an address this module builds, and for a document's own PDF
+path, the only path a document is ever fetched from (is_download_url).
+www.optumbank.com only for the sign-in landing.
 
 KNOWN CEILINGS (ponytail: left as they are until a run shows otherwise)
   * Investment earnings reports and contribution summaries on Forms &
@@ -70,7 +72,6 @@ from urllib.parse import urlsplit
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import redact, set_private_words  # noqa: F401  (re-exported)
 from paperpull_core.urls import is_safe_url as _host_allows
-from paperpull_core.api_census import shape_of as _shape
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
@@ -108,7 +109,7 @@ LOGIN_URL_MARKERS = ["/signin", "/sign-in", "/login", "/oauth", "/mfa", "/verify
                      "healthsafe-id.com", "onehealthcareid.com", "identity."]
 
 # ---------------------------------------------------------------------------
-# HARD SAFETY GUARD. Tuned for an exchange. Every verb stem anchored on both
+# HARD SAFETY GUARD. Tuned for an HSA. Every verb stem anchored on both
 # sides so "Statements" is not "state" and "Downloads" is not "load".
 # ---------------------------------------------------------------------------
 FORBIDDEN_CONTROL_RE = re.compile(
@@ -228,29 +229,6 @@ def parse_period_date(text: str) -> Tuple[Optional[str], str]:
     return None, ""
 
 
-
-_WORD_VALUE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_ -]{0,23}$")
-
-
-def _plain_word(v: str) -> bool:
-    return bool(_WORD_VALUE_RE.match(v or ""))
-
-
-def _safe_query(url: str) -> str:
-    """A URL's query parameters, names always, values only when they are
-    plain words. A value with a digit, a token, an id, anything long, is
-    "..."."""
-    from urllib.parse import parse_qsl
-    try:
-        pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
-    except ValueError:
-        return ""
-    out = []
-    for k, v in pairs[:20]:
-        out.append("%s=%s" % (k[:30], v if _plain_word(v) else "..."))
-    return "&".join(out)
-
-
 # ---------------------------------------------------------------------------
 # Session / safety
 # ---------------------------------------------------------------------------
@@ -309,14 +287,11 @@ def is_safe_control(name: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Hosts. Exact, parsed, no subdomain wildcard, and on the member host only
-# the paths this app reads. Identity hosts are in neither set.
+# Hosts. Exact, parsed, no subdomain wildcard, and a document only from its
+# own path on the member host. Identity hosts are in neither set.
 # ---------------------------------------------------------------------------
 ALLOWED_HOSTS = {"account.optumbank.com", "www.optumbank.com"}
 DOWNLOAD_HOSTS = {"account.optumbank.com"}
-ALLOWED_PATH_RE = re.compile(
-    r"^/(account|account/help/forms|account/help/\d+/forms|account/products/\d+/statements|"
-    r"account/products/\d+/(statements|tax_documents)/\d+\.pdf)/?$")
 DOCUMENT_PATH_RE = re.compile(r"^/account/products/(\d+)/(statements|tax_documents)/(\d+)\.pdf$")
 PRODUCT_RE = re.compile(r"/account/products/(\d+)(?:/|$)")
 # A link that leads to a product's statements, its statements page or one
@@ -777,36 +752,12 @@ def _page_summary(page) -> dict:
 def survey(page, dwell_ms: int = 4000, max_follow: int = 0) -> dict:
     """What the signed-in page looks like, without downloading anything.
     Records the page's headings and controls with the guard's verdict.
-    Follows nothing and listens to nothing: this app presses no control at
-    all, and a survey is not a reason to start. No screenshot."""
-    seen: list = []
-
-    def on_response(res):
-        try:
-            url = res.url or ""
-            if not is_safe_url(url):
-                return
-            ct = (res.headers.get("content-type") or "").lower()
-            if "json" not in ct and "pdf" not in ct:
-                return
-            entry = {"path": redact(urlsplit(url).path)[:200], "status": res.status, "type": ct[:40]}
-            try:
-                entry["method"] = res.request.method
-            except Exception:
-                pass
-            if "json" in ct:
-                try:
-                    entry["shape"] = _shape(res.json())
-                except Exception:
-                    entry["shape"] = "unreadable"
-            seen.append(entry)
-        except Exception:
-            pass
-
-    # No response listener: every document here is a plain link, read from
+    Follows nothing and listens to nothing, since this app presses no
+    control at all and a survey is not a reason to start. No screenshot."""
+    # No response listener. Every document here is a plain link, read from
     # the page, and a listener would count as a capture this app does not
     # make. The page's own summary is the survey.
-    report = {"pages": [], "responses": seen}
+    report = {"pages": []}
     page.wait_for_timeout(dwell_ms)
     report["pages"].append(_page_summary(page))
     return report

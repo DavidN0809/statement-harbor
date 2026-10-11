@@ -1,8 +1,9 @@
 """Optum Bank statement and tax-document downloader (local, supervised).
 
-Optum Bank holds the HSA at www.optumbank.com. This is the orchestrator,
-cloned from the Optum Bank app; everything that is Optum Bank's own lives in
-optum_site.py.
+Optum Bank holds the HSA at www.optumbank.com. This downloads the HSA's
+monthly statements and its tax forms, the 5498-SA and the 1099-SA. The
+orchestrator below is the same one every other statement app runs on.
+Everything about the site itself is in optum_site.py.
 
 Usage:
     python optum_docs.py --login       verify connection to your browser
@@ -21,7 +22,7 @@ Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
 READ-ONLY: this tool only reads the statements and tax-documents areas and
 saves the PDFs Optum Bank already generated. It never pays a bill, reimburses, contributes,
 invests, transfers, or changes any account setting. Everything stays on this
-machine; nothing is sent to any external service.
+machine, and nothing is sent to any external service.
 """
 from __future__ import annotations
 
@@ -475,7 +476,7 @@ class App:
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         elif ok:
             print("Success: connected and the Documents page is visible.")
-            print("Keep that browser window OPEN, then run run_pilot.bat.")
+            print("Keep that browser window OPEN, then run the diagnostics or pilot.")
         else:
             print("Connected, but the Documents list did not load, so this cannot say")
             print("whether you are signed in. Look at the browser window and answer")
@@ -498,41 +499,6 @@ class App:
         if a.end_date and (not doc.date or doc.date > a.end_date):
             return False
         return True
-
-    def _record_raw(self, r, tax_year: str = "") -> int:
-        """Turn one scraped row into a discovery record. Returns 1 if new."""
-        if doc_types.should_skip(r.title, self.rules):
-            self.stats["skipped_out_of_scope"] += 1
-            return 0
-        category, summary, confidence = doc_types.classify_document(
-            r.title, self.rules)
-        if not doc_types.wanted(category, self.config):
-            self.stats["skipped_out_of_scope"] += 1
-            return 0
-        if r.date_text:
-            date, period = site.parse_period_date(r.date_text)
-        elif tax_year:
-            # Tax-table rows carry no date; file them at the tax year end.
-            date, period = f"{tax_year}-12-31", f"Tax Year {tax_year}"
-        else:
-            date, period = site.parse_period_date(r.text or r.title)
-        # Keep the account in the summary so files stay distinguishable
-        # (several accounts produce the same form in the same year).
-        acct = (r.account or "").strip()
-        full_summary = f"{summary} {acct}".strip() if acct else summary
-        doc = Document(title=r.title, category=category, summary=full_summary,
-                       date=date or "", period=period, href=persistable(r.href),
-                       row_index=r.row_index, confidence=confidence,
-                       date_text=getattr(r, "date_text", ""))
-        doc.account = acct
-        if self.discovery.get(doc.key) is None:
-            rec = doc.to_dict()
-            rec["state"] = State.DISCOVERED.value
-            self.discovery.update(doc.key, rec, save=False)
-            return 1
-        self.discovery.update(doc.key, {"row_index": r.row_index,
-                                        "href": persistable(r.href)}, save=False)
-        return 0
 
     def _record_rawdoc(self, r, source_url: str) -> int:
         """Record one scraped document (a RawDoc) from a Optum Bank page.
@@ -593,10 +559,10 @@ class App:
             for r in stop.docs:
                 self._record_rawdoc(r, site.BILLING_URL)
             self.discovery.save()
-            print(f"\n!! The Inbox & Statements list stopped partway, since {stop}.")
+            print(f"\n!! The Optum Bank documents list stopped partway, since {stop}.")
             print(f"   The {len(stop.docs)} document(s) listed before it stopped are kept,")
             print("   and this run stops rather than call the list read. Run it again.")
-            self.write_failure("read the inbox list", "the list stopped partway")
+            self.write_failure("read the documents list", "the list stopped partway")
             raise SystemExit(1)
         hold_known_forms(docs, self.progress.data, self.discovery.data)
         for r in docs:
