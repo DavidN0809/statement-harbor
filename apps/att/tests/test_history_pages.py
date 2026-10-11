@@ -713,30 +713,49 @@ def test_download_pdf_drawn_after_view_print_is_still_the_one_pressed(browser, t
     assert presses["view"] == 0, "View/print PDF was taken before Download PDF appeared"
 
 
-def test_a_second_step_whose_click_raised_is_followed_by_no_other_press(browser, tmp_path, monkeypatch):
-    """Download PDF gave nothing, and Playwright's click of the View/print
-    PDF it revealed went through and then raised, so it may have been made.
-    The fallback pressed View/print PDF again and went on to the billing
-    center (review of 0.45.0's fixes)."""
+def test_a_view_print_whose_click_raised_is_followed_by_no_other_press(browser, tmp_path, monkeypatch):
+    """Download PDF gave nothing, and Playwright's click of View/print PDF
+    went through and then raised, so it may have been made. The fallback
+    pressed View/print PDF again and went on to the billing center (review
+    of 0.45.0's fixes). A View/print PDF beside other controls is no longer
+    Download PDF's own second step, so it is pressed as the fallback through
+    press_once, which stops the run on a press that began and never said
+    how it ended. Either way nothing is pressed after it."""
+    from paperpull_core import pressing
     sync_api = pytest.importorskip("playwright.sync_api")
-    real = sync_api.Locator.click
     raised = []
 
-    def click(self, *args, **kwargs):
-        try:
-            text = self.inner_text(timeout=500)
-        except Exception:
-            text = ""
-        real(self, *args, **kwargs)
-        if "View/print" in text and not raised:
-            raised.append(1)
-            raise sync_api.TimeoutError("Timeout 8000ms exceeded.\n  - waiting for scheduled navigations to finish")
-    monkeypatch.setattr(sync_api.Locator, "click", click)
+    def words_of(el):
+        # A Locator's inner_text takes a timeout and an element handle's
+        # does not.
+        for ask in (lambda: el.inner_text(timeout=500), lambda: el.inner_text()):
+            try:
+                return ask()
+            except TypeError:
+                continue
+            except Exception:
+                return ""
+        return ""
+
+    def raising(real):
+        def click(self, *args, **kwargs):
+            text = words_of(self)
+            real(self, *args, **kwargs)
+            if "View/print" in text and not raised:
+                raised.append(1)
+                raise sync_api.TimeoutError("Timeout 8000ms exceeded.\n  - waiting for scheduled navigations to finish")
+        return click
+    monkeypatch.setattr(sync_api.Locator, "click", raising(sync_api.Locator.click))
+    monkeypatch.setattr(sync_api.ElementHandle, "click", raising(sync_api.ElementHandle.click))
     bills = _bills(_newest_now(), 16)
     presses = _presses_on_leaving(browser[0], monkeypatch)
-    ok, out, trace, page = _download(
-        browser, tmp_path, _history(bills, extra=_DOWNLOAD_GIVES_NOTHING), bills[1]["iso"])
-    assert raised, "View/print PDF was never clicked as the second step"
+    out = tmp_path / "bill.pdf"
+    try:
+        ok, out, trace, page = _download(
+            browser, tmp_path, _history(bills, extra=_DOWNLOAD_GIVES_NOTHING), bills[1]["iso"])
+    except pressing.Stop:
+        ok, page = False, browser[0]
+    assert raised, "View/print PDF was never pressed"
     assert not ok and not out.exists()
     assert not presses, "the billing center was opened after a click that may have been made"
     assert page.evaluate("window.presses")["view"] == 1

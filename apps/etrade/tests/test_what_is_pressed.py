@@ -915,7 +915,7 @@ def test_nothing_more_is_pressed_after_a_second_step_whose_click_raised(page, mo
             raise RuntimeError("Timeout 8000ms exceeded. waiting for scheduled navigations to finish")
     shown = []
 
-    def second_step(pg, appeared):
+    def second_step(pg, appeared, place=None, trace=None):
         shown.append(1)
         return (Step(), "Download PDF") if len(shown) == 1 else (None, "")
     monkeypatch.setattr(site, "_second_step", second_step)

@@ -1146,6 +1146,22 @@ def _leave_if_turned_off(page, el, css: str, what: str, words, step: str, facts:
         AGAIN], {**facts, "verdict": "off"}, after_a_press=after_a_press)
 
 
+def turned_off_after_a_press(page, el, error, *, css: str, what: str, words,
+                             step: str = "press a control") -> None:
+    """For an app's own press that raised, made after an earlier press for
+    the same document. When Playwright's account says only that it waited
+    for the control and found it turned off, nothing was pressed, and what
+    the earlier press began may still bring its document, so this raises
+    TurnedOff after a press, which stops the run, once the control is read
+    as showing and turned off with nothing over it (_leave_if_turned_off).
+    It returns for any other error, for the caller to treat the press as
+    one that may have been made, as it would have."""
+    from .failure import error_kind
+    if _only_turned_off(error):
+        _leave_if_turned_off(page, el, css, what, words, step, {"error": error_kind(error)},
+                             after_a_press=True)
+
+
 def _press(page, action, what: str, step: str, off: Optional[Callable[[str], None]] = None) -> None:
     """Playwright's own unforced press. Any error from it stops the run, and
     nothing is pressed again. That includes Playwright's own verdict that

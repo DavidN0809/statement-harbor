@@ -2008,6 +2008,13 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 if trace is not None:
                     trace.append({"note": "second step click failed", "control": redact(step_label)[:60],
                                   "error": str(e)[:160]})
+                # One Playwright waited for and found turned off was never
+                # pressed, and what Download PDF began may still bring its
+                # PDF, so the run stops there (pressing.TurnedOff).
+                pressing.turned_off_after_a_press(
+                    page, step, e, css=pressing.BUTTONS + ", " + pressing.LINKS,
+                    what="the second step for this bill", words=_words(),
+                    step="press the second step")
                 # A click that raised may have been made, so nothing more is
                 # pressed for this bill, View/print PDF again least of all
                 # (review of 0.45.0's fixes).

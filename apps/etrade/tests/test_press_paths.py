@@ -475,7 +475,7 @@ def _turned_off_at_the_first_press(monkeypatch):
     import inspect
     calls = []
 
-    def fake(pg, el, label, out_path, trace=None, dl_dir=None, pressed=None):
+    def fake(pg, el, label, out_path, trace=None, dl_dir=None, pressed=None, unsure=None):
         calls.append(inspect.stack()[1].function)
         if pressed is not None and len(calls) == 1:
             pressed.append(site._TURNED_OFF)
