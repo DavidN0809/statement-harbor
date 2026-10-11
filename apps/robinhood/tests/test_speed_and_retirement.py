@@ -54,9 +54,9 @@ class FakePage:
 
 class FindControl(unittest.TestCase):
     def test_plain_download_link_is_found_once(self):
-        page = FakePage({"own": "Monthly Statement - March 2026", "hasDl": True})
-        self.assertIsNotNone(site.find_control(page, "Monthly Statement - March 2026"))
-        self.assertEqual(page.evaluated[0][:2], ["Monthly Statement - March 2026", ""], "one pass, needle cut to 30 chars")
+        page = FakePage({"own": "Monthly Statement - March 2014", "hasDl": True})
+        self.assertIsNotNone(site.find_control(page, "Monthly Statement - March 2014"))
+        self.assertEqual(page.evaluated[0][:2], ["Monthly Statement - March 2014", ""], "one pass, needle cut to 30 chars")
         self.assertEqual(len(page.evaluated[0]), 4, "needle, year, one-time token, mark attribute")
 
     def test_guard_refuses_forbidden_and_csv_and_non_download(self):
@@ -76,9 +76,9 @@ class FindControl(unittest.TestCase):
 
     def test_year_is_passed_to_the_page(self):
         page = FakePage({"own": "Download PDF", "hasDl": False})
-        self.assertIsNotNone(site.find_control(page, "Form 1099-B", year="2024"))
-        self.assertEqual(page.evaluated[0][1], "2024")
-        self.assertTrue(site.has_control(page, "Form 1099-B", "2024"))
+        self.assertIsNotNone(site.find_control(page, "Form 1099-B", year="2012"))
+        self.assertEqual(page.evaluated[0][1], "2012")
+        self.assertTrue(site.has_control(page, "Form 1099-B", "2012"))
 
 
 class Challenge(unittest.TestCase):
@@ -92,10 +92,10 @@ class Challenge(unittest.TestCase):
                     def inner_text(self, **kw): return page.body
                     def count(self): return 68
                 return L()
-        self.assertIsNone(site.challenge_text(Page("March 2026 Statement Download")))
+        self.assertIsNone(site.challenge_text(Page("March 2014 Statement Download")))
         self.assertIn("challenge", site.challenge_text(Page("Please enter the code we sent to your phone")).lower())
         self.assertIsNotNone(site.challenge_text(Page("Too many requests, try again later")))
-        late = ("March 2026 Statement Download\n" * 80) + "Enter the code we sent"
+        late = ("March 2014 Statement Download\n" * 80) + "Enter the code we sent"
         self.assertGreater(len(late), 1500)
         self.assertIsNotNone(site.challenge_text(Page(late)), "a prompt after a long list is still a prompt")
 
@@ -103,12 +103,12 @@ class Challenge(unittest.TestCase):
 class Duplicates(unittest.TestCase):
     def test_only_the_crypto_page_is_refused_a_duplicate(self):
         import robinhood_docs as docs
-        listed = {("March 2026 Statement", "2026-03-31")}
-        key = ("March 2026 Statement", "2026-03-31")
+        listed = {("March 2014 Statement", "2014-03-31")}
+        key = ("March 2014 Statement", "2014-03-31")
         self.assertTrue(docs.is_crypto_duplicate("https://robinhood.com/account/reports-statements/crypto", key, listed))
         self.assertFalse(docs.is_crypto_duplicate("https://robinhood.com/account/reports-statements/retirement", key, listed))
         self.assertFalse(docs.is_crypto_duplicate("https://robinhood.com/account/reports-statements/individual", key, listed))
-        self.assertFalse(docs.is_crypto_duplicate("https://robinhood.com/account/reports-statements/crypto", ("other", "2026-03-31"), listed))
+        self.assertFalse(docs.is_crypto_duplicate("https://robinhood.com/account/reports-statements/crypto", ("other", "2014-03-31"), listed))
         self.assertFalse(docs.is_crypto_duplicate("https://robinhood.com/account/reports-statements/crypto", key, None))
 
 
@@ -268,7 +268,7 @@ def _app(tmp_path):
     return app
 
 
-def _statement(title="January 2022 Monthly Statement", date="2022-01-31",
+def _statement(title="January 2010 Monthly Statement", date="2010-01-31",
                source=INDIVIDUAL, account=""):
     summary = ("%s Monthly Statement" % account) if account else "Monthly Statement"
     return robinhood_docs.Document(title=title, category=doc_types.STATEMENT,
@@ -289,7 +289,7 @@ def _presses(monkeypatch, lines=None):
     return pressed
 
 
-def _retirement(title="January 2022 Monthly Statement", date="2022-01-31"):
+def _retirement(title="January 2010 Monthly Statement", date="2010-01-31"):
     return _statement(title, date, source=RETIREMENT, account="Retirement")
 
 
@@ -310,7 +310,7 @@ def test_the_tab_is_brought_forward_once_for_each_page_it_opens(tmp_path, monkey
     pressed = _presses(monkeypatch)
     monkeypatch.setattr(site, "has_control", lambda page, title, year="": True)
     page = _Tab()
-    _take(app, page, _statement("February 2022 Monthly Statement", "2022-02-28"))
+    _take(app, page, _statement("February 2010 Monthly Statement", "2010-02-28"))
     _take(app, page, _statement())
     assert page.opened == [INDIVIDUAL] and pressed == [INDIVIDUAL, INDIVIDUAL]
     assert page.fronted == 1
@@ -326,19 +326,19 @@ def _listed(app, *items):
 
 def test_documents_are_taken_page_by_page_newest_first(tmp_path):
     app = _app(tmp_path)
-    _listed(app, (CRYPTO, "2026-03-31"), (INDIVIDUAL, "2026-03-31"), (TAX, "2025-12-31"),
-            (RETIREMENT, "2026-03-31"), (INDIVIDUAL, "2026-02-28"), (RETIREMENT, "2026-02-28"),
-            (CRYPTO, "2026-02-28"), (INDIVIDUAL, ""), ("", "2026-01-31"))
+    _listed(app, (CRYPTO, "2014-03-31"), (INDIVIDUAL, "2014-03-31"), (TAX, "2013-12-31"),
+            (RETIREMENT, "2014-03-31"), (INDIVIDUAL, "2014-02-28"), (RETIREMENT, "2014-02-28"),
+            (CRYPTO, "2014-02-28"), (INDIVIDUAL, ""), ("", "2014-01-31"))
     assert [(d.source_url, d.date) for d in app._select()] == [
-        (INDIVIDUAL, "2026-03-31"), (INDIVIDUAL, "2026-02-28"), (INDIVIDUAL, ""),
-        (RETIREMENT, "2026-03-31"), (RETIREMENT, "2026-02-28"),
-        (CRYPTO, "2026-03-31"), (CRYPTO, "2026-02-28"), (TAX, "2025-12-31"), ("", "2026-01-31")]
+        (INDIVIDUAL, "2014-03-31"), (INDIVIDUAL, "2014-02-28"), (INDIVIDUAL, ""),
+        (RETIREMENT, "2014-03-31"), (RETIREMENT, "2014-02-28"),
+        (CRYPTO, "2014-03-31"), (CRYPTO, "2014-02-28"), (TAX, "2013-12-31"), ("", "2014-01-31")]
 
 
 def test_the_pilot_takes_the_newest_across_every_page(tmp_path, monkeypatch):
     app = _app(tmp_path)
-    _listed(app, (INDIVIDUAL, "2026-03-31"), (INDIVIDUAL, "2026-02-28"), (RETIREMENT, "2026-03-31"),
-            (CRYPTO, "2026-03-31"), (INDIVIDUAL, "2026-01-31"))
+    _listed(app, (INDIVIDUAL, "2014-03-31"), (INDIVIDUAL, "2014-02-28"), (RETIREMENT, "2014-03-31"),
+            (CRYPTO, "2014-03-31"), (INDIVIDUAL, "2014-01-31"))
     app.config["pilot_count"] = 3
     taken = []
     monkeypatch.setattr(app, "cmd_discover", lambda quiet=False: 0)
@@ -346,7 +346,7 @@ def test_the_pilot_takes_the_newest_across_every_page(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "_pilot_report", lambda docs: None)
     app.cmd_pilot()
     assert [(d.source_url, d.date) for d in taken] == [
-        (INDIVIDUAL, "2026-03-31"), (RETIREMENT, "2026-03-31"), (CRYPTO, "2026-03-31")]
+        (INDIVIDUAL, "2014-03-31"), (RETIREMENT, "2014-03-31"), (CRYPTO, "2014-03-31")]
     assert [d.source_url for d in app._select()][:3] == [INDIVIDUAL] * 3, \
         "a run without a limit takes a page at a time"
 
@@ -355,11 +355,11 @@ def test_max_docs_takes_the_newest_across_every_page(tmp_path):
     """--max-docs N in Run All took N statements of the individual page
     first, once a run took its documents page by page."""
     app = _app(tmp_path)
-    _listed(app, (INDIVIDUAL, "2026-02-28"), (CRYPTO, "2026-03-31"), (INDIVIDUAL, "2026-01-31"),
-            (RETIREMENT, "2026-03-31"), (INDIVIDUAL, "2026-03-31"))
+    _listed(app, (INDIVIDUAL, "2014-02-28"), (CRYPTO, "2014-03-31"), (INDIVIDUAL, "2014-01-31"),
+            (RETIREMENT, "2014-03-31"), (INDIVIDUAL, "2014-03-31"))
     app.args.max_docs = 3
     assert [(d.source_url, d.date) for d in app._select()] == [
-        (INDIVIDUAL, "2026-03-31"), (RETIREMENT, "2026-03-31"), (CRYPTO, "2026-03-31")]
+        (INDIVIDUAL, "2014-03-31"), (RETIREMENT, "2014-03-31"), (CRYPTO, "2014-03-31")]
 
 
 def _shows_the_control(monkeypatch, shows=True):
@@ -485,7 +485,7 @@ def test_a_retirement_statement_that_is_the_individual_file_is_refused(tmp_path,
     and the file can. The individual statement's digest is kept with its
     record, so this holds after its file is deleted once imported."""
     app = _app(tmp_path)
-    same = ["Robinhood Securities LLC", "Account statement", "January 2022"]
+    same = ["Robinhood Securities LLC", "Account statement", "January 2010"]
     pressed = _presses(monkeypatch, lines=same)
     page = _Tab(headings={RETIREMENT: ["Retirement"]})
     individual = _statement()
@@ -501,7 +501,7 @@ def test_a_retirement_statement_that_is_the_individual_file_is_refused(tmp_path,
     assert app.stats["wrong_document"] == 1
     assert _statements_saved(app) == []
     assert [p.name for p in app.paths.manual_review.glob("*.pdf")] == [
-        "2022-01-31 Robinhood Retirement Monthly Statement.pdf"]
+        "2010-01-31 Robinhood Retirement Monthly Statement.pdf"]
     assert app.progress.get(individual.key)["downloaded_ok"], "the individual one stands"
 
 
@@ -509,7 +509,7 @@ def test_an_older_individual_record_is_read_from_its_file(tmp_path, monkeypatch)
     """A statement saved before the digest was kept is compared by its
     file, while the file is there."""
     app = _app(tmp_path)
-    same = ["Robinhood Securities LLC", "Account statement", "January 2022"]
+    same = ["Robinhood Securities LLC", "Account statement", "January 2010"]
     _presses(monkeypatch, lines=same)
     page = _Tab(headings={RETIREMENT: ["Retirement"]})
     individual = _statement()
@@ -529,8 +529,8 @@ def test_a_retirement_statement_of_its_own_is_saved_beside_the_individual_one(
     rec = _take(app, page, _retirement())
     assert rec["state"] == State.COMPLETED.value and rec["downloaded_ok"]
     assert app.stats["wrong_document"] == 0
-    assert _statements_saved(app) == ["2022-01-31 Robinhood Monthly Statement.pdf",
-                                      "2022-01-31 Robinhood Retirement Monthly Statement.pdf"]
+    assert _statements_saved(app) == ["2010-01-31 Robinhood Monthly Statement.pdf",
+                                      "2010-01-31 Robinhood Retirement Monthly Statement.pdf"]
 
 
 if __name__ == "__main__":

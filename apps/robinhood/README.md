@@ -45,10 +45,10 @@ thousands). To include them, edit `skip_patterns` in `document_rules.json` and
 add "Trade Confirmation" to `document_types` in `config.json`.
 
 Filenames: `YYYY-MM-DD Robinhood <Summary>.pdf`, e.g.
-`2025-12-31 Robinhood Monthly Statement.pdf`,
-`2025-12-31 Robinhood Retirement Monthly Statement.pdf`,
-`2025-12-31 Robinhood Crypto Monthly Statement.pdf`,
-`2025-12-31 Robinhood Consolidated 1099 Tax Form.pdf`.
+`2013-12-31 Robinhood Monthly Statement.pdf`,
+`2013-12-31 Robinhood Retirement Monthly Statement.pdf`,
+`2013-12-31 Robinhood Crypto Monthly Statement.pdf`,
+`2013-12-31 Robinhood Consolidated 1099 Tax Form.pdf`.
 The retirement statements page is read only when its own heading names a
 retirement account, and a retirement statement whose file is the same as
 the individual statement of that month goes to Manual Review. A

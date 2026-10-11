@@ -89,8 +89,8 @@ def test_the_crypto_statements_page_is_read():
 
 def test_a_crypto_statement_is_a_document_of_its_own(tmp_path):
     app = _app(tmp_path)
-    _record(app, "January 2022 Monthly Statement", INDIVIDUAL, "2022-01-31")
-    _record(app, "January 2022 Monthly Statement", CRYPTO, "2022-01-31")
+    _record(app, "January 2010 Monthly Statement", INDIVIDUAL, "2010-01-31")
+    _record(app, "January 2010 Monthly Statement", CRYPTO, "2010-01-31")
     docs = _docs(app)
     assert len(docs) == 2, "the crypto statement was taken for the individual one"
     by_page = {d.source_url: d for d in docs.values()}
@@ -98,7 +98,7 @@ def test_a_crypto_statement_is_a_document_of_its_own(tmp_path):
     assert cry.account == "Crypto" and ind.account == ""
     assert cry.summary == "Crypto Monthly Statement"
     assert storage.build_pdf_filename(cry.date, cry.summary, "", record=cry) == \
-        "2022-01-31 Robinhood Crypto Monthly Statement.pdf"
+        "2010-01-31 Robinhood Crypto Monthly Statement.pdf"
     # the download goes to the page that lists it, and nothing on another
     assert cry.source_url == CRYPTO
 
@@ -108,18 +108,18 @@ def test_an_individual_statement_keeps_the_key_and_name_it_always_had(tmp_path):
     this key and this name. A change to either would fetch all of them
     again beside the copies already saved."""
     app = _app(tmp_path)
-    _record(app, "January 2022 Monthly Statement", INDIVIDUAL, "2022-01-31")
+    _record(app, "January 2010 Monthly Statement", INDIVIDUAL, "2010-01-31")
     (key, doc), = _docs(app).items()
     # An empty account has always been written into the key as "Unnamed".
-    assert key == "Statement:2022-01-31:January 2022 Monthly Statement:Unnamed"
+    assert key == "Statement:2010-01-31:January 2010 Monthly Statement:Unnamed"
     assert doc.summary == "Monthly Statement"
     assert storage.build_pdf_filename(doc.date, doc.summary, "", record=doc) == \
-        "2022-01-31 Robinhood Monthly Statement.pdf"
+        "2010-01-31 Robinhood Monthly Statement.pdf"
 
 
 def test_a_title_that_says_crypto_does_not_say_it_twice(tmp_path):
     app = _app(tmp_path)
-    _record(app, "January 2022 Crypto Statement", CRYPTO, "2022-01-31")
+    _record(app, "January 2010 Crypto Statement", CRYPTO, "2010-01-31")
     (doc,) = _docs(app).values()
     assert doc.summary == "Crypto Statement"
 
@@ -128,8 +128,8 @@ def test_a_tax_form_a_statements_page_lists_is_the_tax_pages_form(tmp_path):
     """A statements page that also shows a 1099 is showing the tax page's
     form. It keeps that key, so it is one document and not two."""
     app = _app(tmp_path)
-    _record(app, "2022 Robinhood Crypto 1099", CRYPTO)
-    _record(app, "2022 Robinhood Crypto 1099", TAX)
+    _record(app, "2010 Robinhood Crypto 1099", CRYPTO)
+    _record(app, "2010 Robinhood Crypto 1099", TAX)
     docs = _docs(app)
     assert len(docs) == 1
     (doc,) = docs.values()
@@ -138,16 +138,16 @@ def test_a_tax_form_a_statements_page_lists_is_the_tax_pages_form(tmp_path):
 
 # -- a crypto statement saved when the crypto page was read before -------------
 
-TITLE = "January 2022 Monthly Statement"
+TITLE = "January 2010 Monthly Statement"
 
 
 def _legacy(app, source):
     """A statement saved before its account was part of its key."""
     old = robinhood_docs.Document(title=TITLE, category=doc_types.STATEMENT,
-                                  summary="Monthly Statement", date="2022-01-31",
+                                  summary="Monthly Statement", date="2010-01-31",
                                   source_url=source)
     old.downloaded_ok, old.state = True, "Completed"
-    old.pdf_filename = "2022-01-31 Robinhood Monthly Statement.pdf"
+    old.pdf_filename = "2010-01-31 Robinhood Monthly Statement.pdf"
     app.progress.update(old.key, old.to_dict())
     app.discovery.update(old.key, old.to_dict())
     return old
@@ -155,7 +155,7 @@ def _legacy(app, source):
 
 def _crypto():
     return robinhood_docs.Document(title=TITLE, category=doc_types.STATEMENT,
-                                   summary="Crypto Monthly Statement", date="2022-01-31",
+                                   summary="Crypto Monthly Statement", date="2010-01-31",
                                    source_url=CRYPTO, account="Crypto")
 
 
@@ -173,7 +173,7 @@ def test_a_crypto_statement_saved_under_its_old_key_is_done(tmp_path):
 def test_discovery_keeps_it_under_its_new_key(tmp_path):
     app = _app(tmp_path)
     old = _legacy(app, CRYPTO)
-    _record(app, TITLE, CRYPTO, "2022-01-31")
+    _record(app, TITLE, CRYPTO, "2010-01-31")
     rec = app.progress.get(_crypto().key)
     assert rec and rec["downloaded_ok"] and rec["summary"] == "Crypto Monthly Statement"
     assert app.progress.get(old.key) is None
@@ -229,7 +229,7 @@ def _run(tmp_path, monkeypatch, listings, stops=(), repeated=None, **tab):
 
 
 def test_a_crypto_page_showing_the_individual_list_is_refused_and_said(tmp_path, monkeypatch):
-    same = [(TITLE, "2022-01-31")]
+    same = [(TITLE, "2010-01-31")]
     app = _run(tmp_path, monkeypatch, {INDIVIDUAL: same, CRYPTO: same})
     assert [d.account for d in _docs(app).values()] == [""], "saved twice"
     assert app.stats["crypto_refused"] == 1 and app.stats["wrong_document"] == 1
@@ -239,7 +239,7 @@ def test_a_crypto_page_showing_the_individual_list_is_refused_and_said(tmp_path,
 
 
 def test_a_crypto_address_that_opens_elsewhere_is_not_read(tmp_path, monkeypatch):
-    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2022-01-31")]},
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2010-01-31")]},
                lands={CRYPTO: "https://robinhood.com/account"})
     assert [d.account for d in _docs(app).values()] == [""]
     assert any("opened another address" in n for n in app.stats["notes"])
@@ -248,7 +248,7 @@ def test_a_crypto_address_that_opens_elsewhere_is_not_read(tmp_path, monkeypatch
 def test_the_crypto_page_waits_for_the_individual_one(tmp_path, monkeypatch):
     """It is checked against the individual page, so without that page in
     the same run it is not read."""
-    app = _run(tmp_path, monkeypatch, {CRYPTO: [(TITLE, "2022-01-31")]},
+    app = _run(tmp_path, monkeypatch, {CRYPTO: [(TITLE, "2010-01-31")]},
                broken=(INDIVIDUAL,))
     assert _docs(app) == {}
     assert any("were not read in this run" in n for n in app.stats["notes"])
@@ -262,7 +262,7 @@ def test_a_retirement_page_showing_the_individual_list_is_not_read(tmp_path, mon
     individual statement would be saved again as a Retirement Monthly
     Statement.
     Nothing in the list says whose it is, and the page's own heading does."""
-    same = [(TITLE, "2022-01-31")]
+    same = [(TITLE, "2010-01-31")]
     app = _run(tmp_path, monkeypatch, {INDIVIDUAL: same, RETIREMENT: same},
                headings={RETIREMENT: ["Individual investing", "Statements"]})
     assert [d.account for d in _docs(app).values()] == [""], "saved twice"
@@ -276,7 +276,7 @@ def test_a_retirement_page_showing_the_individual_list_is_not_read(tmp_path, mon
 def test_a_retirement_page_with_no_heading_of_its_own_is_not_read(tmp_path, monkeypatch):
     for i, headings in enumerate(([], ["Statements"], None)):
         app = _run(tmp_path / str(i), monkeypatch,
-                   {INDIVIDUAL: [(TITLE, "2022-01-31")], RETIREMENT: [(TITLE, "2022-01-31")]},
+                   {INDIVIDUAL: [(TITLE, "2010-01-31")], RETIREMENT: [(TITLE, "2010-01-31")]},
                    headings={RETIREMENT: headings})
         assert [d.account for d in _docs(app).values()] == [""], headings
 
@@ -284,7 +284,7 @@ def test_a_retirement_page_with_no_heading_of_its_own_is_not_read(tmp_path, monk
 def test_a_retirement_page_that_names_its_account_is_read(tmp_path, monkeypatch):
     """Its statements can share a title and a date with the individual
     account's and are its own, so they are kept beside them."""
-    same = [(TITLE, "2022-01-31")]
+    same = [(TITLE, "2010-01-31")]
     app = _run(tmp_path, monkeypatch, {INDIVIDUAL: same, RETIREMENT: same},
                headings={RETIREMENT: ["Retirement", "Traditional IRA"]})
     by_page = {d.source_url: d for d in _docs(app).values()}
@@ -297,7 +297,7 @@ def test_a_retirement_page_that_names_its_account_is_read(tmp_path, monkeypatch)
 def test_a_retirement_page_that_shows_a_title_twice_is_not_read(tmp_path, monkeypatch):
     """Two IRAs can each list a statement of the same month under one
     title, and the second would be dropped as the first without a word."""
-    same = [(TITLE, "2022-01-31")]
+    same = [(TITLE, "2010-01-31")]
     app = _run(tmp_path, monkeypatch, {INDIVIDUAL: same, RETIREMENT: same},
                repeated={RETIREMENT: [TITLE]}, headings={RETIREMENT: ["Retirement"]})
     assert [d.account for d in _docs(app).values()] == [""], "one IRA's statements were kept"
@@ -306,7 +306,7 @@ def test_a_retirement_page_that_shows_a_title_twice_is_not_read(tmp_path, monkey
 
 
 def test_another_page_that_shows_a_title_twice_is_read_as_before(tmp_path, monkeypatch):
-    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2022-01-31")]},
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2010-01-31")]},
                repeated={INDIVIDUAL: [TITLE]})
     assert [d.account for d in _docs(app).values()] == [""]
     assert listing.last(app) == listing.COMPLETE
@@ -315,14 +315,14 @@ def test_another_page_that_shows_a_title_twice_is_read_as_before(tmp_path, monke
 # -- a list cut short is never called whole -------------------------------------
 
 def test_a_list_read_to_its_end_is_noted_whole(tmp_path, monkeypatch):
-    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2022-01-31")]})
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2010-01-31")]})
     assert listing.last(app) == listing.COMPLETE
 
 
 def test_a_page_that_would_not_open_leaves_the_list_short(tmp_path, monkeypatch):
     """The tax page went unread, and a Resume after it called the run
     finished all the same."""
-    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2022-01-31")]},
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2010-01-31")]},
                broken=(TAX,))
     assert [d.account for d in _docs(app).values()] == [""], "what was read is kept"
     assert any("tax page would not open" in n for n in app.stats["notes"])
@@ -332,7 +332,7 @@ def test_a_page_that_would_not_open_leaves_the_list_short(tmp_path, monkeypatch)
 def test_a_view_more_that_stopped_leaves_the_list_short(tmp_path, monkeypatch):
     """What the page showed is kept, and the older statements behind the
     View More that could not be pressed are not taken as not there."""
-    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2022-01-31")]},
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2010-01-31")]},
                stops=(INDIVIDUAL,))
     assert [d.account for d in _docs(app).values()] == [""], "what showed is kept"
     assert any("statements page's View More stopped" in n for n in app.stats["notes"])
