@@ -318,7 +318,8 @@ def logged_in_says(make_app, capsys, forms) -> str:
 def test_login_says_success_only_when_the_forms_page_links_a_statement(make_app, capsys):
     """A link into a product is the site's menu, which any signed-in page
     of the site draws, and the old check took it for the forms page."""
-    menu_only = [link(f"/account/products/{PID}"), link(f"/account/products/{PID}/settings", "Settings")]
+    menu_only = [link(f"/account/products/{PID}"), link(f"/account/products/{PID}/settings", "Settings"),
+                 link(f"/account/products/{PID}/statements", "Statements")]
     said = logged_in_says(make_app, capsys, menu_only)
     assert "Success" not in said and "cannot" in said
     said = logged_in_says(make_app, capsys, menu_only + [latest(PID)])

@@ -408,8 +408,21 @@ def goto_documents(page) -> bool:
 
 def forms_page_links_statements(page) -> bool:
     """Whether the Forms & documents page opened and its own content links
-    at least one product's statements, which only a signed-in page shows."""
-    return bool(goto_documents(page) and product_ids(_entries(page)))
+    a product's latest statement, which only a signed-in page shows. A link
+    to a product's statements page may be the site's menu, so only a link
+    to a statement's own PDF counts."""
+    if not goto_documents(page):
+        return False
+    try:
+        page.wait_for_selector("a[href*='/account/products/'][href*='/statements/'][href$='.pdf']",
+                               timeout=15000)
+    except Exception:
+        return False
+    for e in _entries(page):
+        m = DOCUMENT_PATH_RE.match(e.get("path") or "")
+        if m and m.group(2) == "statements" and e.get("how") == "link" and (e.get("host") or "") == "account.optumbank.com":
+            return True
+    return False
 
 
 def scroll_full_page(page, rounds: int = 8, delay_ms: int = 600) -> None:
