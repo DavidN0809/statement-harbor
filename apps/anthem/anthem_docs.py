@@ -149,7 +149,7 @@ def told_apart_by(record: dict) -> str:
     parts = doc_id.split("|")
     if parts[0] == "MemberDoc" and len(parts) == 3 and parts[2]:
         return "type " + parts[2]
-    if parts[0] == "IdCard" and len(parts) == 4 and parts[3].isdigit():
+    if parts[0] == "IdCard" and len(parts) == 4 and parts[3].isdecimal():
         return "No. %d" % (int(parts[3]) + 1)
     if parts[0] == "Letter" and len(parts) == 2 and parts[1]:
         return parts[1][-6:]
@@ -830,7 +830,7 @@ class App:
             folder.mkdir(parents=True, exist_ok=True)
             # What tells this one apart, used only if the name is taken, as
             # for the EOBs (told_apart_by). Two letters of one subject on one
-            # day were " (2)" apart, and Rename offered the second more.
+            # day were " (2)" apart, and Rename offered the second an ending.
             out_path = unique_path(folder, filename, self.config["max_path_length"],
                                    distinguisher=told_apart_by(record))
             try:

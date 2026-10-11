@@ -39,6 +39,8 @@ def test_each_kind_of_document_is_told_apart_in_words(doc_id, ending):
     # A shape this rule does not know is told apart the usual way.
     ({"document_id": "SOMETHING-ELSE-12345678"}, "345678"),
     ({"document_id": "IdCard|Jane Doe|normal|x"}, "rmal|x"),
+    # A digit int() cannot read, as a hand-edited record could hold.
+    ({"document_id": "IdCard|Jane Doe|normal|²"}, "rmal|²"),
     ({"document_id": "MemberDoc|%s|" % PERIOD}, "%s|" % PERIOD[-5:]),
     ({"document_id": ""}, ""),
     ({}, ""),
