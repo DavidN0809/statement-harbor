@@ -102,9 +102,12 @@ def test_whatever_is_offered_is_something_the_document_knows(app):
             if kw.arg != "distinguisher":
                 continue
             text = ast.unparse(kw.value)
+            # told_apart_by is the core's rule (renaming.told_apart_by), read
+            # from a document's own record, as Anthem builds one from the row
+            # a document was listed in.
             assert any(w in text for w in
                        ("document_id", "order_number", "doc.", "purchase.",
-                        "payment_id", "item_id")), \
+                        "payment_id", "item_id", "told_apart_by(")), \
                 "%s names a file by %s, which the document does not carry" % (
                     app.name, text)
 

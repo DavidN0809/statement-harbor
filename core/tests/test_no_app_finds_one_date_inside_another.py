@@ -164,12 +164,16 @@ BUILTIN_NAMES = set(dir(builtins))
 
 
 def _constant_text(node):
-    """A string put together from string constants alone, or None."""
+    """A string put together from string constants alone, or None. A
+    constant filled in with % is its own written text, the parts it is
+    filled with left as their %s, as controls.py's _PLACE_JS is."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         a, b = _constant_text(node.left), _constant_text(node.right)
         return (a or "") + (b or "") if (a is not None or b is not None) else None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+        return _constant_text(node.left)
     if isinstance(node, ast.JoinedStr):
         return "".join(v.value for v in node.values if isinstance(v, ast.Constant))
     return None

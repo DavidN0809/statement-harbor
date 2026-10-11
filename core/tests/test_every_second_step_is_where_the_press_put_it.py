@@ -111,6 +111,27 @@ def _presses_in(fn):
     return out
 
 
+def _names_nothing(node) -> bool:
+    """A value that names no control, None or a tuple whose first item is
+    None, as `(None, "")` does for a step not looked for."""
+    if isinstance(node, ast.Constant) and node.value is None:
+        return True
+    return (isinstance(node, ast.Tuple) and bool(node.elts)
+            and isinstance(node.elts[0], ast.Constant) and node.elts[0].value is None)
+
+
+def _choices(value) -> list:
+    """What an assignment takes a control from. Through a conditional, each
+    side that names one, so `(None, "") if unsure_press else
+    _second_step(page, appeared, place, trace)` is the call alone and still
+    has to pass the place. A side that is neither a call nor nothing is kept
+    as it is, and counts as not chosen."""
+    if isinstance(value, ast.IfExp):
+        return [c for side in (value.body, value.orelse)
+                if not _names_nothing(side) for c in _choices(side)]
+    return [value]
+
+
 def _site_modules():
     for app in sorted(p for p in (REPO / "apps").iterdir()
                       if p.is_dir() and not p.name.startswith(("_", "."))):
@@ -170,17 +191,18 @@ def census():
                     places |= {t.id for t in n.targets if isinstance(t, ast.Name)}
             chosen = {}
             for n in ast.walk(fn):
-                if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call):
+                if isinstance(n, ast.Assign) and isinstance(n.value, (ast.Call, ast.IfExp)):
                     for t in n.targets:
                         for name in ([t] if isinstance(t, ast.Name) else getattr(t, "elts", [])):
                             if isinstance(name, ast.Name):
-                                chosen.setdefault(name.id, []).append(n.value)
+                                chosen.setdefault(name.id, []).extend(_choices(n.value))
             for line, receiver in _presses_in(fn):
                 if line <= first:
                     continue
                 made = chosen.get(receiver, [])
                 if not made or not all(
-                        isinstance(c.func, ast.Name) and chooses(c.func.id) and _passes(c, places)
+                        isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+                        and chooses(c.func.id) and _passes(c, places)
                         for c in made):
                     findings.append("line %d presses %s, not chosen against the place"
                                     % (line, receiver or "a value it did not name"))
@@ -210,6 +232,16 @@ def census():
 
 
 CENSUS = census()
+
+
+def test_a_step_not_looked_for_after_an_unsure_press_is_still_chosen_against_the_place():
+    """The census looks through `(None, "") if unsure_press else ...` to the
+    call, which must pass the place, and a conditional whose other side
+    names a control of its own is not let through."""
+    good = ast.parse("step, label = (None, '') if unsure else _second_step(page, seen, place, trace)").body[0]
+    assert [ast.unparse(c) for c in _choices(good.value)] == ["_second_step(page, seen, place, trace)"]
+    bad = ast.parse("step, label = other if unsure else _second_step(page, seen, place, trace)").body[0]
+    assert [ast.unparse(c) for c in _choices(bad.value)] == ["other", "_second_step(page, seen, place, trace)"]
 
 
 def test_the_census_is_not_vacuous():
