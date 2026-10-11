@@ -191,6 +191,94 @@ def test_a_new_name_keeps_the_part_of_a_split_order(app, tmp_path, monkeypatch):
     assert renamed == 0, "Rename agrees with the names the review gave, %s" % said
 
 
+def saved(inst, folder: Path, purchase: Purchase, part, name: str = "") -> Path:
+    """An invoice of `purchase` on disk with its record and both CSVs, as
+    the app's own run writes them down, marked for review when the
+    purchase's confidence is Low. Named for its summary and part, or `name`
+    when a download told it apart."""
+    path = invoice(folder, name or name_of(purchase, purchase.summary, part))
+    purchase.pdf_path, purchase.pdf_filename = str(path), path.name
+    inst._record_state(purchase, State.PDF_VERIFIED, extra={
+        "pdf_size": path.stat().st_size, "pdf_pages": 1, "downloaded_ok": True})
+    unsure = purchase.confidence == "Low"
+    inst._write_csv_rows(purchase, receipt_status="Downloaded",
+                         processing_status="Review Needed" if unsure else "Completed")
+    if unsure:
+        inst._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
+                           notes="Low classification confidence")
+    else:
+        inst._record_state(purchase, State.COMPLETED)
+    return path
+
+
+def another_order(summary: str, number: str = "ORDER-0009") -> Purchase:
+    """A purchase of the same day whose name nobody doubted."""
+    other = split_order(number)
+    other.summary, other.confidence = summary, "High"
+    return other
+
+
+@pytest.mark.parametrize("part", [(1, 2), None], ids=["part", "whole"])
+@pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
+def test_a_new_name_another_order_holds_is_told_apart_as_rename_tells_it(
+        app, part, tmp_path, monkeypatch):
+    """The name typed is already another order's file. The review tells the
+    file apart by its order number, as a download and Rename do, and keeps
+    its part. Told apart by " (2)", the first invoice of a split order was
+    "... Garden Hose Invoice (1 of 2) (2).pdf", the next Rename read no part
+    from it and moved it to "... Garden Hose Invoice.pdf", and an order that
+    came whole went from "... Lamp Invoice (2).pdf" to "... Lamp Invoice
+    ORDER-0001.pdf"."""
+    mod = load(app)
+    inst = app_in(mod, tmp_path / "out")
+    folder = inst.paths.folder_for(ONLINE)
+    other = another_order("Garden Hose")
+    held = saved(inst, folder, other, part)
+    purchase = split_order()
+    saved(inst, folder, purchase, part)
+
+    asked, renamed, said = review_then_rename(mod, inst, monkeypatch)
+
+    wanted = Path(name_of(purchase, "Garden Hose", part))
+    wanted = wanted.stem + " ORDER-0001" + wanted.suffix
+    assert len(asked) == 1
+    assert sorted(p.name for p in folder.iterdir()) == sorted([held.name, wanted])
+    assert inst.progress.get(purchase.key)["pdf_filename"] == wanted
+    assert inst.progress.get(other.key)["pdf_filename"] == held.name
+    assert renamed == 0, "Rename agrees with the name the review gave, %s" % said
+
+
+@pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
+def test_a_part_a_download_told_apart_is_kept(app, tmp_path, monkeypatch):
+    """The first invoice of a split order whose name another order's file
+    had when it was saved, "... Unsure Item Invoice (1 of 2) ORDER-0001.pdf"
+    as a download writes it. Rename leaves it as it is, and a new name
+    typed for it keeps "(1 of 2)". Both read no part from a name with the
+    order number after it, so Rename moved it to "... Unsure Item
+    Invoice.pdf" and the review to "... Garden Hose Invoice.pdf"."""
+    mod = load(app)
+    inst = app_in(mod, tmp_path / "out")
+    folder = inst.paths.folder_for(ONLINE)
+    other = another_order("Unsure Item")
+    held = saved(inst, folder, other, (1, 2))
+    purchase = split_order()
+    told = Path(held.name)
+    told = saved(inst, folder, purchase, (1, 2),
+                 name=told.stem + " ORDER-0001" + told.suffix)
+
+    said = []
+    alone = renaming.run_for(inst, apply_changes=True, say=said.append)
+    assert alone.renamed == 0, "Rename leaves a part a download told apart, %s" % said
+    assert told.is_file()
+
+    asked, renamed, said = review_then_rename(mod, inst, monkeypatch)
+
+    wanted = name_of(purchase, "Garden Hose", (1, 2))
+    assert len(asked) == 1
+    assert sorted(p.name for p in folder.iterdir()) == sorted([held.name, wanted])
+    assert renamed == 0, "Rename agrees with the name the review gave, %s" % said
+
+
 def test_target_keeps_the_part_of_an_invoice_it_saved(tmp_path, monkeypatch):
     """Target's own run, from the invoice it placed to the rows it wrote,
     for an order whose two invoices both name its item. Each is placed by
