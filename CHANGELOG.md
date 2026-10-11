@@ -27,23 +27,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
   names no account stops Discover once the months are filed under one, and
   a lookalike address is never suggested for the list of domains.
 
+### Changed
+- **A checkout is set up as one environment, not one in every app folder
+  (#65).** setup-all made a venv in each of the 62 app folders, about 400
+  MB apiece on a Mac and well over 20 GB in all, though every app asks for
+  the same few packages. It now builds one, `gui/.venv`, the control
+  panel's own, with every app's requirements read in one pip call and the
+  shared core. The panel, `paperpull`, and each app's login and
+  review_names files run an app on its own `.venv` when it has one, and
+  otherwise on `gui/.venv` once that can import what an app needs. Until
+  it can, they say to run setup-all, where the panel used to send each
+  provider to a setup of its own. An app that already has a `.venv` keeps
+  running on it, and setup-all names those apps, so an older checkout gets
+  the space back by running setup-all again and then deleting each app's
+  `.venv`. An app's own setup file still gives it a venv of its own. Asked
+  for by appchamp.
+
 ### Fixed
-- **Ally's Discover heard no list for an account with one year of
-  statements.** Ally's statements page asks Ally for a year's list as it
-  opens and again when its year picker moves, and the app reads the list
-  from those answers. It began listening after Discover had opened the
-  page, and by the app's own notes picking the year already shown asks for
-  nothing, so with one year in the picker it heard no list at all, and
-  with the page left on its oldest year it never heard that year. Either
-  way the list was called read. With nothing heard it read the rows
-  instead, which took the statements of one date that read alike as one
-  and kept no document id. Every year is now picked from another one, and
-  the last pick's answer is waited for. With one year in the picker the
-  list is drawn again while the app listens, through the page's Tax Forms
-  tab and back, and only when that brings nothing is the statements
-  address loaded again. A list that never arrives, or a year picker that
-  could not be read, stops the run rather than pass for an empty list.
-  Proven against a made-up page, not yet run against Ally.
 - **USAA's Discover could miss most of the list from 0.26.0 on.** USAA's
   documents page asks USAA for its whole list as it loads, and the app
   reads the list from those answers. Since 0.26.0 the app opened the page
@@ -166,10 +166,32 @@ All notable changes to PaperPull are recorded here. Versioning follows
   later one, rightly, but the records cannot tell that case from the
   other, so it keeps its name there too. Robinhood's and Newrez's own
   records of one document under two keys still count as one.
-
-  told apart by the last six characters of its id, as an EOB already was.
-  A file saved before keeps its name until Rename is run, which offers the
-  new name in a preview first.
+- **Ally's Discover heard no list for an account with one year of
+  statements.** Ally's statements page asks Ally for a year's list as it
+  opens and again when its year picker moves, and the app reads the list
+  from those answers. It began listening after Discover had opened the
+  page, and by the app's own notes picking the year already shown asks for
+  nothing, so with one year in the picker it heard no list at all, and
+  with the page left on its oldest year it never heard that year. Either
+  way the list was called read. With nothing heard it read the rows
+  instead, which took the statements of one date that read alike as one
+  and kept no document id. Every year is now picked from another one, and
+  the last pick's answer is waited for. With one year in the picker the
+  list is drawn again while the app listens, through the page's Tax Forms
+  tab and back, and only when that brings nothing is the statements
+  address loaded again. A list that never arrives, or a year picker that
+  could not be read, stops the run rather than pass for an empty list.
+  Proven against a made-up page, not yet run against Ally.
+- **Capital One and Schwab take each document by its own id, never by its
+  place in the list.** Two documents of one day sharing a type, a title
+  and an account, two buys of one fund in a Schwab account for instance,
+  were told apart only by where each stood in the provider's list. When
+  the list came back in another order, or with a new one ahead of one
+  already saved, the saved one was downloaded again in the other's place
+  and the other never was, and no later run asked for it. Each document
+  is now found by the id it was listed and saved under. Where the
+  provider's ids change and cannot say which of two was saved before, the
+  one not yet saved is marked for manual review rather than guessed at.
 - **Review Names leaves out a file two purchases name, and keeps the name
   a file already has, in every receipt app.** Deleting receipts once they
   are imported elsewhere frees their names, and a later purchase of the
@@ -181,54 +203,6 @@ All notable changes to PaperPull are recorded here. Versioning follows
   summary a file already has moved it to "... (2).pdf", and the next
   Rename offered to move it back. The file now keeps its name, or takes the
   new case when only the case changed, and counts as reviewed.
-- **Every app's next step names a command that still exists.** The
-  run_pilot.bat, diagnose.bat and resume.bat files went when
-  `paperpull <app> <command>` replaced them (#23), and 31 login.bat
-  banners, 48 setup.bat files and 51 messages the apps print still told
-  the person to run them, eight of the banners as "Tell Claude you're
-  signed in". Each now names `paperpull <app> pilot` or
-  `paperpull <app> diagnose`, a login.bat started for a second person
-  shows the `--account` to add, and a message the apps print says to
-  run the diagnostics, the pilot or Resume. The Mac sign-in files, made
-  from the Windows ones, gain the step they lacked and say
-  `./paperpull`, as a checkout on a Mac runs it. The editable document
-  rules of ten apps point at the same command. A census over every
-  launcher, doc, rules file and script an app ships now fails on a
-  deleted launcher's name, where it read only the README and COMMANDS.txt
-  files.
-
-### Security
-- **M&T presses a year heading only when nothing covers it, and once.**
-  M&T's statements list opens one year at a time, and the app pressed each
-  collapsed year's heading through the page with nothing checking what was
-  drawn over it, since the core could check what covers a control only in
-  a page's main frame and the list sits in a frame. The core now reads a
-  control inside a frame in that frame, then checks that the frame is the
-  thing on top in the page at the point to be pressed, as Playwright checks
-  before its own press. Right after the press, unless the control heard the
-  browser's own click at that point, the point is read once more, so a
-  loading cover put up once the press went through does not stop the run.
-  M&T presses each heading that way, with Playwright's own press.
-  Something over a heading, inside the frame or over the frame in the
-  page, stops the run before anything is pressed, and so does a heading
-  that cannot be checked, with the reason said in PaperPull's own words and
-  the failure file written. The words held to the forbidden list are now
-  those of the heading pressed, where a second call used to find the
-  heading again, and a heading pressed once is not pressed again, the same
-  element or one the page draws anew with the same id and words. The
-  heading is gone from the reviewed list of presses made through a page
-  script, where two links PG&E makes itself to save a PDF remain.
-  run lists it among what needs attention.
-- **Capital One and Schwab take each document by its own id, never by its
-  place in the list.** Two documents of one day sharing a type, a title
-  and an account, two buys of one fund in a Schwab account for instance,
-  were told apart only by where each stood in the provider's list. When
-  the list came back in another order, or with a new one ahead of one
-  already saved, the saved one was downloaded again in the other's place
-  and the other never was, and no later run asked for it. Each document
-  is now found by the id it was listed and saved under. Where the
-  provider's ids change and cannot say which of two was saved before, the
-  one not yet saved is marked for manual review rather than guessed at.
 - **Review Names keeps the "(1 of 2)" of an order split into several
   invoices, in every receipt app.** Target and Amazon save each invoice of
   a split order with its part at the end of its name. A new name typed in
@@ -270,6 +244,58 @@ All notable changes to PaperPull are recorded here. Versioning follows
   computer Meijer then asked again for every receipt set aside, and the
   other receipt apps said each one was already completed instead of why it
   was skipped. Both now carry the days.
+- **A run scoped to part of the history no longer counts the whole list as
+  read.** A Discover, Pilot, Run All or Resume with a year or dates set,
+  as the panel's Scope row passes them, noted the list as read to its end
+  once its part was, in every app but Best Buy, Apple and Uber. So after
+  a run that stopped partway through the whole history, one scoped run
+  let the next unscoped Resume finish clean with the rest never read. A
+  scoped run that reaches the end of its part now leaves things as the
+  last unscoped run left them, so a list that stopped stays unfinished
+  until a run with no year or dates set reads all of it, and Resume says
+  to run one. A list read whole stays whole through scoped runs, even
+  after one of them stops. Best Buy, Apple and Uber, which counted a run
+  for a year or from a start date as unfinished and so read the list
+  again on every Resume after one, now do the same, so keeping a scope
+  set after a whole listing costs no second reading. A scoped run that
+  stops is still a run that stopped.
+- **Target fetches an invoice put aside again once its copy is deleted,
+  and no longer saves a renamed invoice twice.** An online order with no
+  store receipt is saved as its invoices, and one that fails its check is
+  put aside in Manual Review, as a delivery driver's tip always is, since
+  it names no item. When every invoice of an order was put aside,
+  deleting the copy the order's record names asks for the order again, as
+  it does for a receipt put aside. The next run counted the deleted copy
+  as still on file, so it went through the order's invoices on Target,
+  saved nothing, and wrote the order down as needing review again under
+  the deleted file's name. Every run after did the same, adding a row to
+  the receipt index each time, and so did a copy that no longer opened as
+  a PDF. Now that invoice is fetched and checked again, as a receipt put
+  aside is, and the order is then left alone while its copies are there
+  and open. A tip fetched again is put aside again. An invoice that was
+  kept still counts as saved after its file is deleted, unless Download
+  again asks for it. Review Names and Rename gave an invoice's file a new
+  name while the record's list of the order's invoices kept the old one,
+  so Download again took the renamed invoice for missing and saved it a
+  second time. It is now found under its new name.
+- **A control a press reveals is pressed only where that press put it.**
+  When pressing a document's own control brought nothing, American
+  Family, Apple Card, AT&T, E*TRADE, Golden 1, Nelnet, Newrez, SBA, SMUD,
+  State Farm, Verizon Mobile and Wells Fargo pressed a control the press
+  had newly shown whose words finish a download, such as Download PDF or
+  Save PDF, wherever on the page it was. A list drawn anew after the
+  press, or a panel opened for another row, could show another document's
+  Download, and its PDF would have been saved under this document's name.
+  Now such a control is pressed only inside a dialog or menu the press
+  opened, or beside the pressed control in a part of the page that held
+  nothing else to press, and only while the pressed control is still on
+  the page it was pressed on. Otherwise nothing more is pressed, the
+  document is left for the next run, and download-attempt.json says where
+  the control sat. AT&T's Regular PDF menu is still taken wherever AT&T
+  draws it, since that was never recorded, but only while Download PDF is
+  on the page, and the trace now says where it sat. Once the Download PDF
+  pressed has left the page, AT&T presses nothing more for that bill,
+  where it used to press whatever View/print PDF was showing then.
 - **A document whose Download the site has turned off no longer stops
   every run there.** Most apps find a document's Download by its role and
   its name, which finds a grayed out one too. Playwright waited for it to
@@ -289,6 +315,51 @@ All notable changes to PaperPull are recorded here. Versioning follows
   since that press may still bring the PDF. Playwright waits as long as it
   always did, so a control the page turns on in that time is pressed as
   before.
+- **`paperpull list` in the installed app no longer marks every app as
+  needing setup.** It marked each app with no `.venv` of its own, which in
+  the installed app, whose one Python carries everything, was all of them.
+  It now marks only an app that nothing can run.
+- **The Mac sign-in and setup files no longer print a stray caret.** Nine
+  of them showed the caret Windows needs before & and >, as in
+  "Statements ^& Activity".
+- **The Windows sign-in files of ADP, AmFam, AT&T, Nelnet and Wells Fargo,
+  and AT&T's setup, print their whole instructions.** A bare & on a line
+  they print ends the line in Windows, so "Open your Statements &
+  Documents page" stopped after "Statements" and was followed by
+  "'Documents' is not recognized as an internal or external command", and
+  AT&T's title and steps said the same of "T". Each & is now written the
+  way Windows prints it, as PG&E and M&T always were, and a check reads
+  every Windows file the repository ships for another such line.
+- **Every app's next step names a command that still exists.** The
+  run_pilot.bat, diagnose.bat and resume.bat files went when
+  `paperpull <app> <command>` replaced them (#23), and 31 login.bat
+  banners, 48 setup.bat files and 51 messages the apps print still told
+  the person to run them, eight of the banners as "Tell Claude you're
+  signed in". Each now names `paperpull <app> pilot` or
+  `paperpull <app> diagnose`, a login.bat started for a second person
+  shows the `--account` to add, and a message the apps print says to
+  run the diagnostics, the pilot or Resume. The Mac sign-in files, made
+  from the Windows ones, gain the step they lacked and say
+  `./paperpull`, as a checkout on a Mac runs it. The editable document
+  rules of ten apps point at the same command. A census over every
+  launcher, doc, rules file and script an app ships now fails on a
+  deleted launcher's name, where it read only the README and COMMANDS.txt
+  files.
+- **A File names pattern with {number} keeps a statement's file named for
+  the id it was saved under.** Capital One and Schwab write down the id
+  each new listing gives a statement they already know, and Rename named
+  the file for the newest one. Schwab says its ids are not stable from one
+  listing to the next, so under such a pattern a Rename after a Discover
+  could offer to rename every Schwab file, while the File names page's
+  preview showed the id as saved. And two statements of one day,
+  one title and one account are told apart by their place in the list, so
+  when the list came back in another order each took the other's id, and
+  Rename offered to name each file for the statement it does not hold.
+  Rename now reads which document a file holds, its order number or id,
+  from the record written when the file was saved, while a summary or an
+  account the app has learned to read since still reaches the name. A
+  statement downloaded today is named for the id today's listing gave it,
+  as before.
 - **Ally's Rename keeps the name a statement's PDF gave it.** Ally names
   each statement after the accounts and the addressee its PDF shows, but
   Rename read the list's description over it and offered every such file
@@ -300,6 +371,36 @@ All notable changes to PaperPull are recorded here. Versioning follows
   listed without Ally's id, as when the list is read from the page, is no
   longer taken again on every run. One taken that way before this version
   is taken once more, beside its first copy, and then no more.
+- **The next Rename finishes a file left under its temporary name.** A
+  file of a swap that Rename could neither finish nor send back, with its
+  row in the index and its record naming it under a name ending
+  ".renaming", was left out of every later Rename as not a PDF the app
+  holds. It stayed there until it was renamed by hand, and then the index
+  named a file that was gone. Rename now takes such a file, in a folder
+  the app files documents in and never a link, as one of its own, and
+  gives it the name the app would give it today.
+
+### Security
+- **M&T presses a year heading only when nothing covers it, and once.**
+  M&T's statements list opens one year at a time, and the app pressed each
+  collapsed year's heading through the page with nothing checking what was
+  drawn over it, since the core could check what covers a control only in
+  a page's main frame and the list sits in a frame. The core now reads a
+  control inside a frame in that frame, then checks that the frame is the
+  thing on top in the page at the point to be pressed, as Playwright checks
+  before its own press. Right after the press, unless the control heard the
+  browser's own click at that point, the point is read once more, so a
+  loading cover put up once the press went through does not stop the run.
+  M&T presses each heading that way, with Playwright's own press.
+  Something over a heading, inside the frame or over the frame in the
+  page, stops the run before anything is pressed, and so does a heading
+  that cannot be checked, with the reason said in PaperPull's own words and
+  the failure file written. The words held to the forbidden list are now
+  those of the heading pressed, where a second call used to find the
+  heading again, and a heading pressed once is not pressed again, the same
+  element or one the page draws anew with the same id and words. The
+  heading is gone from the reviewed list of presses made through a page
+  script, where two links PG&E makes itself to save a PDF remain.
 
 ## [0.45.0] - 2026-10-07
 
@@ -333,56 +434,7 @@ did not read.
   reached stops the listing, where it used to end it as though the list
   were whole.
 
-### Changed
-- **A checkout is set up as one environment, not one in every app folder
-  (#65).** setup-all made a venv in each of the 62 app folders, about 400
-  MB apiece on a Mac and well over 20 GB in all, though every app asks for
-  the same few packages. It now builds one, `gui/.venv`, the control
-  panel's own, with every app's requirements read in one pip call and the
-  shared core. The panel, `paperpull`, and each app's login and
-  review_names files run an app on its own `.venv` when it has one, and
-  otherwise on `gui/.venv` once that can import what an app needs. Until
-  it can, they say to run setup-all, where the panel used to send each
-  provider to a setup of its own. An app that already has a `.venv` keeps
-  running on it, and setup-all names those apps, so an older checkout gets
-  the space back by running setup-all again and then deleting each app's
-  `.venv`. An app's own setup file still gives it a venv of its own. Asked
-  for by appchamp.
-
 ### Fixed
-- **A control a press reveals is pressed only where that press put it.**
-  When pressing a document's own control brought nothing, American
-  Family, Apple Card, AT&T, E*TRADE, Golden 1, Nelnet, Newrez, SBA, SMUD,
-  State Farm, Verizon Mobile and Wells Fargo pressed a control the press
-  had newly shown whose words finish a download, such as Download PDF or
-  Save PDF, wherever on the page it was. A list drawn anew after the
-  press, or a panel opened for another row, could show another document's
-  Download, and its PDF would have been saved under this document's name.
-  Now such a control is pressed only inside a dialog or menu the press
-  opened, or beside the pressed control in a part of the page that held
-  nothing else to press, and only while the pressed control is still on
-  the page it was pressed on. Otherwise nothing more is pressed, the
-  document is left for the next run, and download-attempt.json says where
-  the control sat. AT&T's Regular PDF menu is still taken wherever AT&T
-  draws it, since that was never recorded, but only while Download PDF is
-  on the page, and the trace now says where it sat. Once the Download PDF
-  pressed has left the page, AT&T presses nothing more for that bill,
-  where it used to press whatever View/print PDF was showing then.
-- **`paperpull list` in the installed app no longer marks every app as
-  needing setup.** It marked each app with no `.venv` of its own, which in
-  the installed app, whose one Python carries everything, was all of them.
-  It now marks only an app that nothing can run.
-- **The Mac sign-in and setup files no longer print a stray caret.** Nine
-  of them showed the caret Windows needs before & and >, as in
-  "Statements ^& Activity".
-- **The Windows sign-in files of ADP, AmFam, AT&T, Nelnet and Wells Fargo,
-  and AT&T's setup, print their whole instructions.** A bare & on a line
-  they print ends the line in Windows, so "Open your Statements &
-  Documents page" stopped after "Statements" and was followed by
-  "'Documents' is not recognized as an internal or external command", and
-  AT&T's title and steps said the same of "T". Each & is now written the
-  way Windows prints it, as PG&E and M&T always were, and a check reads
-  every Windows file the repository ships for another such line.
 - **A run whose documents page would not open no longer finishes clean.**
   In twenty document apps, when Discover could not open the documents
   page, even after checking the session, it said so and returned. Pilot
@@ -504,21 +556,6 @@ did not read.
   fit the folder's limit, where it is told apart by a number as before. It
   happened in the apps that tell a second statement apart by an id, and
   for PayPal's business statements, told apart by their first day.
-- **A File names pattern with {number} keeps a statement's file named for
-  the id it was saved under.** Capital One and Schwab write down the id
-  each new listing gives a statement they already know, and Rename named
-  the file for the newest one. Schwab says its ids are not stable from one
-  listing to the next, so under such a pattern a Rename after a Discover
-  could offer to rename every Schwab file, while the File names page's
-  preview showed the id as saved. And two statements of one day,
-  one title and one account are told apart by their place in the list, so
-  when the list came back in another order each took the other's id, and
-  Rename offered to name each file for the statement it does not hold.
-  Rename now reads which document a file holds, its order number or id,
-  from the record written when the file was saved, while a summary or an
-  account the app has learned to read since still reaches the name. A
-  statement downloaded today is named for the id today's listing gave it,
-  as before.
 - **Every receipt app's Resume reads the purchase list again after a run
   that stopped while reading it.** After a Discover, Pilot or Run All that
   stopped while it read the purchase list, at a sign-in, a check or a
@@ -677,33 +714,6 @@ did not read.
   at most thirty times and no further once a press draws nothing new. A
   row counts only once its download icon is drawn, where one in the
   page's text that was not drawn used to count. Contributed by tylerverry.
-- **Target fetches an invoice put aside again once its copy is deleted,
-  and no longer saves a renamed invoice twice.** An online order with no
-  store receipt is saved as its invoices, and one that fails its check is
-  put aside in Manual Review, as a delivery driver's tip always is, since
-  it names no item. When every invoice of an order was put aside,
-  deleting the copy the order's record names asks for the order again, as
-  it does for a receipt put aside. The next run counted the deleted copy
-  as still on file, so it went through the order's invoices on Target,
-  saved nothing, and wrote the order down as needing review again under
-  the deleted file's name. Every run after did the same, adding a row to
-  the receipt index each time, and so did a copy that no longer opened as
-  a PDF. Now that invoice is fetched and checked again, as a receipt put
-  aside is, and the order is then left alone while its copies are there
-  and open. A tip fetched again is put aside again. An invoice that was
-  kept still counts as saved after its file is deleted, unless Download
-  again asks for it. Review Names and Rename gave an invoice's file a new
-  name while the record's list of the order's invoices kept the old one,
-  so Download again took the renamed invoice for missing and saved it a
-  second time. It is now found under its new name.
-- **The next Rename finishes a file left under its temporary name.** A
-  file of a swap that Rename could neither finish nor send back, with its
-  row in the index and its record naming it under a name ending
-  ".renaming", was left out of every later Rename as not a PDF the app
-  holds. It stayed there until it was renamed by hand, and then the index
-  named a file that was gone. Rename now takes such a file, in a folder
-  the app files documents in and never a link, as one of its own, and
-  gives it the name the app would give it today.
 
 ### Security
 - **A press made through the page is made only when it is safe, and never
@@ -758,25 +768,6 @@ did not read.
   run before it says a prompt is showing, saying why in PaperPull's own
   words and writing the failure file. The scaffold capture ADP carried,
   which no run called, is gone.
-  with the reason it is safe. Besides the core's own, four remain on it,
-  ADP's press of the View statement that shows its identity check, M&T's
-  year headings in its statements frame, and two links PG&E makes itself to
-  save a PDF.
-- **A run scoped to part of the history no longer counts the whole list as
-  read.** A Discover, Pilot, Run All or Resume with a year or dates set,
-  as the panel's Scope row passes them, noted the list as read to its end
-  once its part was, in every app but Best Buy, Apple and Uber. So after
-  a run that stopped partway through the whole history, one scoped run
-  let the next unscoped Resume finish clean with the rest never read. A
-  scoped run that reaches the end of its part now leaves things as the
-  last unscoped run left them, so a list that stopped stays unfinished
-  until a run with no year or dates set reads all of it, and Resume says
-  to run one. A list read whole stays whole through scoped runs, even
-  after one of them stops. Best Buy, Apple and Uber, which counted a run
-  for a year or from a start date as unfinished and so read the list
-  again on every Resume after one, now do the same, so keeping a scope
-  set after a whole listing costs no second reading. A scoped run that
-  stops is still a run that stopped.
 
 ## [0.44.0] - 2026-10-07
 
