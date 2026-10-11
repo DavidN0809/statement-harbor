@@ -328,11 +328,15 @@ def scroll_full_page(page, rounds: int = 8, delay_ms: int = 700) -> None:
         pass
 
 
-def _to_front(page) -> None:
+def to_front(page) -> None:
     """Bring the tab forward. A press waits for the control to hold still
     across two animation frames, and a tab in the background gets none, so
     a press in a tab behind another waited out its whole timeout on every
-    View More and every download (seen 2026-10-09 with three tabs open)."""
+    View More and every download (seen 2026-10-09 with three tabs open).
+
+    Called once each time the app opens a page, and not before every
+    press, since in the person's own browser that pulled the app's tab in
+    front of theirs every few seconds."""
     try:
         page.bring_to_front()
     except Exception:
@@ -342,13 +346,12 @@ def _to_front(page) -> None:
 def expand_all(page) -> bool:
     """Click 'View More' / 'Show more' repeatedly until the full list loads.
     Robinhood's 'View More' is an <a> link (not a button), so both roles are
-    tried. The tab is brought forward first (_to_front).
+    tried.
 
     True once no such control is left on the page. False when one could not
     be pressed, or was still there after sixty presses, since the list on
     the page may then be short, and a caller must not take it for the whole
     list."""
-    _to_front(page)
     pat = re.compile(r"^\s*(show|load|view|see)\s+more\s*$|^\s*view\s+all\s*$|^\s*older\s*$", re.I)
     for _ in range(60):
         clicked = False
@@ -1029,7 +1032,6 @@ def download_named(page, title: str, out_path, year: str = "") -> bool:
     pressed when none is."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    _to_front(page)
     control = find_control(page, title, year)
     if control is None:
         log.info("download control not found for %r%s", title,

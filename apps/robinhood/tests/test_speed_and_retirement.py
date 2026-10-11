@@ -1,9 +1,33 @@
-"""Checks for the control finder and the statement sources. No browser."""
+"""Checks for the control finder, the statement sources, View More and a
+document taken from the page it is on. No browser.
+
+The pages here are made up, and so are the statements, in the shape the
+statement links take."""
 import sys, unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
+import storage  # noqa: E402  binds this provider's AppSpec
+import robinhood_docs  # noqa: E402
 import robinhood_site as site  # noqa: E402
+from paperpull_core import doc_types  # noqa: E402
+from paperpull_core import storage as core_storage  # noqa: E402
+from paperpull_core.models import State  # noqa: E402
+
+INDIVIDUAL = "https://robinhood.com/account/reports-statements/individual"
+RETIREMENT = "https://robinhood.com/account/reports-statements/retirement"
+
+
+@pytest.fixture(autouse=True)
+def default_names():
+    storage.set_filename_owner("")
+    core_storage.set_filename_patterns({})
+    yield
+    core_storage.set_filename_patterns({})
 
 
 class FakePage:
@@ -128,10 +152,10 @@ class _MorePage:
 
     def __init__(self, presses=0, covered=False):
         self.left, self.covered = presses, covered
-        self.tried, self.timeouts = 0, []
+        self.tried, self.timeouts, self.fronted = 0, [], 0
 
     def bring_to_front(self):
-        pass
+        self.fronted += 1
 
     def wait_for_timeout(self, ms):
         pass
@@ -166,6 +190,7 @@ def test_view_more_is_pressed_to_the_end_of_the_list():
     page = _MorePage(presses=3)
     assert site.expand_all(page) is True
     assert page.tried == 3 and page.left == 0
+    assert page.fronted == 0, "the tab is brought forward where the page is opened"
 
 
 def test_a_view_more_that_cannot_be_pressed_says_the_list_is_short():
@@ -183,6 +208,119 @@ def test_a_view_more_that_never_ends_says_the_list_is_short():
     page = _MorePage(presses=None)
     assert site.expand_all(page) is False
     assert page.tried == 60
+
+
+# -- a document taken from the page it is on ----------------------------------
+
+def _text_pdf(path: Path, lines) -> None:
+    """A one page PDF whose lines pypdf reads back."""
+    stream = "".join("BT /F1 12 Tf 72 %d Td (%s) Tj ET\n" % (720 - 20 * i, line)
+                     for i, line in enumerate(lines)).encode("latin-1")
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for i, body in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % i + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    for off in offsets:
+        out += b"%010d 00000 n \n" % off
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(bytes(out) + b" " * 4000)
+
+
+class _Tab:
+    """A tab that goes where it is sent, unless the site sends it on."""
+
+    def __init__(self, url="", lands=None):
+        self.url, self.lands = url, dict(lands or {})
+        self.opened, self.fronted = [], 0
+
+    def goto(self, url, **kw):
+        self.opened.append(url)
+        self.url = self.lands.get(url, url)
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def bring_to_front(self):
+        self.fronted += 1
+
+
+def _app(tmp_path):
+    app = object.__new__(robinhood_docs.App)
+    app.args = SimpleNamespace(redownload=False, start_date=None, end_date=None,
+                               year=None, type=None, max_docs=None, dry_run=False)
+    app.config = {"max_path_length": 240, "min_pdf_bytes": 1000, "owner": "",
+                  "document_types": ["Statement", "Tax Document"],
+                  "delay_min_seconds": 0, "delay_max_seconds": 0, "pilot_count": 5}
+    app.paths = storage.Paths(tmp_path)
+    app.paths.ensure()
+    app.progress = storage.JsonStore(app.paths.progress_json)
+    app.discovery = storage.JsonStore(app.paths.discovery_json)
+    app.index_csv = storage.CsvFile(app.paths.document_index_csv,
+                                    storage.DOCUMENT_INDEX_COLUMNS)
+    app.rules = doc_types.load_rules()
+    app.stats = {"mode": "", "discovered": 0, "manual_review": 0, "new_files": [],
+                 "dates": [], "statements": 0, "tax_documents": 0,
+                 "insurance_documents": 0, "other": 0, "validation_failures": 0,
+                 "duplicate_filenames": 0, "failed": 0, "skipped_out_of_scope": 0,
+                 "skipped_completed": 0, "wrong_document": 0, "crypto_refused": 0,
+                 "notes": []}
+    app._journal = SimpleNamespace(checkpoint=lambda *a, **k: None,
+                                   op=lambda *a, **k: None)
+    app.check_session = lambda page, challenge=None: False
+    app.write_failure = lambda *a, **k: None
+    return app
+
+
+def _statement(title="January 2022 Monthly Statement", date="2022-01-31",
+               source=INDIVIDUAL, account=""):
+    summary = ("%s Monthly Statement" % account) if account else "Monthly Statement"
+    return robinhood_docs.Document(title=title, category=doc_types.STATEMENT,
+                                   summary=summary, date=date, source_url=source,
+                                   account=account)
+
+
+def _presses(monkeypatch, lines=None):
+    """Where each press was made. A press saves a statement that prints
+    its own title, or `lines` when given."""
+    pressed = []
+
+    def press(page, title, out_path, year=""):
+        pressed.append(page.url)
+        _text_pdf(Path(out_path), lines or ["Robinhood Securities LLC", title])
+        return True
+    monkeypatch.setattr(site, "download_named", press)
+    return pressed
+
+
+def _take(app, page, doc):
+    app.download_one(page, doc, storage.build_pdf_filename(doc.date, doc.summary, "",
+                                                           record=doc))
+    return app.progress.get(doc.key) or {}
+
+
+def test_the_tab_is_brought_forward_once_for_each_page_it_opens(tmp_path, monkeypatch):
+    """Not before every press. In the person's own browser that pulled the
+    app's tab in front of theirs every few seconds."""
+    app = _app(tmp_path)
+    pressed = _presses(monkeypatch)
+    monkeypatch.setattr(site, "has_control", lambda page, title, year="": True)
+    page = _Tab()
+    _take(app, page, _statement("February 2022 Monthly Statement", "2022-02-28"))
+    _take(app, page, _statement())
+    assert page.opened == [INDIVIDUAL] and pressed == [INDIVIDUAL, INDIVIDUAL]
+    assert page.fronted == 1
 
 
 if __name__ == "__main__":

@@ -671,6 +671,7 @@ class App:
             while self.check_session(page):
                 page.goto(url, wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(4000)
+            site.to_front(page)
             # An account page is read only where it was asked for. Checked
             # before anything is pressed and again before the list is read.
             if account and not site.at_address(page.url, url):
@@ -966,6 +967,7 @@ class App:
             while self.check_session(page):
                 page.goto(source, wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(3000)
+            site.to_front(page)
             # Older statements are hidden behind "View More" pagination, so the
             # list must be fully expanded before the control can be found.
             site.expand_all(page)
