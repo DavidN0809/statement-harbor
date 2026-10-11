@@ -18,6 +18,11 @@ The crypto page is read only as itself, at its own address and after the
 individual page, and a document on it with the title and date of an
 individual one is refused, and the run says so.
 
+The retirement page, read since #74, is read only at its own address and
+only when a heading of its own names a retirement account, since its
+statements can share a title and a date with the individual ones and the
+list alone cannot say whose they are.
+
 The titles here are invented, in the shape the statement links take.
 """
 import sys
@@ -178,8 +183,13 @@ def test_discovery_keeps_it_under_its_new_key(tmp_path):
 # -- the crypto page is read only as itself ------------------------------------
 
 class _Tab:
-    def __init__(self, lands=None, broken=()):
+    """A tab that goes where it is sent, unless the site sends it on or the
+    page is `broken`, and shows the headings `headings` gives for the
+    address it is at."""
+
+    def __init__(self, lands=None, broken=(), headings=None):
         self.url, self.lands, self.broken = "", lands or {}, broken
+        self.headings = dict(headings or {})
 
     def goto(self, url, **kw):
         if url in self.broken:
@@ -188,6 +198,9 @@ class _Tab:
 
     def wait_for_timeout(self, ms):
         pass
+
+    def evaluate(self, js, arg=None):
+        return self.headings.get(self.url) if js == site._HEADINGS_JS else None
 
 
 def _run(tmp_path, monkeypatch, listings, stops=(), **tab):
@@ -236,6 +249,45 @@ def test_the_crypto_page_waits_for_the_individual_one(tmp_path, monkeypatch):
                broken=(INDIVIDUAL,))
     assert _docs(app) == {}
     assert any("were not read in this run" in n for n in app.stats["notes"])
+
+
+# -- the retirement page is read only as itself --------------------------------
+
+def test_a_retirement_page_showing_the_individual_list_is_not_read(tmp_path, monkeypatch):
+    """An account without a retirement account can be shown the individual
+    list at the retirement address, as the crypto address did, and every
+    individual statement was saved again as a Retirement Monthly Statement.
+    Nothing in the list says whose it is, and the page's own heading does."""
+    same = [(TITLE, "2022-01-31")]
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: same, RETIREMENT: same},
+               headings={RETIREMENT: ["Individual investing", "Statements"]})
+    assert [d.account for d in _docs(app).values()] == [""], "saved twice"
+    assert any("retirement statements page does not name a retirement account" in n
+               for n in app.stats["notes"])
+    # An account with no retirement account has nothing on that page to
+    # list, so the list is not short for it.
+    assert listing.last(app) == listing.COMPLETE
+
+
+def test_a_retirement_page_with_no_heading_of_its_own_is_not_read(tmp_path, monkeypatch):
+    for i, headings in enumerate(([], ["Statements"], None)):
+        app = _run(tmp_path / str(i), monkeypatch,
+                   {INDIVIDUAL: [(TITLE, "2022-01-31")], RETIREMENT: [(TITLE, "2022-01-31")]},
+                   headings={RETIREMENT: headings})
+        assert [d.account for d in _docs(app).values()] == [""], headings
+
+
+def test_a_retirement_page_that_names_its_account_is_read(tmp_path, monkeypatch):
+    """Its statements can share a title and a date with the individual
+    account's and are its own, so they are kept beside them."""
+    same = [(TITLE, "2022-01-31")]
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: same, RETIREMENT: same},
+               headings={RETIREMENT: ["Retirement", "Traditional IRA"]})
+    by_page = {d.source_url: d for d in _docs(app).values()}
+    assert sorted(by_page) == [INDIVIDUAL, RETIREMENT]
+    assert by_page[RETIREMENT].account == "Retirement"
+    assert by_page[RETIREMENT].summary == "Retirement Monthly Statement"
+    assert app.stats["crypto_refused"] == 0
 
 
 # -- a list cut short is never called whole -------------------------------------

@@ -610,6 +610,60 @@ def account_for(source_url: str) -> str:
     return dict(STATEMENT_PAGES).get(source_url or "", "")
 
 
+# An account page that has to name its own account before it is read or
+# pressed on, with the words that name it. Robinhood may show an account
+# without a retirement account the individual list at the retirement
+# address, as the crypto address did (#62), and those statements were read
+# and saved again as retirement statements. The crypto page is told apart
+# from the individual one by its list instead, as it always was.
+ACCOUNT_NAMES = {
+    "Retirement": re.compile(r"(?i:\bretirement\b)|\bIRAs?\b"),
+}
+# Words that name an account other than the one asked for. A page whose
+# headings name one is not taken for that account's own page, whatever else
+# it says. An "Individual Retirement Account" is a retirement account.
+_OTHER_ACCOUNT_RE = re.compile(r"\bindividual\b(?!\s+retirement)|\bcrypto\b", re.I)
+
+# The headings in the page's main region, the part that is the page itself,
+# leaving out any inside a link, a button, a tab or the navigation, which
+# on these pages name every account. None when the page has no main region.
+_HEADINGS_JS = r"""() => {
+  const region = document.querySelector('main, [role=main]');
+  if (!region) return null;
+  const out = [];
+  for (const h of region.querySelectorAll('h1, h2, h3, h4, [role=heading]')) {
+    if (h.closest('nav, a, button, [role=navigation], [role=tablist], [role=tab], [role=menu], [role=link], [role=button]')) continue;
+    if (!h.getClientRects().length) continue;
+    const t = (h.innerText || '').replace(/\s+/g, ' ').trim();
+    if (t) out.push(t.slice(0, 200));
+  }
+  return out;
+}"""
+
+
+def names_account(page, account: str) -> bool:
+    """Whether the page in front of the app names `account` as its own, by
+    a heading in its main region. True for an account no words are kept
+    for, which is read as it always was. False when the headings cannot be
+    read, when none names the account, and when any names another one.
+
+    Only headings. A tab or a link that says Retirement is on every page of
+    the statements hub, and the one for the address open is marked as
+    chosen by the address, whatever list the page shows under it."""
+    words = ACCOUNT_NAMES.get(account or "")
+    if words is None:
+        return True
+    try:
+        headings = page.evaluate(_HEADINGS_JS)
+    except Exception:
+        return False
+    if not isinstance(headings, list):
+        return False
+    said = [str(h) for h in headings]
+    return (any(words.search(h) for h in said)
+            and not any(_OTHER_ACCOUNT_RE.search(h) for h in said))
+
+
 def at_address(current: str, wanted: str) -> bool:
     """True when the tab is on the page it was sent to.
 

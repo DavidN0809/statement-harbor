@@ -239,11 +239,16 @@ def _text_pdf(path: Path, lines) -> None:
 
 
 class _Tab:
-    """A tab that goes where it is sent, unless the site sends it on."""
+    """A tab that goes where it is sent, unless the site sends it on, and
+    shows the headings `headings` gives for the address it is at."""
 
-    def __init__(self, url="", lands=None):
+    def __init__(self, url="", lands=None, headings=None):
         self.url, self.lands = url, dict(lands or {})
+        self.headings = dict(headings or {})
         self.opened, self.fronted = [], 0
+
+    def evaluate(self, js, arg=None):
+        return self.headings.get(self.url) if js == site._HEADINGS_JS else None
 
     def goto(self, url, **kw):
         self.opened.append(url)
@@ -293,15 +298,23 @@ def _statement(title="January 2022 Monthly Statement", date="2022-01-31",
 
 def _presses(monkeypatch, lines=None):
     """Where each press was made. A press saves a statement that prints
-    its own title, or `lines` when given."""
+    its own title and the page it came from, or `lines` when given."""
     pressed = []
 
     def press(page, title, out_path, year=""):
         pressed.append(page.url)
-        _text_pdf(Path(out_path), lines or ["Robinhood Securities LLC", title])
+        _text_pdf(Path(out_path), lines or ["Robinhood Securities LLC", title, page.url])
         return True
     monkeypatch.setattr(site, "download_named", press)
     return pressed
+
+
+def _retirement(title="January 2022 Monthly Statement", date="2022-01-31"):
+    return _statement(title, date, source=RETIREMENT, account="Retirement")
+
+
+def _statements_saved(app):
+    return sorted(p.name for p in app.paths.folder_for(doc_types.STATEMENT).glob("*.pdf"))
 
 
 def _take(app, page, doc):
@@ -321,6 +334,93 @@ def test_the_tab_is_brought_forward_once_for_each_page_it_opens(tmp_path, monkey
     _take(app, page, _statement())
     assert page.opened == [INDIVIDUAL] and pressed == [INDIVIDUAL, INDIVIDUAL]
     assert page.fronted == 1
+
+
+# -- a retirement statement is the retirement account's own ------------------
+
+def test_a_retirement_statement_is_not_pressed_on_another_address(tmp_path, monkeypatch):
+    """An account holder whose retirement address opened another page had
+    the statement of that title there pressed and filed as retirement."""
+    app = _app(tmp_path)
+    pressed = _presses(monkeypatch)
+    expanded = []
+    monkeypatch.setattr(site, "expand_all", lambda page: expanded.append(page.url) or True)
+    page = _Tab(lands={RETIREMENT: INDIVIDUAL}, headings={INDIVIDUAL: ["Individual investing"]})
+    doc = _retirement()
+    rec = _take(app, page, doc)
+    assert pressed == [] and expanded == [], "nothing is pressed on another page"
+    assert rec["state"] == State.NEEDS_MANUAL_REVIEW.value and not rec.get("downloaded_ok")
+    assert "opened another address" in rec["notes"]
+    assert not app._already_done(doc)
+    assert _statements_saved(app) == []
+
+
+def test_a_retirement_statement_is_not_pressed_on_a_page_naming_no_retirement_account(
+        tmp_path, monkeypatch):
+    app = _app(tmp_path)
+    pressed = _presses(monkeypatch)
+    page = _Tab(headings={RETIREMENT: ["Individual investing"]})
+    doc = _retirement()
+    rec = _take(app, page, doc)
+    assert page.opened == [RETIREMENT] and pressed == []
+    assert rec["state"] == State.NEEDS_MANUAL_REVIEW.value
+    assert "did not name a retirement account" in rec["notes"]
+    assert not app._already_done(doc)
+    assert _statements_saved(app) == []
+
+
+def test_a_retirement_statement_that_is_the_individual_file_is_refused(tmp_path, monkeypatch):
+    """The page named a retirement account and handed over the individual
+    statement of the month all the same. Nothing on the page could tell,
+    and the file can. The individual statement's digest is kept with its
+    record, so this holds after its file is deleted once imported."""
+    app = _app(tmp_path)
+    same = ["Robinhood Securities LLC", "Account statement", "January 2022"]
+    pressed = _presses(monkeypatch, lines=same)
+    page = _Tab(headings={RETIREMENT: ["Retirement"]})
+    individual = _statement()
+    saved = _take(app, page, individual)
+    assert saved["downloaded_ok"] and saved["pdf_sha256"]
+    Path(saved["pdf_path"]).unlink()
+    doc = _retirement()
+    rec = _take(app, page, doc)
+    assert pressed == [INDIVIDUAL, RETIREMENT]
+    assert rec["state"] == State.NEEDS_MANUAL_REVIEW.value and rec["pdf_path"] == ""
+    assert "same file as the individual statement" in rec["notes"]
+    assert not app._already_done(doc), "the copy in Manual Review must not count as done"
+    assert app.stats["wrong_document"] == 1
+    assert _statements_saved(app) == []
+    assert [p.name for p in app.paths.manual_review.glob("*.pdf")] == [
+        "2022-01-31 Robinhood Retirement Monthly Statement.pdf"]
+    assert app.progress.get(individual.key)["downloaded_ok"], "the individual one stands"
+
+
+def test_an_older_individual_record_is_read_from_its_file(tmp_path, monkeypatch):
+    """A statement saved before the digest was kept is compared by its
+    file, while the file is there."""
+    app = _app(tmp_path)
+    same = ["Robinhood Securities LLC", "Account statement", "January 2022"]
+    _presses(monkeypatch, lines=same)
+    page = _Tab(headings={RETIREMENT: ["Retirement"]})
+    individual = _statement()
+    _take(app, page, individual)
+    app.progress.update(individual.key, {"pdf_sha256": ""})
+    rec = _take(app, page, _retirement())
+    assert rec["state"] == State.NEEDS_MANUAL_REVIEW.value
+    assert app.stats["wrong_document"] == 1
+
+
+def test_a_retirement_statement_of_its_own_is_saved_beside_the_individual_one(
+        tmp_path, monkeypatch):
+    app = _app(tmp_path)
+    _presses(monkeypatch)
+    page = _Tab(headings={RETIREMENT: ["Retirement"]})
+    _take(app, page, _statement())
+    rec = _take(app, page, _retirement())
+    assert rec["state"] == State.COMPLETED.value and rec["downloaded_ok"]
+    assert app.stats["wrong_document"] == 0
+    assert _statements_saved(app) == ["2022-01-31 Robinhood Monthly Statement.pdf",
+                                      "2022-01-31 Robinhood Retirement Monthly Statement.pdf"]
 
 
 if __name__ == "__main__":

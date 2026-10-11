@@ -103,6 +103,9 @@ class Document:
         self.pdf_path = kw.get("pdf_path", "")
         self.pdf_size = kw.get("pdf_size", "")
         self.pdf_pages = kw.get("pdf_pages", "")
+        # The saved statement's SHA-256, so a statement another account's
+        # page hands over is known for this one after its file is deleted.
+        self.pdf_sha256 = kw.get("pdf_sha256", "")
         self.notes = kw.get("notes", "")
         self.discovered_at = kw.get("discovered_at", now_iso())
 
@@ -172,6 +175,15 @@ def _clear(path) -> None:
         Path(path).unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _sha256(path) -> str:
+    """The file's SHA-256, or "" when it cannot be read."""
+    import hashlib
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    except OSError:
+        return ""
 
 
 class _Ledger:
@@ -687,6 +699,15 @@ class App:
             if account and not site.at_address(page.url, url):
                 self._note(f"The {label} page moved to another address and was not read.")
                 continue
+            # The retirement address can show another account's list, as the
+            # crypto one did (#62), and nothing in that list says whose it
+            # is. So it is read only when the page names a retirement account
+            # of its own (site.names_account).
+            if not site.names_account(page, account):
+                self._note(f"The {label} page does not name a {account.lower()} "
+                           "account of its own, so it was not read. Nothing was "
+                           "saved from it.")
+                continue
             docs = site.collect_download_docs(page, tax_page=(url == site.TAX_URL))
             before = n_new
             for r in docs:
@@ -969,12 +990,27 @@ class App:
                 page.wait_for_timeout(3000)
             site.to_front(page)
             # Older statements are hidden behind "View More" pagination, so the
-            # list must be fully expanded before the control can be found.
-            site.expand_all(page)
-            site.scroll_full_page(page, rounds=6)
-            site.expand_all(page)
+            # list must be fully expanded before the control can be found. An
+            # account page that opened another address is not pressed on at
+            # all, and the document is refused below.
+            if not site.account_for(source) or site.at_address(page.url or "", source):
+                site.expand_all(page)
+                site.scroll_full_page(page, rounds=6)
+                site.expand_all(page)
           except Exception as e:
             log.info("could not open source page %s: %s", source, e)
+        # An account page is pressed on only at its own address, and the
+        # retirement page only while it names a retirement account of its
+        # own. Anywhere else the statement of this title is another
+        # account's, and it was saved under this account's name.
+        wrong_page = self._not_its_page(page, source)
+        if wrong_page:
+            self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=wrong_page)
+            self._write_row(doc, "Not the account's page", "Needs Manual Review")
+            self.write_failure('open the statements page', 'the page was not the account page')
+            self.stats["manual_review"] += 1
+            print(f"  !! {wrong_page} Marked for manual review.")
+            return
         # A tax form lands beside its place first, and is put in place only
         # once the year it prints has been read against what it was listed as.
         target = out_path
@@ -1028,6 +1064,19 @@ class App:
             self.stats["manual_review"] += 1
             print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
             return
+
+        # A statement of an account page whose file is byte for byte the
+        # statement of another account saved for the same date is that
+        # statement, the page having shown the other account's list. The
+        # digest is kept with every statement saved, so this still holds once
+        # the person has deleted a file they imported elsewhere.
+        if doc.category == doc_types.STATEMENT:
+            digest = _sha256(out_path)
+            twin = self._other_accounts_statement(doc, digest) if doc.account else None
+            if twin is not None:
+                self._refuse_another_accounts(doc, out_path, target, twin)
+                return
+            doc.pdf_sha256 = digest
 
         # A form set with more than one file arrives here as a ZIP, and the
         # extraction above is what unpacks it. A second mechanism for that
@@ -1145,6 +1194,77 @@ class App:
         doc.pdf_path = doc.pdf_filename = ""
         self._record(doc, State.NEEDS_MANUAL_REVIEW)
         self.write_failure('check the saved tax form', 'the form prints another tax year')
+        self.stats["manual_review"] += 1
+        self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+        print("  !! " + said)
+
+    @staticmethod
+    def _not_its_page(page, source: str) -> str:
+        """Why the open page is not the account page a statement is listed
+        on, in words for the record, or "" when it is. A statement of the
+        individual or the tax page is looked for as it always was."""
+        account = site.account_for(source)
+        if not account:
+            return ""
+        if not site.at_address(page.url or "", source):
+            return (f"The {account.lower()} statements page opened another address, "
+                    "so nothing was pressed.")
+        if not site.names_account(page, account):
+            return (f"The {account.lower()} statements page did not name a "
+                    f"{account.lower()} account of its own, so nothing was pressed.")
+        return ""
+
+    @staticmethod
+    def _account_of(rec: dict) -> str:
+        """The account a saved record is a statement of. One saved from an
+        account page before the account was in its key says it by the page."""
+        return rec.get("account") or site.account_for(rec.get("source_url", ""))
+
+    def _other_accounts_statement(self, doc: Document, digest: str) -> Optional[dict]:
+        """The saved statement of another account, the individual one among
+        them, of the same date as `doc` and with these very bytes, or None."""
+        if not digest:
+            return None
+        for key, rec in (self.progress.data or {}).items():
+            if (not isinstance(rec, dict) or key == doc.key
+                    or rec.get("category") != doc_types.STATEMENT
+                    or (rec.get("date") or "") != (doc.date or "")
+                    or self._account_of(rec) == (doc.account or "")
+                    or not is_done(rec)):
+                continue
+            theirs = rec.get("pdf_sha256") or ""
+            own = (rec.get("pdf_path") or "").strip()
+            if not theirs and own and Path(own).is_file():
+                theirs = _sha256(own)
+            if theirs == digest:
+                return rec
+        return None
+
+    def _refuse_another_accounts(self, doc: Document, path: Path, target: Path,
+                                 other: dict) -> None:
+        """A statement of an account page that is another account's saved
+        statement goes to Manual Review. The record keeps no path, so the
+        copy there never counts as done, and the next run asks for it
+        again."""
+        quarantine = unique_path(self.paths.manual_review, target.name,
+                                 self.config["max_path_length"])
+        try:
+            path.replace(quarantine)
+        except OSError as e:
+            log.info("could not move %s to manual review: %s", target.name, e)
+            _clear(path)
+            quarantine = None
+        whose = (self._account_of(other) or "individual").lower()
+        said = (f"The same file as the {whose} statement saved for {doc.date or 'no date'}, "
+                f"so it is that statement and not a {doc.account.lower()} one. Moved to "
+                "Manual Review, and not recorded as done.")
+        doc.notes = (doc.notes + "; " if doc.notes else "") + said
+        doc.pdf_path = str(quarantine) if quarantine else ""
+        doc.pdf_filename = quarantine.name if quarantine else ""
+        self._write_row(doc, "Another account's statement", "Needs Manual Review")
+        doc.pdf_path = doc.pdf_filename = ""
+        self._record(doc, State.NEEDS_MANUAL_REVIEW)
+        self.write_failure('check the saved statement', 'the file is another account statement')
         self.stats["manual_review"] += 1
         self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
         print("  !! " + said)

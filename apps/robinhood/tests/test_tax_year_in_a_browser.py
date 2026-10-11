@@ -34,6 +34,7 @@ import robinhood_site as site  # noqa: E402
 TAX = "https://robinhood.com/account/reports-statements/tax"
 CRYPTO = "https://robinhood.com/account/reports-statements/crypto"
 INDIVIDUAL = "https://robinhood.com/account/reports-statements/individual"
+RETIREMENT = "https://robinhood.com/account/reports-statements/retirement"
 
 
 @pytest.fixture(scope="module")
@@ -287,6 +288,33 @@ def test_a_statement_link_is_pressed_only_for_its_own_title(show, tmp_path):
         out = tmp_path / ("%s.pdf" % month)
         assert site.download_named(page, "%s Monthly Statement" % month, out)
         assert ("tax year %s" % month).encode() in out.read_bytes(), month
+
+
+# -- the retirement page names its own account -----------------------------------
+
+HUB = ('<nav><a href="#">Individual</a><a href="#" aria-current="page">Retirement</a>'
+       '<a href="#">Crypto</a><a href="#">Tax</a></nav>')
+
+
+def test_the_retirement_page_is_known_by_a_heading_of_its_own(show):
+    """The hub's Retirement tab is on every statements page, and the one
+    for the address open is marked as chosen whatever list is under it, so
+    only a heading in the page's main region says whose list it is."""
+    link = statement_link("January 2022")
+    for html, named in [
+            (HUB + "<main><h1>Retirement</h1>%s</main>" % link, True),
+            (HUB + "<main><h1>Statements</h1><h2>Traditional IRA</h2>%s</main>" % link, True),
+            (HUB + "<main><h1>Individual Retirement Account</h1>%s</main>" % link, True),
+            # the individual list at the retirement address
+            (HUB + "<main><h1>Individual investing</h1>%s</main>" % link, False),
+            (HUB + "<main><h1>Statements</h1>%s</main>" % link, False),
+            (HUB + '<main><div role="tablist"><h2 role="tab" aria-selected="true">'
+             "Retirement</h2></div>%s</main>" % link, False),
+            # no main region to read
+            ("<h1>Retirement</h1><div>%s</div>" % link, False)]:
+        page = show(html, url=RETIREMENT)
+        assert site.names_account(page, "Retirement") is named, html
+        assert site.names_account(page, "Crypto") is True, "the crypto page is told apart by its list"
 
 
 def test_a_download_pdf_in_a_box_of_several_forms_is_pressed_for_none(show, tmp_path):
