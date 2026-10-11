@@ -328,10 +328,30 @@ def scroll_full_page(page, rounds: int = 8, delay_ms: int = 700) -> None:
         pass
 
 
-def expand_all(page) -> None:
+def to_front(page) -> None:
+    """Bring the tab forward. A press waits for the control to hold still
+    across two animation frames, and a tab in the background gets none, so
+    a press in a tab behind another waited out its whole timeout on every
+    View More and every download (seen 2026-10-09 with three tabs open).
+
+    Called once each time the app opens a page, and not before every
+    press, since in the person's own browser that pulled the app's tab in
+    front of theirs every few seconds."""
+    try:
+        page.bring_to_front()
+    except Exception:
+        pass
+
+
+def expand_all(page) -> bool:
     """Click 'View More' / 'Show more' repeatedly until the full list loads.
     Robinhood's 'View More' is an <a> link (not a button), so both roles are
-    tried."""
+    tried.
+
+    True once no such control is left on the page. False when one could not
+    be pressed, or was still there after sixty presses, since the list on
+    the page may then be short, and a caller must not take it for the whole
+    list."""
     pat = re.compile(r"^\s*(show|load|view|see)\s+more\s*$|^\s*view\s+all\s*$|^\s*older\s*$", re.I)
     for _ in range(60):
         clicked = False
@@ -341,14 +361,26 @@ def expand_all(page) -> None:
                 if loc.count() > 0 and loc.first.is_visible():
                     label = loc.first.inner_text(timeout=1000) or ""
                     if not FORBIDDEN_CONTROL_RE.search(label):
-                        loc.first.click()
+                        # A press that cannot land, the link under a consent
+                        # layer say, raises once its time is up. It used to
+                        # be swallowed, and the expanding ended there with
+                        # the list cut short and nothing said. Now the list
+                        # is said to be short.
+                        try:
+                            loc.first.click()
+                        except Exception as e:
+                            log.warning("View More could not be pressed (%s), so the list "
+                                        "may be short", type(e).__name__)
+                            return False
                         page.wait_for_timeout(1600)
                         clicked = True
                         break
             except Exception:
                 continue
         if not clicked:
-            break
+            return True
+    log.warning("View More still showed after sixty presses, so the list may be short")
+    return False
 
 
 def next_page(page) -> bool:
@@ -550,8 +582,15 @@ def download_by_url(page, url: str, out_path) -> bool:
 # because the account it was built on does not trade crypto. A tester who
 # does got none of them (#62). The page was on this list before and is read
 # the same way as the individual one, under the same guards.
+#
+# The Retirement page (IRA statements) was likewise missing. The hub at
+# /account/reports-statements lists Individual, Retirement, Crypto and Tax,
+# and an account with an IRA got none of its statements (seen 2026-10-09,
+# ten download links on the page before View More). It is read only when it
+# names a retirement account of its own (names_account).
 STATEMENT_PAGES = [
     (f"{BASE}/account/reports-statements/individual", ""),
+    (f"{BASE}/account/reports-statements/retirement", "Retirement"),
     (f"{BASE}/account/reports-statements/crypto", "Crypto"),
 ]
 STATEMENT_URLS = [url for url, _account in STATEMENT_PAGES]
@@ -566,10 +605,72 @@ def document_source_urls() -> List[Tuple[str, str]]:
     return pairs
 
 
+# The account pages that may list more than one account of their kind. A
+# person can hold a traditional and a Roth IRA, and both are on the
+# retirement page, with nothing this app reads yet to tell a statement of
+# one from the same month's of the other. Such a page that shows a title
+# twice is not read (cmd_discover).
+SHARED_PAGES = {"Retirement"}
+
+
 def account_for(source_url: str) -> str:
     """The account a statements page belongs to. "" for the individual
     investing page, and for any page that is not a statements page."""
     return dict(STATEMENT_PAGES).get(source_url or "", "")
+
+
+# An account page that has to name its own account before it is read or
+# pressed on, with the words that name it. Robinhood may show an account
+# without a retirement account the individual list at the retirement
+# address, as the crypto address did (#62), and those statements would be
+# read and saved again as retirement statements. The crypto page is told
+# apart from the individual one by its list instead, as it always was.
+ACCOUNT_NAMES = {
+    "Retirement": re.compile(r"(?i:\bretirement\b)|\bIRAs?\b"),
+}
+# Words that name an account other than the one asked for. A page whose
+# headings name one is not taken for that account's own page, whatever else
+# it says. An "Individual Retirement Account" is a retirement account.
+_OTHER_ACCOUNT_RE = re.compile(r"\bindividual\b(?!\s+retirement)|\bcrypto\b", re.I)
+
+# The headings in the page's main region, the part that is the page itself,
+# leaving out any inside a link, a button, a tab or the navigation, which
+# on these pages name every account. None when the page has no main region.
+_HEADINGS_JS = r"""() => {
+  const region = document.querySelector('main, [role=main]');
+  if (!region) return null;
+  const out = [];
+  for (const h of region.querySelectorAll('h1, h2, h3, h4, [role=heading]')) {
+    if (h.closest('nav, a, button, [role=navigation], [role=tablist], [role=tab], [role=menu], [role=link], [role=button]')) continue;
+    if (!h.getClientRects().length) continue;
+    const t = (h.innerText || '').replace(/\s+/g, ' ').trim();
+    if (t) out.push(t.slice(0, 200));
+  }
+  return out;
+}"""
+
+
+def names_account(page, account: str) -> bool:
+    """Whether the page in front of the app names `account` as its own, by
+    a heading in its main region. True for an account no words are kept
+    for, which is read as it always was. False when the headings cannot be
+    read, when none names the account, and when any names another one.
+
+    Only headings. A tab or a link that says Retirement is on every page of
+    the statements hub, and the one for the address open is marked as
+    chosen by the address, whatever list the page shows under it."""
+    words = ACCOUNT_NAMES.get(account or "")
+    if words is None:
+        return True
+    try:
+        headings = page.evaluate(_HEADINGS_JS)
+    except Exception:
+        return False
+    if not isinstance(headings, list):
+        return False
+    said = [str(h) for h in headings]
+    return (any(words.search(h) for h in said)
+            and not any(_OTHER_ACCOUNT_RE.search(h) for h in said))
 
 
 def at_address(current: str, wanted: str) -> bool:
@@ -750,6 +851,7 @@ _PAGE_JS_LIB = r"""
 _COLLECT_JS = r"""(readYears) => {""" + _PAGE_JS_LIB + r"""
   const out = [];
   const seen = new Set();
+  const shownKeys = new Set();
   for (const el of document.querySelectorAll("a[download], a, button, [role=button]")) {
     const own = ((el.innerText||'') + ' ' + (el.getAttribute('aria-label')||'')).trim();
     const hasDlAttr = el.hasAttribute('download');
@@ -782,15 +884,21 @@ _COLLECT_JS = r"""(readYears) => {""" + _PAGE_JS_LIB + r"""
       try { year = taxYearOf(el) || ''; } catch (e) { year = ''; }
     }
     const key = title.toLowerCase() + (year ? '|' + year : '');
-    if (seen.has(key)) continue;
+    // A title shown again is one document, as before. A second control of
+    // it that shows beside one that shows is passed on as a repeat, so a
+    // page that lists two accounts' statements under one title is not read
+    // as one account's. A hidden twin of a control that shows is no repeat.
+    const shown = el.getClientRects().length > 0;
+    if (seen.has(key)) {
+      if (shown && shownKeys.has(key)) out.push({title: title.slice(0, 160), is_pdf, year, repeat: true});
+      if (shown) shownKeys.add(key);
+      continue;
+    }
     seen.add(key);
+    if (shown) shownKeys.add(key);
     out.push({title: title.slice(0, 160), is_pdf, year});
   }
   return out;
-}"""
-
-_YEAR_OF_JS = r"""el => {""" + _PAGE_JS_LIB + r"""
-  return taxYearOf(el);
 }"""
 
 TAX_TITLE_RE = re.compile(r"\b(1099|1042-?S|5498)\b", re.I)
@@ -812,15 +920,28 @@ def tax_year_of(title: str, year, today=None) -> str:
     return year
 
 
-def collect_download_docs(page, tax_page: bool = False) -> List[RawDoc]:
+class Listed(list):
+    """The documents a page lists, and in `repeated` each title it showed
+    on a second control beside one that shows, once."""
+
+    def __init__(self, docs=(), repeated=()):
+        super().__init__(docs)
+        self.repeated = list(repeated)
+
+
+def collect_download_docs(page, tax_page: bool = False) -> Listed:
     """Every downloadable PDF document on the current page (skips CSV-only
     items like the tax transactions export).
 
     `tax_page` is True only for the tax documents page, the one page where
     what surrounds a tax form is read for its year. A form a statements
     page lists is dated by its title alone, as it always was, because the
-    years around it there are statement years."""
+    years around it there are statement years.
+
+    A title shown twice is one document, as it always was, and is said in
+    `repeated` as well, for a page that may list two accounts."""
     docs: List[RawDoc] = []
+    repeated: List[str] = []
     try:
         items = page.evaluate(_COLLECT_JS, bool(tax_page))
     except Exception:
@@ -830,6 +951,10 @@ def collect_download_docs(page, tax_page: bool = False) -> List[RawDoc]:
             continue
         title = _html.unescape(it.get("title", "")).strip()
         if not title:
+            continue
+        if it.get("repeat"):
+            if title not in repeated:
+                repeated.append(title)
             continue
         date_text, _ = parse_period_date(title)
         # A tax form whose own title names no date is filed at the end of
@@ -845,7 +970,149 @@ def collect_download_docs(page, tax_page: bool = False) -> List[RawDoc]:
     # undated one would press the first control of that title, whatever its
     # year, and save a second copy of it as 0000-00-00.
     dated = {d.title for d in docs if d.tax_year}
-    return [d for d in docs if d.date_text or d.title not in dated]
+    return Listed([d for d in docs if d.date_text or d.title not in dated], repeated)
+
+
+_PICK_ATTR = "data-paperpull-pick"
+
+# Whether a control is the one for the title. Its own label says the title,
+# or, when its own label names no statement or form at all, a tax form's
+# Download PDF say, its own card says it. The card is the nearest box around
+# it that holds a document's title and no other document's control (cardOf).
+# The nearest box with any text at all used to do, and on a page of sibling
+# statement links that box is the whole list, which says every title, so
+# January's link would be pressed for February and saved as February for
+# good.
+_SAYS_TITLE_JS = r"""
+  function saysTitle(el, own, want) {
+    if (own.toLowerCase().includes(want)) return true;
+    if (TITLE_RE.test(own)) return false;
+    const card = cardOf(el);
+    return !!card && (card.innerText || '').toLowerCase().includes(want);
+  }
+"""
+
+# The first control, in document order, that says the title (saysTitle),
+# and that offers a download (a download attribute, or the word in its own
+# label), skipping CSV. One pass in the page, where the old loop asked the
+# browser three times for each of up to four hundred controls, which was
+# most of a document's half minute. The control found is marked with an
+# attribute carrying a one-time token, so it is found again by that mark
+# and not by its place in a list a re-render can shuffle. A re-render that
+# rebuilds the node drops the mark, and nothing is pressed. The whole label
+# comes back, never a prefix, so the guard reads all of it.
+_FIND_CONTROL_JS = r"""([needle, year, token, attr]) => {""" + _PAGE_JS_LIB + _SAYS_TITLE_JS + r"""
+  for (const old of document.querySelectorAll('[' + attr + ']')) old.removeAttribute(attr);
+  const want = needle.toLowerCase();
+  const els = [...document.querySelectorAll("a[download], a, button, [role='button']")].slice(0, 400);
+  for (let i = 0; i < els.length; i++) {
+    const el = els[i];
+    const own = ((el.innerText || '') + ' ' + (el.getAttribute('aria-label') || '')).trim();
+    const hasDl = el.hasAttribute('download');
+    if (!(hasDl || /download/i.test(own))) continue;
+    if (/csv/i.test(own)) continue;
+    if (!saysTitle(el, own, want)) continue;
+    if (year) { let shown = ''; try { shown = taxYearOf(el) || ''; } catch (e) { shown = ''; } if (shown !== year) continue; }
+    el.setAttribute(attr, token);
+    return {own: own, hasDl: hasDl};
+  }
+  return null;
+}"""
+
+# Run on the marked element just before it is pressed, the same predicate
+# the pass applied, read again from the live page. False means the page
+# changed.
+_VERIFY_CONTROL_JS = r"""(el, [needle, year, own]) => {""" + _PAGE_JS_LIB + _SAYS_TITLE_JS + r"""
+  const now = ((el.innerText || '') + ' ' + (el.getAttribute('aria-label') || '')).trim();
+  if (now.replace(/\s+/g, ' ') !== own.replace(/\s+/g, ' ')) return false;
+  const hasDl = el.hasAttribute('download');
+  if (!(hasDl || /download/i.test(now))) return false;
+  if (/csv/i.test(now)) return false;
+  if (!saysTitle(el, now, needle.toLowerCase())) return false;
+  if (year) { let shown = ''; try { shown = taxYearOf(el) || ''; } catch (e) { shown = ''; } if (shown !== year) return false; }
+  return true;
+}"""
+
+
+def _squash(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def find_control(page, title: str, year: str = ""):
+    """The download control for `title`, or None. Found in one pass in the
+    page and marked there, then checked here against the guard with its
+    whole label, never a forbidden label unless the control is a plain
+    download link, and never a CSV. Located again by its mark, and the
+    whole predicate is read once more from the live element right before
+    it is handed back, so a page that changed in between presses nothing."""
+    import secrets
+    needle = _squash(title)[:30]
+    if not needle:
+        return None
+    token = secrets.token_hex(8)
+    try:
+        hit = page.evaluate(_FIND_CONTROL_JS, [needle, year or "", token, _PICK_ATTR])
+    except Exception:
+        hit = None
+    if not hit:
+        return None
+    own = str(hit.get("own") or "")
+    has_dl_attr = bool(hit.get("hasDl"))
+    if not (has_dl_attr or re.search(r"download", own, re.I)):
+        return None
+    if re.search(r"csv", own, re.I):
+        return None
+    if FORBIDDEN_CONTROL_RE.search(own) and not has_dl_attr:
+        return None
+    el = page.locator('[%s="%s"]' % (_PICK_ATTR, token))
+    try:
+        if el.count() != 1:
+            return None
+        # The node itself, not a locator. A locator is resolved again at the
+        # press, and a page that re-rendered in between could put another
+        # node under the same mark. A handle is bound to this one node, and
+        # if the page replaces it the press fails instead of landing
+        # elsewhere.
+        handle = el.first.element_handle(timeout=5000)
+        if handle is None:
+            return None
+        if not handle.evaluate(_VERIFY_CONTROL_JS, [needle, year or "", own]):
+            return None
+    except Exception:
+        return None
+    return handle
+
+
+def has_control(page, title: str, year: str = "") -> bool:
+    """Whether the page as it stands shows the download control for `title`,
+    so a statements page already open and expanded is not opened again."""
+    return find_control(page, title, year) is not None
+
+
+def challenge_text(page) -> Optional[str]:
+    """A security or throttling prompt in the page's visible text, read
+    whether or not document rows are showing. detect_security_challenge
+    trusts a page with rows, which is right after a fresh open and wrong
+    for a page kept open across documents, where a prompt can land over the
+    rows. Used before a kept page is pressed on again."""
+    try:
+        title = (page.title() or "").lower()
+    except Exception:
+        title = ""
+    try:
+        body = page.locator("body").inner_text(timeout=5000).lower()
+    except Exception:
+        body = ""
+    # The whole body, not its first lines, since a prompt over a long list
+    # of statements comes after the list in the page's text.
+    hay = title + "\n" + body
+    for m in SECURITY_CHALLENGE_MARKERS:
+        if m in hay:
+            return f"Security challenge detected: '{m}'"
+    for m in RATE_LIMIT_MARKERS:
+        if m in hay:
+            return f"Possible rate limiting detected: '{m}'"
+    return None
 
 
 def download_named(page, title: str, out_path, year: str = "") -> bool:
@@ -858,50 +1125,7 @@ def download_named(page, title: str, out_path, year: str = "") -> bool:
     pressed when none is."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    needle = re.sub(r"\s+", " ", title).strip()[:30]
-
-    # find the matching download control (its own text or an ancestor's holds
-    # the title). Only follow controls that pass the safety guard for their
-    # visible label (download/view) - never a forbidden one.
-    control = None
-    try:
-        loc = page.locator("a[download], a, button, [role='button']")
-        for i in range(min(loc.count(), 400)):
-            el = loc.nth(i)
-            try:
-                own = (el.inner_text(timeout=400) or "") + " " + \
-                    (el.get_attribute("aria-label") or "")
-            except Exception:
-                continue
-            has_dl_attr = el.get_attribute("download") is not None
-            if not (has_dl_attr or re.search(r"download", own, re.I)):
-                continue
-            if re.search(r"csv", own, re.I):
-                continue
-            if FORBIDDEN_CONTROL_RE.search(own) and not has_dl_attr:
-                continue
-            # match by own text or ancestor text containing the title
-            hay = own
-            if needle.lower() not in hay.lower():
-                try:
-                    hay = el.evaluate(
-                        "el => { let n = el; for (let i=0;i<6 && n;i++){ n=n.parentElement;"
-                        " if(n && (n.innerText||'').length>10) return n.innerText; } return ''; }")
-                except Exception:
-                    hay = ""
-            if needle.lower() not in (hay or "").lower():
-                continue
-            if year:
-                try:
-                    shown = el.evaluate(_YEAR_OF_JS) or ""
-                except Exception:
-                    shown = ""
-                if shown != year:
-                    continue
-            control = el
-            break
-    except Exception:
-        pass
+    control = find_control(page, title, year)
     if control is None:
         log.info("download control not found for %r%s", title,
                  f" of tax year {year}" if year else "")

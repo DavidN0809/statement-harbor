@@ -33,6 +33,8 @@ import robinhood_site as site  # noqa: E402
 
 TAX = "https://robinhood.com/account/reports-statements/tax"
 CRYPTO = "https://robinhood.com/account/reports-statements/crypto"
+INDIVIDUAL = "https://robinhood.com/account/reports-statements/individual"
+RETIREMENT = "https://robinhood.com/account/reports-statements/retirement"
 
 
 @pytest.fixture(scope="module")
@@ -266,4 +268,78 @@ def test_no_control_is_pressed_for_a_year_the_page_does_not_show(show, tmp_path)
                 % card("Consolidated Form 1099", year="2022"))
     out = tmp_path / "form.pdf"
     assert not site.download_named(page, "Consolidated Form 1099", out, year="2020")
+    assert not out.exists()
+
+
+def statement_link(month):
+    return ('<a download href="#" onclick="give(\'%s\'); return false;">'
+            '%s Monthly Statement</a>' % (month, month))
+
+
+def test_a_statement_link_is_pressed_only_for_its_own_title(show, tmp_path):
+    """Sibling statement links in one list. The nearest box with text
+    around January's link is the whole list, which says every title, so
+    January's link would be pressed for February and saved as February."""
+    page = show("<h1>Individual investing</h1><main>%s%s"
+                '<a href="#">View More</a></main>' % (
+                    statement_link("January 2022"), statement_link("February 2022")),
+                url=INDIVIDUAL)
+    for month in ("February 2022", "January 2022"):
+        out = tmp_path / ("%s.pdf" % month)
+        assert site.download_named(page, "%s Monthly Statement" % month, out)
+        assert ("tax year %s" % month).encode() in out.read_bytes(), month
+
+
+# -- the retirement page names its own account -----------------------------------
+
+HUB = ('<nav><a href="#">Individual</a><a href="#" aria-current="page">Retirement</a>'
+       '<a href="#">Crypto</a><a href="#">Tax</a></nav>')
+
+
+def test_the_retirement_page_is_known_by_a_heading_of_its_own(show):
+    """The hub's Retirement tab is on every statements page, and the one
+    for the address open is marked as chosen whatever list is under it, so
+    only a heading in the page's main region says whose list it is."""
+    link = statement_link("January 2022")
+    for html, named in [
+            (HUB + "<main><h1>Retirement</h1>%s</main>" % link, True),
+            (HUB + "<main><h1>Statements</h1><h2>Traditional IRA</h2>%s</main>" % link, True),
+            (HUB + "<main><h1>Individual Retirement Account</h1>%s</main>" % link, True),
+            # the individual list at the retirement address
+            (HUB + "<main><h1>Individual investing</h1>%s</main>" % link, False),
+            (HUB + "<main><h1>Statements</h1>%s</main>" % link, False),
+            (HUB + '<main><div role="tablist"><h2 role="tab" aria-selected="true">'
+             "Retirement</h2></div>%s</main>" % link, False),
+            # no main region to read
+            ("<h1>Retirement</h1><div>%s</div>" % link, False)]:
+        page = show(html, url=RETIREMENT)
+        assert site.names_account(page, "Retirement") is named, html
+        assert site.names_account(page, "Crypto") is True, "the crypto page is told apart by its list"
+
+
+def test_a_title_shown_twice_is_said_and_a_hidden_twin_is_not(show):
+    """Two IRAs can each list a statement of the same month under one
+    title, and the second would be dropped as the first without a word.
+    A copy of a control the page keeps hidden is not a second statement."""
+    link = statement_link("January 2022")
+    page = show("<main><h1>Retirement</h1><h2>Traditional IRA</h2>%s"
+                "<h2>Roth IRA</h2>%s</main>" % (link, link), url=RETIREMENT)
+    docs = site.collect_download_docs(page)
+    assert [d.title for d in docs] == ["January 2022 Monthly Statement"]
+    assert docs.repeated == ["January 2022 Monthly Statement"]
+    page = show("<main><h1>Retirement</h1>%s<div hidden>%s</div></main>" % (link, link),
+                url=RETIREMENT)
+    docs = site.collect_download_docs(page)
+    assert [d.title for d in docs] == ["January 2022 Monthly Statement"]
+    assert docs.repeated == []
+
+
+def test_a_download_pdf_in_a_box_of_several_forms_is_pressed_for_none(show, tmp_path):
+    """A control whose own label names no form is read by its own card,
+    and a box that holds another form's control is no form's card."""
+    page = show(NAV + "<main><div>Consolidated Form 1099</div><div>Form 1099-DIV</div>"
+                "<button onclick=\"give('first')\">Download PDF</button>"
+                "<button onclick=\"give('second')\">Download PDF</button></main>")
+    out = tmp_path / "form.pdf"
+    assert not site.download_named(page, "Form 1099-DIV", out)
     assert not out.exists()

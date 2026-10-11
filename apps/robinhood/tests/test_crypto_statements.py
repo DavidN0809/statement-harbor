@@ -18,6 +18,11 @@ The crypto page is read only as itself, at its own address and after the
 individual page, and a document on it with the title and date of an
 individual one is refused, and the run says so.
 
+The retirement page, read since #74, is read only at its own address and
+only when a heading of its own names a retirement account, since its
+statements can share a title and a date with the individual ones and the
+list alone cannot say whose they are.
+
 The titles here are invented, in the shape the statement links take.
 """
 import sys
@@ -32,9 +37,11 @@ import storage  # noqa: E402  binds this provider's AppSpec
 import robinhood_docs  # noqa: E402
 import robinhood_site as site  # noqa: E402
 from paperpull_core import doc_types  # noqa: E402
+from paperpull_core import listing  # noqa: E402
 from paperpull_core import storage as core_storage  # noqa: E402
 
 INDIVIDUAL = "https://robinhood.com/account/reports-statements/individual"
+RETIREMENT = "https://robinhood.com/account/reports-statements/retirement"
 CRYPTO = "https://robinhood.com/account/reports-statements/crypto"
 TAX = "https://robinhood.com/account/reports-statements/tax"
 
@@ -72,7 +79,7 @@ def _docs(app):
 
 def test_the_crypto_statements_page_is_read():
     urls = [u for u, _label in site.document_source_urls()]
-    assert urls == [INDIVIDUAL, CRYPTO, TAX]
+    assert urls == [INDIVIDUAL, RETIREMENT, CRYPTO, TAX]
     for u in urls:
         assert site.is_safe_url(u), u
     assert site.account_for(CRYPTO) == "Crypto"
@@ -176,8 +183,13 @@ def test_discovery_keeps_it_under_its_new_key(tmp_path):
 # -- the crypto page is read only as itself ------------------------------------
 
 class _Tab:
-    def __init__(self, lands=None, broken=()):
+    """A tab that goes where it is sent, unless the site sends it on or the
+    page is `broken`, and shows the headings `headings` gives for the
+    address it is at."""
+
+    def __init__(self, lands=None, broken=(), headings=None):
         self.url, self.lands, self.broken = "", lands or {}, broken
+        self.headings = dict(headings or {})
 
     def goto(self, url, **kw):
         if url in self.broken:
@@ -187,8 +199,15 @@ class _Tab:
     def wait_for_timeout(self, ms):
         pass
 
+    def evaluate(self, js, arg=None):
+        return self.headings.get(self.url) if js == site._HEADINGS_JS else None
 
-def _run(tmp_path, monkeypatch, listings, **tab):
+
+def _run(tmp_path, monkeypatch, listings, stops=(), repeated=None, **tab):
+    """Discover over made-up pages. `stops` are the pages whose View More
+    stops before the end of their list, and `repeated` the titles a page
+    shows twice."""
+    repeated = dict(repeated or {})
     app = _app(tmp_path)
     app.config.update(delay_min_seconds=0, delay_max_seconds=0)
     app.stats = {"mode": "all", "started": "", "ended": "", "discovered": 0,
@@ -200,9 +219,10 @@ def _run(tmp_path, monkeypatch, listings, **tab):
     page = _Tab(**tab)
     app.page = lambda: page
     app.check_session = lambda page: False
-    monkeypatch.setattr(site, "collect_download_docs", lambda page, **kw: [
-        site.RawDoc(title=t, date_text=d, text=t) for t, d in listings.get(page.url, [])])
-    monkeypatch.setattr(site, "expand_all", lambda page: None)
+    monkeypatch.setattr(site, "collect_download_docs", lambda page, **kw: site.Listed(
+        [site.RawDoc(title=t, date_text=d, text=t) for t, d in listings.get(page.url, [])],
+        repeated.get(page.url, [])))
+    monkeypatch.setattr(site, "expand_all", lambda page: page.url not in stops)
     monkeypatch.setattr(site, "scroll_full_page", lambda page, **kw: None)
     app.cmd_discover(quiet=True)
     return app
@@ -232,3 +252,88 @@ def test_the_crypto_page_waits_for_the_individual_one(tmp_path, monkeypatch):
                broken=(INDIVIDUAL,))
     assert _docs(app) == {}
     assert any("were not read in this run" in n for n in app.stats["notes"])
+
+
+# -- the retirement page is read only as itself --------------------------------
+
+def test_a_retirement_page_showing_the_individual_list_is_not_read(tmp_path, monkeypatch):
+    """An account without a retirement account can be shown the individual
+    list at the retirement address, as the crypto address did, and every
+    individual statement would be saved again as a Retirement Monthly
+    Statement.
+    Nothing in the list says whose it is, and the page's own heading does."""
+    same = [(TITLE, "2022-01-31")]
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: same, RETIREMENT: same},
+               headings={RETIREMENT: ["Individual investing", "Statements"]})
+    assert [d.account for d in _docs(app).values()] == [""], "saved twice"
+    assert any("retirement statements page does not name a retirement account" in n
+               for n in app.stats["notes"])
+    # An account with no retirement account has nothing on that page to
+    # list, so the list is not short for it.
+    assert listing.last(app) == listing.COMPLETE
+
+
+def test_a_retirement_page_with_no_heading_of_its_own_is_not_read(tmp_path, monkeypatch):
+    for i, headings in enumerate(([], ["Statements"], None)):
+        app = _run(tmp_path / str(i), monkeypatch,
+                   {INDIVIDUAL: [(TITLE, "2022-01-31")], RETIREMENT: [(TITLE, "2022-01-31")]},
+                   headings={RETIREMENT: headings})
+        assert [d.account for d in _docs(app).values()] == [""], headings
+
+
+def test_a_retirement_page_that_names_its_account_is_read(tmp_path, monkeypatch):
+    """Its statements can share a title and a date with the individual
+    account's and are its own, so they are kept beside them."""
+    same = [(TITLE, "2022-01-31")]
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: same, RETIREMENT: same},
+               headings={RETIREMENT: ["Retirement", "Traditional IRA"]})
+    by_page = {d.source_url: d for d in _docs(app).values()}
+    assert sorted(by_page) == [INDIVIDUAL, RETIREMENT]
+    assert by_page[RETIREMENT].account == "Retirement"
+    assert by_page[RETIREMENT].summary == "Retirement Monthly Statement"
+    assert app.stats["crypto_refused"] == 0
+
+
+def test_a_retirement_page_that_shows_a_title_twice_is_not_read(tmp_path, monkeypatch):
+    """Two IRAs can each list a statement of the same month under one
+    title, and the second would be dropped as the first without a word."""
+    same = [(TITLE, "2022-01-31")]
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: same, RETIREMENT: same},
+               repeated={RETIREMENT: [TITLE]}, headings={RETIREMENT: ["Retirement"]})
+    assert [d.account for d in _docs(app).values()] == [""], "one IRA's statements were kept"
+    assert any("lists a statement title more than once" in n for n in app.stats["notes"])
+    assert listing.last(app) == listing.STOPPED
+
+
+def test_another_page_that_shows_a_title_twice_is_read_as_before(tmp_path, monkeypatch):
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2022-01-31")]},
+               repeated={INDIVIDUAL: [TITLE]})
+    assert [d.account for d in _docs(app).values()] == [""]
+    assert listing.last(app) == listing.COMPLETE
+
+
+# -- a list cut short is never called whole -------------------------------------
+
+def test_a_list_read_to_its_end_is_noted_whole(tmp_path, monkeypatch):
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2022-01-31")]})
+    assert listing.last(app) == listing.COMPLETE
+
+
+def test_a_page_that_would_not_open_leaves_the_list_short(tmp_path, monkeypatch):
+    """The tax page went unread, and a Resume after it called the run
+    finished all the same."""
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2022-01-31")]},
+               broken=(TAX,))
+    assert [d.account for d in _docs(app).values()] == [""], "what was read is kept"
+    assert any("tax page would not open" in n for n in app.stats["notes"])
+    assert listing.last(app) == listing.STOPPED
+
+
+def test_a_view_more_that_stopped_leaves_the_list_short(tmp_path, monkeypatch):
+    """What the page showed is kept, and the older statements behind the
+    View More that could not be pressed are not taken as not there."""
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2022-01-31")]},
+               stops=(INDIVIDUAL,))
+    assert [d.account for d in _docs(app).values()] == [""], "what showed is kept"
+    assert any("statements page's View More stopped" in n for n in app.stats["notes"])
+    assert listing.last(app) == listing.STOPPED

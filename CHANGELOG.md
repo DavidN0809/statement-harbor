@@ -62,6 +62,31 @@ All notable changes to PaperPull are recorded here. Versioning follows
   for by appchamp.
 
 ### Fixed
+- **Robinhood took half a minute per statement, and read no retirement
+  statements at all (#74).** Documents are now taken page by page, the
+  individual page's first, then the retirement page's, then crypto, then
+  tax, newest first within each. Taken by date across pages, each one
+  opened and expanded a different page than the one before. A page
+  already open that still shows a document's control is not opened again,
+  and the control is found in one pass in the page, where the browser was
+  asked about each of up to four hundred controls in turn. The tab is
+  brought forward once for each page opened, since a press waits on
+  animation frames a background tab does not get. The retirement
+  statements page is read as well, and an account with an IRA got none of
+  its statements before. It is read and pressed on only at its own address
+  and only when a heading of its own names a retirement account. A
+  retirement statement whose file is the individual statement of the same
+  month goes to Manual Review as a wrong document, and a retirement page
+  that lists one title twice, as two IRAs might, is not read yet, and the
+  run says so. Contributed by JasperDale420, whose account went from 22 to
+  26 seconds a document to 4 to 6, with 136 of 139 documents saved and the
+  other three offered by Robinhood only as HTML. Before merging, a
+  statement's control is pressed only when its own label or its own card
+  names it, where a page of sibling links could have January's pressed for
+  February. A prompt over a page kept open stops the run as a sign-in
+  check does. A View More that cannot be pressed, or a page that would not
+  open, leaves the list noted as stopped for Resume, and `--max-docs` takes
+  the newest documents again.
 - **USAA's Discover could miss most of the list from 0.26.0 on.** USAA's
   documents page asks USAA for its whole list as it loads, and the app
   reads the list from those answers. Since 0.26.0 the app opened the page

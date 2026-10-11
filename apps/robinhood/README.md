@@ -35,10 +35,10 @@ Port 9226 keeps this separate from Walmart (9222), Amazon (9223), Wealthfront
 
 | Folder | Contents |
 |---|---|
-| `Statements\` | Monthly statements of the individual investing account and of Robinhood Crypto |
+| `Statements\` | Monthly statements of the individual investing account, the retirement account (IRA) and Robinhood Crypto |
 | `Tax Documents\` | Consolidated 1099, crypto 1099, 1099-B/DIV/INT, 1042-S, etc. |
 | `Other Documents\` | Anything else (only if you widen `document_types`) |
-| `Manual Review\` | Files that failed PDF validation |
+| `Manual Review\` | Files that failed PDF validation or were refused as the wrong document |
 
 Trade confirmations are **skipped by default** (they can number in the
 thousands). To include them, edit `skip_patterns` in `document_rules.json` and
@@ -46,8 +46,14 @@ add "Trade Confirmation" to `document_types` in `config.json`.
 
 Filenames: `YYYY-MM-DD Robinhood <Summary>.pdf`, e.g.
 `2025-12-31 Robinhood Monthly Statement.pdf`,
+`2025-12-31 Robinhood Retirement Monthly Statement.pdf`,
 `2025-12-31 Robinhood Crypto Monthly Statement.pdf`,
 `2025-12-31 Robinhood Consolidated 1099 Tax Form.pdf`.
+The retirement statements page is read only when its own heading names a
+retirement account, and a retirement statement whose file is the same as
+the individual statement of that month goes to Manual Review. A
+retirement page that lists one statement title twice, as two IRAs might,
+is not read yet, and the run says so.
 A tax form is dated at the end of its tax year. When its title does not
 name the year, it is read from words on the tax page that name a tax year,
 such as "Tax year 2025", or failing that from the year the form prints. A
