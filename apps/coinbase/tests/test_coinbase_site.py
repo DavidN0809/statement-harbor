@@ -228,7 +228,8 @@ class StatementDownload(unittest.TestCase):
                 self.page.clicked += 1
                 for ev, cb in list(self.page.handlers):
                     if ev == "download":
-                        cb(dl)
+                        for d in [dl] + self.page.also:
+                            cb(d)
         class Button:
             def __init__(self, page, i): self.page, self.i = page, i
             def element_handle(self, **kw): return El(self.page, self.i)
@@ -245,7 +246,13 @@ class StatementDownload(unittest.TestCase):
             def __init__(self):
                 self.clicked, self.disposed, self.handlers, self.context = 0, 0, [], Ctx()
                 self.rows, self.row_says = list(rows if rows is not None else StatementDownload.ROWS), {}
-            def on(self, ev, cb): self.handlers.append((ev, cb))
+                # Downloads a press hands over beside its own, and one that is
+                # on its way as the capture starts listening.
+                self.also, self.early = [], None
+            def on(self, ev, cb):
+                self.handlers.append((ev, cb))
+                if ev == "download" and self.early:
+                    cb(self.early)
             def remove_listener(self, ev, cb): self.handlers.remove((ev, cb))
             def locator(self, sel):
                 return Loc(0, self) if sel == site_ref._LOAD_MORE else Loc(len(self.rows), self)
@@ -425,6 +432,189 @@ class StatementDownload(unittest.TestCase):
                 with self.assertRaises(site.pressing.Covered):
                     site._catch_statement(page, Path(td) / "dl", "July 2026", Path(td) / "out.pdf", [])
         self.assertEqual(page.clicked, 0)
+
+
+    def test_a_second_download_after_one_press_takes_neither(self):
+        """An earlier month's download, still on its way, comes during this
+        press beside this one's own. Which is which cannot be told."""
+        page, dl = self.make_page(self.S3)
+        _, other = self.make_page(self.S3)
+        page.also = [other]
+        with tempfile.TemporaryDirectory() as td:
+            trace = []
+            ok = site._catch_statement(page, Path(td) / "dl", "September 2026", Path(td) / "out.pdf", trace)
+            self.assertFalse(ok)
+            self.assertFalse((Path(td) / "out.pdf").exists())
+        self.assertTrue(dl.cancelled and other.cancelled)
+        self.assertEqual(page.clicked, 1)
+        self.assertEqual(trace[-1]["downloads"], 2)
+
+    def test_a_download_on_its_way_before_the_press_presses_nothing(self):
+        page, dl = self.make_page(self.S3)
+        _, early = self.make_page(self.S3)
+        page.early = early
+        with tempfile.TemporaryDirectory() as td:
+            trace = []
+            ok = site._catch_statement(page, Path(td) / "dl", "September 2026", Path(td) / "out.pdf", trace)
+            self.assertFalse(ok)
+            self.assertFalse((Path(td) / "out.pdf").exists())
+        self.assertEqual(page.clicked, 0)
+        self.assertTrue(early.cancelled)
+        self.assertEqual(page.handlers, [])
+
+
+class StatementsPageAfresh(unittest.TestCase):
+    """The statements page is loaded again before every statement's press,
+    even when the tab shows it already, so no earlier month's page is left
+    polling for its PDF."""
+
+    def make_page(self):
+        class Loc:
+            def count(self): return 0
+        class Page:
+            url = site.STATEMENTS_URL
+            def __init__(self): self.loads = []
+            def goto(self, url, **kw): self.loads.append(url)
+            def locator(self, sel): return Loc()
+            def wait_for_selector(self, sel, **kw): return True
+        return Page()
+
+    def test_reload_statements_loads_the_page_it_is_on(self):
+        page = self.make_page()
+        self.assertTrue(site.reload_statements(page))
+        self.assertEqual(page.loads, [site.STATEMENTS_URL])
+
+    def test_goto_documents_still_leaves_a_page_that_shows_its_list(self):
+        page = self.make_page()
+        self.assertTrue(site.goto_documents(page))
+        self.assertEqual(page.loads, [])
+
+    def test_every_statement_is_pressed_on_a_page_loaded_for_it(self):
+        page = self.make_page()
+        said = []
+
+        def caught(pg, dl_dir, label, out_path, trace):
+            said.append(("pressed", label, len(pg.loads)))
+            return True
+        with mock.patch.object(site, "_catch_statement", caught):
+            with tempfile.TemporaryDirectory() as td:
+                for title, iso in (("Monthly Statement September 2026", "2026-09-30"),
+                                   ("Monthly Statement August 2026", "2026-08-31")):
+                    self.assertTrue(site.download_bill(page, Path(td), iso, Path(td) / "out.pdf",
+                                                       title=title, trace=[]))
+        self.assertEqual(said, [("pressed", "September 2026", 1), ("pressed", "August 2026", 2)])
+
+
+def pdf_saying(text: str) -> bytes:
+    """A one page PDF whose text is `text`, written by hand so its words
+    can be read back. Every word given here is made up."""
+    stream = ("BT /F1 11 Tf 40 740 Td (%s) Tj ET" % text).encode("latin-1")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for n, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % n + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    for off in offsets:
+        out += b"%010d 00000 n \n" % off
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    return bytes(out)
+
+
+SEPTEMBER = "Invented monthly statement for the period September 1, 2026 to September 30, 2026"
+OCTOBER = "Invented monthly statement for the period October 1, 2026 to October 31, 2026"
+NO_MONTH = "Invented monthly statement of account activity and balances for this holder"
+
+
+class StatementMonth(unittest.TestCase):
+    """A saved statement is filed under its month only when its own text
+    names that month more plainly than the month before or after it."""
+
+    def test_the_identity_is_the_month_and_its_neighbors(self):
+        mine, rivals = site.statement_identity("Monthly Statement January 2026")
+        self.assertEqual((mine.period, mine.start, mine.date), ("2026-01", "2026-01-01", "2026-01-31"))
+        self.assertEqual([(r.period, r.start, r.date) for r in rivals],
+                         [("2025-12", "2025-12-01", "2025-12-31"), ("2026-02", "2026-02-01", "2026-02-28")])
+        self.assertIsNone(site.statement_identity("1099-DA Tax Year 2025"))
+        self.assertIsNone(site.statement_identity(""))
+
+    def test_each_text_gets_its_verdict(self):
+        from paperpull_core import identity
+        mine, rivals = site.statement_identity("Monthly Statement September 2026")
+        for text, outcome in ((SEPTEMBER, identity.VERIFIED), (OCTOBER, identity.REFUSED),
+                              (NO_MONTH, identity.UNCHECKED)):
+            got = identity.distinguish(None, mine, rivals, text=text)
+            self.assertEqual(got.outcome, outcome, text)
+
+    def run_download_one(self, text: str):
+        """The app's own download_one for the September statement, with the
+        site handing over a PDF that says `text`. Returns the run, the
+        document, where it was to be saved and the failures it wrote."""
+        td = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(td.cleanup)
+        root = Path(td.name)
+        cfg = root / "config.json"
+        cfg.write_text(json.dumps({"owner": "Dana Example", "output_dir": str(root / "out"),
+                                   "profile_dir": str(root / "profile"), "min_pdf_bytes": 100,
+                                   "document_types": ["Statement", "Tax Document"]}), encoding="utf-8")
+        with mock.patch.object(docs.App, "_setup_logging", lambda self: None):
+            app = docs.App(docs.build_parser().parse_args(["--config", str(cfg)]))
+        app._dl_dir = root / ".dl"
+        app.check_session = lambda page: None
+        failures = []
+        app.write_failure = lambda *a, **kw: failures.append(a)
+        app._journal = mock.MagicMock()
+        doc = docs.Document(title="Monthly Statement September 2026", category="Statement",
+                            summary="Monthly Statement", date="2026-09-30")
+        saved_to = []
+
+        def hands_over(page, dl_dir, iso, out_path, title="", trace=None):
+            Path(out_path).write_bytes(pdf_saying(text))
+            saved_to.append(Path(out_path))
+            return True
+        with mock.patch.object(site, "goto_documents", lambda page: True), \
+                mock.patch.object(site, "download_bill", hands_over):
+            app.download_one(object(), doc, "2026-09-30 Coinbase Monthly Statement.pdf")
+        return app, doc, saved_to[0], failures
+
+    def test_a_statement_naming_its_month_is_filed(self):
+        app, doc, out, failures = self.run_download_one(SEPTEMBER)
+        rec = app.progress.get(doc.key)
+        self.assertEqual(rec["state"], docs.State.COMPLETED.value)
+        self.assertTrue(rec["downloaded_ok"])
+        self.assertTrue(out.exists())
+        self.assertEqual(failures, [])
+
+    def test_a_statement_naming_another_month_is_not_kept(self):
+        app, doc, out, failures = self.run_download_one(OCTOBER)
+        rec = app.progress.get(doc.key)
+        self.assertEqual(rec["state"], docs.State.NEEDS_MANUAL_REVIEW.value)
+        self.assertFalse(rec.get("downloaded_ok"))
+        self.assertEqual(rec["pdf_path"], "")
+        self.assertIn("names another month", rec["notes"])
+        self.assertFalse(out.exists(), "another month's statement was left under this month's name")
+        self.assertEqual(list(app.paths.manual_review.glob("*.pdf")), [])
+        self.assertFalse(app._already_done(doc), "the next run does not ask for this month again")
+        self.assertEqual(failures[0][0], "check the saved statement")
+
+    def test_a_statement_whose_month_cannot_be_told_goes_to_review(self):
+        app, doc, out, failures = self.run_download_one(NO_MONTH)
+        rec = app.progress.get(doc.key)
+        self.assertEqual(rec["state"], docs.State.NEEDS_MANUAL_REVIEW.value)
+        self.assertFalse(out.exists(), "a statement not checked was filed")
+        kept = Path(rec["pdf_path"])
+        self.assertEqual(kept.parent, app.paths.manual_review)
+        self.assertTrue(kept.exists())
+        self.assertIn("could not be checked", rec["notes"])
 
 
 class Persisted(unittest.TestCase):

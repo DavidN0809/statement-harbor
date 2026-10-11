@@ -11,10 +11,15 @@ ways a document arrives:
     button makes the page itself ask Coinbase to build that month's PDF
     (a POST the page makes, not this app), poll for it, and then the browser
     downloads it from statements-report-persistent-production.s3.amazonaws.com.
+    The statements page is loaded afresh before every press, so a month
+    asked for before cannot hand its download to this one's. Then
     `_catch_statement` presses the one button, through the core's
-    press_once, and takes the download event only when its address is on
-    that exact host. The "Last 30 days" row is
-    a moving window, not a statement, and is skipped.
+    press_once, and takes the download event only when it is the one
+    download the press brought and its address is on that exact host. The
+    saved PDF has to name its own month more plainly than the months on
+    either side (statement_identity) before it is filed under that month.
+    The "Last 30 days" row is a moving window, not a statement, and is
+    skipped.
   * A tax form. The page's own list call, GET /v2/tax/forms?...&year=YYYY,
     returns each form with a short-lived link to its PDF on
     tax-center-forms-production.s3.amazonaws.com. `_collect_tax` reads the
@@ -77,6 +82,7 @@ from paperpull_core.api_census import shape_of as _shape
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
+from paperpull_core.identity import Identity
 # re-exported: the docs module calls it as site.set_download_dir
 from paperpull_core.capture import set_download_dir  # noqa: F401
 from paperpull_core.capture import snapshot as _snapshot
@@ -384,6 +390,10 @@ class ListStopped(Exception):
 
 
 _PDF_BTN = "button[data-testid='statements-pdf-v2']"
+# How long a statement's capture waits, once a download has come, for a
+# second one. One press of one PDF button hands over one PDF, so a second
+# download means one of the two is not this press's, and neither is taken.
+SECOND_DOWNLOAD_WAIT_MS = 3000
 _LOAD_MORE = "button[data-testid='load-more']"
 _MAX_LOAD_MORE = 60
 _MONTH_ROW_RE = re.compile(r"^(January|February|March|April|May|June|July|August|September|"
@@ -422,6 +432,29 @@ def month_to_iso(label: str) -> str:
     return f"{year:04d}-{month:02d}-{_last_day(year, month):02d}"
 
 
+def statement_identity(title: str):
+    """What a monthly statement's own text is checked against, and the
+    statements it could be taken for, as (mine, rivals) for
+    identity.distinguish. Its month, its first day and its last day, the
+    same three kinds of fact for every month, and as rivals the month
+    before and the month after, the two a statement most often names beside
+    its own, in an opening balance or the day it was made. None for a title
+    that is not a monthly statement's."""
+    m = _STATEMENT_TITLE_RE.match((title or "").strip())
+    if not m:
+        return None
+    iso = month_to_iso(m.group(1))
+    year, month = int(iso[:4]), int(iso[5:7])
+
+    def of(y: int, mo: int) -> Identity:
+        return Identity(period="%04d-%02d" % (y, mo), start="%04d-%02d-01" % (y, mo),
+                        date="%04d-%02d-%02d" % (y, mo, _last_day(y, mo)), kind="statement")
+
+    before = (year - 1, 12) if month == 1 else (year, month - 1)
+    after = (year + 1, 1) if month == 12 else (year, month + 1)
+    return of(year, month), (of(*before), of(*after))
+
+
 def _read_rows(page) -> list:
     try:
         return page.evaluate(_ROWS_JS) or []
@@ -454,6 +487,16 @@ def goto_documents(page) -> bool:
     if here.split("?")[0].rstrip("/") == STATEMENTS_URL and is_safe_url(here) \
             and not looks_signed_out(page) and _wait_for_list(page, 5000):
         return True
+    return reload_statements(page)
+
+
+def reload_statements(page) -> bool:
+    """Load the statements page afresh by its address, whatever the tab
+    shows already, and wait for its list. Done before every press of a
+    statement's PDF button. A month pressed before may still be building
+    and polling for its PDF in the page, and its download could then come
+    during the next month's press and be taken for that month. The load
+    ends that page and its polling."""
     try:
         page.goto(STATEMENTS_URL, wait_until="domcontentloaded", timeout=60000)
     except Exception as e:
@@ -768,9 +811,18 @@ def _fetch_tax_pdf(page, title: str, out_path: Path, trace: Optional[list]) -> b
     return True
 
 
+def _cancel_all(downloads: list) -> None:
+    for dl in downloads:
+        try:
+            dl.cancel()
+        except Exception:
+            pass
+
+
 def _catch_statement(page, dl_dir, label: str, out_path: Path, trace: Optional[list]) -> bool:
     """Press the PDF button of the row that reads `label`, once, and take
-    the download the browser then makes, only when it comes from an exact
+    the download the browser then makes, only when it is the one download
+    that came, none came before the press, and it comes from an exact
     download host. A file that lands with no event, or from any other
     host, is not taken."""
     rows = _read_rows(page)
@@ -828,6 +880,14 @@ def _catch_statement(page, dl_dir, label: str, out_path: Path, trace: Optional[l
             if trace is not None:
                 trace.append({"note": "the PDF button's row no longer reads this month"})
             return False
+        # A download that came before the press is not this press's, and
+        # with one on its way nothing is pressed.
+        if downloads:
+            _cancel_all(downloads)
+            if trace is not None:
+                trace.append({"note": "a download came before the press, so nothing was pressed",
+                              "downloads": len(downloads)})
+            return False
         # Playwright's own press, and through the page only when nothing
         # covered the button, its press never reached the page, nothing it
         # should bring came and its row still reads this month. Something
@@ -872,6 +932,16 @@ def _catch_statement(page, dl_dir, label: str, out_path: Path, trace: Optional[l
         if not downloads:
             if trace is not None:
                 trace.append({"note": "no download in two minutes"})
+            return False
+        # One press brings one PDF. A second download means one of them
+        # belongs to an earlier press, and which cannot be told, so neither
+        # is taken and the statement is left for review and the next run.
+        page.wait_for_timeout(SECOND_DOWNLOAD_WAIT_MS)
+        if len(downloads) > 1:
+            _cancel_all(downloads)
+            if trace is not None:
+                trace.append({"note": "more than one download came after one press, so none was taken",
+                              "downloads": len(downloads)})
             return False
         dl = downloads[0]
         host = urlsplit(dl.url or "").hostname or ""
@@ -923,8 +993,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                   trace: Optional[list] = None) -> bool:
     """Save the document titled `title`, dated `iso_date`. A tax document is
     fetched from its listed link, nothing pressed. A monthly statement is
-    taken by pressing its row's own PDF button once and catching the
-    download, which is how the site hands one over."""
+    taken by loading the statements page afresh, pressing its row's own PDF
+    button once and catching the download, which is how the site hands one
+    over. Whether the PDF names its own month is the caller's to check
+    (statement_identity)."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     t = (title or "").strip()
@@ -937,7 +1009,9 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     if month_to_iso(m.group(1)) != iso_date:
         log.info("title %r and date %s disagree", t, iso_date)
         return False
-    if not goto_documents(page):
+    # Afresh before every press, so no earlier month's page is still
+    # polling for its PDF (reload_statements).
+    if not reload_statements(page):
         log.info("could not open the statements page for %s", iso_date)
         return False
     return _catch_statement(page, dl_dir, m.group(1), out_path, trace)

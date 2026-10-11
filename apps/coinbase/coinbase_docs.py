@@ -26,6 +26,7 @@ machine; nothing is sent to any external service.
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core import identity
 from paperpull_core import listing
 from paperpull_core import pressing
 from paperpull_core import capture
@@ -658,6 +659,18 @@ class App:
             print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
             return
 
+        # A monthly statement has to name its own month more plainly than
+        # the month before and the month after, or it is not filed under
+        # this month's name. A download is not tied to the press that made
+        # it, and an earlier month's could still come during this one's
+        # (site.statement_identity).
+        expected = site.statement_identity(doc.title)
+        if expected is not None:
+            verdict = identity.distinguish(out_path, expected[0], expected[1])
+            if verdict.outcome != identity.VERIFIED:
+                self._statement_not_filed(doc, out_path, verdict)
+                return
+
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
         doc.downloaded_ok = True   # done for good, even if the file is deleted later
         self._record(doc, State.COMPLETED)
@@ -675,6 +688,48 @@ class App:
         else:
             self.stats["other"] += 1
         print(f"  Saved: {out_path.name}")
+
+    def _statement_not_filed(self, doc: Document, out_path: Path, verdict) -> None:
+        """Keep a statement that does not name its own month out of the
+        archive. One that names another month more plainly is that month's,
+        so nothing of it is kept and the record names no file, and the next
+        run asks for this month again. One whose month could not be told
+        either way, a scan or a statement printing no month this knows, goes
+        to Manual Review for a person to look at, where it counts as handled
+        like any copy put aside there."""
+        if verdict.outcome == identity.REFUSED:
+            why = "the statement that downloaded names another month"
+            status = "Wrong month"
+            kept = None
+        else:
+            why = "the month of the statement that downloaded could not be checked"
+            status = "Month not checked"
+            kept = unique_path(self.paths.manual_review, out_path.name,
+                               self.config["max_path_length"])
+        try:
+            if kept is None:
+                out_path.unlink()
+            else:
+                out_path.replace(kept)
+        except OSError as e:
+            # Never left in the archive under this month's name.
+            log.info("could not move the statement out of the archive: %s", e)
+            try:
+                out_path.unlink()
+            except OSError:
+                pass
+            kept = None
+        doc.pdf_path, doc.pdf_filename = (str(kept), kept.name) if kept else ("", "")
+        self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
+        self._write_row(doc, status, "Needs Manual Review")
+        self.write_failure("check the saved statement", why, extra={"check": verdict.report()})
+        self.stats["manual_review"] += 1
+        if kept is None:
+            print(f"  !! {verdict.say()}. Nothing was saved for it. The file was")
+            print("     removed rather than filed under this month's name, and the")
+            print("     next run asks for this month again.")
+        else:
+            print(f"  !! {verdict.say()}. Moved to Manual Review, not filed.")
 
     # -- records -----------------------------------------------------------
 

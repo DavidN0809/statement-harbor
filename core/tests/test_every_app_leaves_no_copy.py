@@ -406,9 +406,11 @@ def test_coinbase_takes_its_statement_from_the_folder(left, browser_context, pro
     """Coinbase presses the row's own PDF button and takes the download
     event, through the core, only from its exact document host. Here the
     document comes from the test's provider, so that host stands in for
-    the bucket, and the statements page is this page."""
+    the bucket, and the statements page, loaded afresh before the press,
+    is this page."""
     site = site_of(REPO / "apps" / "coinbase")
     monkeypatch.setattr(site, "goto_documents", lambda page: True)
+    monkeypatch.setattr(site, "reload_statements", lambda page: True)
     monkeypatch.setattr(site, "is_download_url", lambda url: url.startswith(provider.base + "/"))
     provider.pages["/coinbase"] = COINBASE_PAGE
     pg = browser_context.new_page()
