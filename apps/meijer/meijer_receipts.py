@@ -1295,6 +1295,7 @@ class App:
         tokens = receipt_pdf.expected_tokens_for(
             purchase, listed=self.discovery.get(purchase.key) or purchase)
         result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"], tokens)
+        stopped = None
         if not result.ok:
             self.stats["validation_failures"] += 1
             if again is not None:
@@ -1302,6 +1303,12 @@ class App:
                 body = None
                 try:
                     body = again()
+                except pressing.Stop as e:
+                    # The retry's press stopped the run. The first copy
+                    # failed its check, so it goes to Manual Review below
+                    # before the stop goes on, rather than stay as a saved
+                    # receipt a later run saves another beside.
+                    stopped = e
                 except Exception as e:
                     log.warning("Retry failed: %s", e)
                 if body:
@@ -1327,6 +1334,8 @@ class App:
                                  notes_extra=f"Validation: {result.reason}")
             self.stats["manual_review"] += 1
             print(f"  !! Validation failed ({_reason_words(result.reason)}); moved to Manual Review.")
+            if stopped is not None:
+                raise stopped
             return False
 
         purchase.receipt_count = 1

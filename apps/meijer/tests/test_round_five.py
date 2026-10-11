@@ -274,6 +274,28 @@ def test_a_second_print_that_also_fails_never_replaces_the_first(tmp_path, monke
     assert list(out.parent.iterdir()) == []
 
 
+def test_a_retry_whose_press_stops_the_run_puts_the_first_copy_aside_first(tmp_path):
+    """The first copy failed its check, and pressing the receipt link again
+    stopped the run at a press it would not make. The first copy went to
+    Manual Review before the stop went on, never left as a saved receipt
+    the next run would save another beside (review of 0.46.0)."""
+    from paperpull_core import pressing
+    app = _app(tmp_path)
+    out = app.paths.folder_for(IN_STORE, "Receipt") / "2026-09-19 Meijer Mixed Purchases Receipt.pdf"
+    out.write_bytes(SOMETHING_ELSE)
+    purchase = _purchase()
+
+    def again():
+        raise pressing.Covered("press a control", "something on the page covers the control",
+                               ["Something covers the receipt link."], {})
+    with pytest.raises(pressing.Covered):
+        app._finish_pdf(PAGE, purchase, out, again=again)
+    [kept] = _pdfs(app.paths.manual_review)
+    assert (app.paths.manual_review / kept).read_bytes() == SOMETHING_ELSE
+    assert not out.exists()
+    assert (app.progress.get(purchase.key) or {}).get("state") == State.NEEDS_MANUAL_REVIEW.value
+
+
 def test_a_second_print_that_passes_takes_the_first_ones_place(tmp_path, monkeypatch):
     printed = _printing(monkeypatch, RECEIPT)
     app = _app(tmp_path)
