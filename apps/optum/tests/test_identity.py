@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from paperpull_core import listing
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import optum_docs as docs
 import optum_site as site
@@ -35,17 +37,28 @@ def latest(pid):
     return {**statement(pid, doc="1"), "text": "Download latest statement"}
 
 
-class Nothing:
+class Shown:
+    """What a locator finds, never a password field or a row, and the
+    page's own words."""
+
+    def __init__(self, text):
+        self.text = text
+
     def count(self):
         return 0
+
+    def inner_text(self, **_kw):
+        return self.text
 
 
 class Page:
     """A signed-in tab, by address. Each address answers the entries the
-    app's own page script would read there, and nothing is pressed."""
+    app's own page script would read there and the words it shows, and
+    nothing is pressed."""
 
-    def __init__(self, pages):
+    def __init__(self, pages, said=None):
         self.pages = pages
+        self.said = said or {}
         self.url = f"https://{HOST}/account"
 
     def goto(self, url, **_kw):
@@ -55,10 +68,12 @@ class Page:
         pass
 
     def wait_for_selector(self, _sel, **_kw):
-        pass
+        # A page with nothing to read waits out its time.
+        if not self.pages.get(self.url):
+            raise TimeoutError("nothing appeared")
 
     def locator(self, _sel):
-        return Nothing()
+        return Shown(self.said.get(self.url, ""))
 
     def evaluate(self, _js):
         return self.pages.get(self.url, [])
@@ -81,10 +96,10 @@ def make_app(tmp_path):
     return make
 
 
-def listed(app, pages) -> dict:
+def listed(app, pages, said=None) -> dict:
     """Every document the app's own Discover records from these pages, by
     key, with its record."""
-    page = Page(pages)
+    page = Page(pages, said)
     app.page = lambda: page
     app.check_session = lambda _page: None
     app.cmd_discover(quiet=True)
@@ -246,3 +261,41 @@ def test_the_form_saved_first_keeps_its_key_in_whatever_order_the_page_lists_the
 def test_a_corrected_form_is_named_apart_by_the_end_of_its_id():
     assert docs.told_apart_by({"account": PID, "document_id": "4400888"}) == "400888"
     assert docs.told_apart_by({"account": PID}) == "product 5678"
+
+
+# -- which products are read ---------------------------------------------------
+
+def link(path, text="Overview"):
+    return {"text": text, "path": path, "host": HOST, "how": "link"}
+
+
+def test_a_link_to_a_products_overview_or_settings_names_no_product_to_read():
+    """Every link into /account/products/ named a product, nav links
+    included, so a product with no statements page stopped every Discover."""
+    entries = [latest(PID), link(f"/account/products/{OTHER}"),
+               link(f"/account/products/{OTHER}/settings", "Card settings")]
+    assert site.product_ids(entries) == [PID]
+    assert site.product_ids(entries + [link(f"/account/products/{OTHER}/statements",
+                                            "Statements")]) == [PID, OTHER]
+
+
+SECOND = {site.FORMS_URL: [latest(PID), link(f"/account/products/{OTHER}/statements", "Statements")],
+          statements_url(PID): [statement(PID)]}
+
+
+def test_a_product_whose_page_says_it_has_no_statements_is_read_as_empty(make_app):
+    app = make_app()
+    found = listed(app, SECOND, said={statements_url(OTHER): "Statements\nYou have no statements yet."})
+    assert [r["account"] for r in found.values()] == [PID]
+    assert listing.last(app) == listing.COMPLETE
+
+
+def test_a_product_page_that_shows_nothing_and_says_nothing_still_stops(make_app):
+    """Help text that says what happens if there are none says nothing of
+    this product, so the list is not called whole."""
+    app = make_app()
+    app.write_failure = lambda *_a, **_kw: None
+    with pytest.raises(SystemExit):
+        listed(app, SECOND, said={statements_url(OTHER): "If there are no statements, call us."})
+    assert listing.last(app) == listing.STOPPED
+    assert [r["account"] for r in app.discovery.data.values()] == [PID]

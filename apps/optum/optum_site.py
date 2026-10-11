@@ -45,6 +45,11 @@ PDF path (ALLOWED_PATH_RE); www.optumbank.com only for the sign-in landing.
 KNOWN CEILINGS (ponytail: left as they are until a run shows otherwise)
   * Investment earnings reports and contribution summaries on Forms &
     documents are not read; statements and tax forms are the scope.
+  * More than one product has not been seen. Product ids are read only
+    from links that lead to a product's statements, and a product whose
+    statements page says outright that it has none (NO_STATEMENTS_RE, a
+    guess at the wording) is read as empty. A page that shows nothing and
+    says nothing still stops the list.
   * A tax document whose title names no year is dated from Optum's title
     alone and gets no date when none is there; the orchestrator may then
     date it from the title's other words, and the download's binding check
@@ -314,6 +319,9 @@ ALLOWED_PATH_RE = re.compile(
     r"account/products/\d+/(statements|tax_documents)/\d+\.pdf)/?$")
 DOCUMENT_PATH_RE = re.compile(r"^/account/products/(\d+)/(statements|tax_documents)/(\d+)\.pdf$")
 PRODUCT_RE = re.compile(r"/account/products/(\d+)(?:/|$)")
+# A link that leads to a product's statements, its statements page or one
+# of its statements. Only these name a product this app reads.
+STATEMENTS_LINK_RE = re.compile(r"^/account/products/(\d+)/statements(?:/\d+\.pdf)?/?$")
 
 
 def is_safe_url(url: str) -> bool:
@@ -443,16 +451,39 @@ def _entries(page) -> list:
 
 
 def product_ids(entries: list) -> List[str]:
-    """Every product id named by a link into /account/products/<id>/, in
-    the order first seen."""
+    """Every product id named by a link that leads to that product's
+    statements, in the order first seen. A link to a product's overview or
+    its settings names a product too, and one with no statements, an FSA,
+    an HRA or an investment account, would then have stopped every
+    Discover at a statements page it does not have."""
     out: List[str] = []
     for e in entries:
-        if (e.get("host") or "") != "account.optumbank.com":
+        if e.get("how") != "link" or (e.get("host") or "") != "account.optumbank.com":
             continue
-        m = PRODUCT_RE.search(e.get("path") or "")
+        m = STATEMENTS_LINK_RE.match(e.get("path") or "")
         if m and m.group(1) not in out:
             out.append(m.group(1))
     return out
+
+
+# What a product's statements page says when it has none. Only a sentence
+# that says so outright counts, never a page that merely shows nothing, and
+# never one that begins "if" or "when", as help text does. Not yet seen on a
+# real account (KNOWN CEILINGS).
+NO_STATEMENTS_RE = re.compile(
+    r"(?<!\bif )(?<!\bwhen )\b(?:you\s+(?:have\s+no|do\s+not\s+have\s+any|don'?t\s+have\s+any)\s+statements"
+    r"|there\s+are\s+no\s+statements"
+    r"|no\s+statements\s+(?:are\s+)?(?:available|to\s+(?:show|display)|yet|found))\b", re.I)
+
+
+def says_no_statements(page) -> bool:
+    """True only when the page's own text says the product has no
+    statements."""
+    try:
+        text = page.locator("body").inner_text(timeout=5000) or ""
+    except Exception:
+        return False
+    return bool(NO_STATEMENTS_RE.search(text))
 
 
 def document_id_of(path: str) -> str:
@@ -538,7 +569,9 @@ def _goto_statements(page, pid: str) -> bool:
     try:
         page.wait_for_selector("a[href*='/statements/'], select[name='document_id']", timeout=30000)
     except Exception:
-        return False
+        # Nothing to read after the whole wait. That is a page that opened
+        # only when it says outright that the product has no statements.
+        return says_no_statements(page)
     return True
 
 
@@ -550,7 +583,7 @@ def collect_download_docs(page) -> List[RawDoc]:
         raise ListStopped("the Forms & documents page did not open")
     pids = product_ids(_entries(page))
     if not pids:
-        raise ListStopped("the Forms & documents page names no product")
+        raise ListStopped("the Forms & documents page links no product's statements")
     docs: List[RawDoc] = []
     for pid in pids:
         if not _goto_statements(page, pid):
@@ -561,6 +594,8 @@ def collect_download_docs(page) -> List[RawDoc]:
             stop.docs = docs + stop.docs
             raise
         if not found:
+            if says_no_statements(page):
+                continue   # a product that has none yet, which its page says
             raise ListStopped("a product's statements page lists no document", docs)
         docs.extend(found)
     return docs
