@@ -436,6 +436,34 @@ def dialog_is_open(page) -> bool:
     return period_select(page) is not None
 
 
+# The mark this app puts on the period dropdown of the dialog it opened by
+# pressing the Activity Statement row's own Run, so a statement dialog found
+# open is used only when it is that one. Another statement's dialog (MTM
+# Summary, Realized Summary) has the same dropdowns and its own Download PDF,
+# and a file it gives back may be named the same way (review of #77).
+_OURS_ATTR = "data-paperpull-activity"
+
+
+def _mark_ours(page) -> None:
+    sel = period_select(page)
+    if sel is None:
+        return
+    try:
+        sel.evaluate("(s, a) => s.setAttribute(a, '1')", _OURS_ATTR)
+    except Exception:
+        pass
+
+
+def _is_ours(page) -> bool:
+    sel = period_select(page)
+    if sel is None:
+        return False
+    try:
+        return sel.get_attribute(_OURS_ATTR) == "1"
+    except Exception:
+        return False
+
+
 def close_dialog(page) -> None:
     """Close the statement dialog with the Escape key, which presses nothing."""
     for _ in range(2):
@@ -503,6 +531,15 @@ def open_activity_dialog(page) -> bool:
     on Monthly with the month list showing."""
     if not ensure_statements(page):
         return False
+    if dialog_is_open(page) and not _is_ours(page):
+        # A statement dialog this app did not open, left open in the tab.
+        # Its Download PDF is not the Activity Statement's, so it is closed
+        # first, and when it will not close nothing is pressed.
+        log.info("a statement dialog this app did not open is showing, closing it")
+        close_dialog(page)
+        if dialog_is_open(page):
+            log.warning("a statement dialog this app did not open would not close")
+            return False
     if not dialog_is_open(page):
         _clear_stray_dialog(page)
         run = _wait_for_run_control(page)
@@ -521,6 +558,7 @@ def open_activity_dialog(page) -> bool:
         for _ in range(20):
             page.wait_for_timeout(500)
             if dialog_is_open(page):
+                _mark_ours(page)
                 break
     if not dialog_is_open(page):
         return False
@@ -608,6 +646,11 @@ def collect_statement_periods(page, keep=None, filed_under=(), why=None) -> Opti
             why.append(NO_MONTHS)
             return None
         labels = _select_options(sel)
+        if not labels:
+            # The select went away between finding it and reading it.
+            log.info(NO_MONTHS)
+            why.append(NO_MONTHS)
+            return None
         values = []
         try:
             values = sel.evaluate("s => [...s.options].map(o => o.value)") if sel is not None else []

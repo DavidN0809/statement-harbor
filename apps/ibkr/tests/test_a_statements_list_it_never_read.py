@@ -53,6 +53,7 @@ MONTHS = [("September, 2031", "203109"), ("August, 2031", "203108"),
 # names it.
 STATEMENTS_PAGE = """<!doctype html><html><head><title>Statements</title></head><body>
 %(notice)s
+%(other)s
 <h1>Statements <span>%(account)s</span></h1>
 <h3>Default Statements</h3>
 <div id="list"></div>
@@ -83,7 +84,30 @@ if (ROWS) setTimeout(() => {
     dialog();
   });
 }, 300);
+</script>
+<script>
+const ESCAPE_CLOSES = %(escape_closes)s;
+const other = document.getElementById('other');
+if (other) {
+  document.getElementById('other-pdf').addEventListener('click', () => {
+    location.href = '/statement?kind=mtm&m=' +
+      document.getElementById('other-date').value.replace('string:', '');
+  });
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const o = document.getElementById('other');
+  if (o && ESCAPE_CLOSES) o.remove();
+});
 </script></body></html>"""
+
+# Another statement's dialog, MTM Summary, left open by the person, with the
+# same dropdowns and a Download PDF of its own.
+OTHER_DIALOG = """<div role="dialog" aria-label="MTM Summary" id="other">
+<div class="modal-title">MTM Summary</div><form name="mtmForm">
+<select><option>Daily</option><option>Monthly</option><option>Annual</option></select>
+<select id="other-date"><option value="string:203109">September, 2031</option></select>
+<button type="button" id="other-pdf">Download PDF</button></form></div>"""
 
 PORTAL_PAGE = """<!doctype html><html><head><title>Portal</title></head><body>
 <h1>Portfolio</h1></body></html>"""
@@ -101,6 +125,11 @@ class FakeIbkr:
         self.account = ACCOUNT
         self.notice = ""
         self.file_account = ACCOUNT
+        # Another statement's dialog open when the page loads, whether the
+        # Escape key closes it, and the kind of each statement asked for.
+        self.other_open = False
+        self.escape_closes = True
+        self.asked = []
 
 
 SITE = FakeIbkr()
@@ -127,10 +156,14 @@ class _Handler(BaseHTTPRequestHandler):
         elif parts.path.startswith("/AccountManagement/"):
             page = STATEMENTS_PAGE % {"rows": "true" if SITE.rows else "false",
                                       "account": SITE.account, "notice": SITE.notice,
+                                      "other": OTHER_DIALOG if SITE.other_open else "",
+                                      "escape_closes": "true" if SITE.escape_closes
+                                      else "false",
                                       "months": json.dumps(MONTHS)}
             self._send(page.encode("utf-8"), "text/html; charset=utf-8")
         elif parts.path == "/statement":
             month = parse_qs(parts.query).get("m", [""])[0]
+            SITE.asked.append(parse_qs(parts.query).get("kind", ["activity"])[0])
             name = "%s_%s_%s.pdf" % (SITE.file_account, month, month)
             self._send(testkit.text_pdf(["Activity Statement", SITE.file_account, month]),
                        "application/pdf",
@@ -344,3 +377,48 @@ def test_another_regional_domain_is_named(url):
 ])
 def test_a_lookalike_domain_is_never_suggested(url):
     assert site.regional_host_problem(url) is None
+
+
+# -- a statement dialog the app did not open -------------------------------
+
+@pytest.fixture
+def tab_with_another_dialog(attached, server):
+    """The person's tab on the Statements page with MTM Summary's dialog
+    open, as they left it."""
+    SITE.other_open = True
+    from playwright.sync_api import sync_playwright
+    pw = sync_playwright().start()
+    browser = pw.chromium.connect_over_cdp(attached)
+    page = browser.contexts[0].new_page()
+    page.goto(address(server, site.STATEMENTS_PATH))
+    page.wait_for_selector("#other")
+    yield page
+    page.close()
+    pw.stop()
+
+
+def test_another_statements_dialog_left_open_is_closed_first(tab_with_another_dialog,
+                                                             tmp_path):
+    got, out = download(tab_with_another_dialog, tmp_path)
+    assert got and out.read_bytes()[:5] == b"%PDF-"
+    assert SITE.asked == ["activity"]
+
+
+def test_another_statements_dialog_that_will_not_close_is_never_pressed(
+        tab_with_another_dialog, tmp_path):
+    SITE.escape_closes = False
+    tab_with_another_dialog.reload()
+    tab_with_another_dialog.wait_for_selector("#other")
+    got, out = download(tab_with_another_dialog, tmp_path)
+    assert got is False
+    assert not out.exists()
+    assert SITE.asked == []
+
+
+def test_the_dialog_this_app_opened_is_used_again_when_escape_leaves_it(tab, tmp_path):
+    """Escape may not close the Activity Statement dialog (it does not here),
+    and the dialog this app opened itself is the right one to use again."""
+    assert site.collect_statement_periods(tab) is not None
+    assert site.dialog_is_open(tab), "the invented dialog closed on Escape"
+    got, out = download(tab, tmp_path)
+    assert got and SITE.asked == ["activity"]
