@@ -221,20 +221,20 @@ class StatementList(unittest.TestCase):
 
 class TaxList(unittest.TestCase):
     def test_duplicate_forms_keep_both(self):
-        forms = {2025: [{"id": "930a0ab0-3626-5828-8859-8ebd4d45f690", "form_type": "1099-DA"},
+        forms = {2025: [{"id": "11111111-2222-3333-4444-555555555555", "form_type": "1099-DA"},
                         {"id": "aaaa1111-bbbb-2222-cccc-333344445555", "form_type": "1099-DA"},
                         {"id": "x", "form_type": "1099-MISC"}]}
-        reports = [{"id": "e32dcf1e", "name": "PregeneratedGainLossPDF", "year": 2021,
+        reports = [{"id": "rpt00001", "name": "PregeneratedGainLossPDF", "year": 2021,
                     "file": {"file_type": "PDF", "url": "https://tax-center-forms-production.s3.amazonaws.com/x?sig=1"}}]
         out = site.tax_rawdocs(forms, reports)
         titles = [d.title for d in out]
-        self.assertEqual(titles, ["1099-DA Tax Year 2025 (#930a0ab03626582888598ebd4d45f690)",
+        self.assertEqual(titles, ["1099-DA Tax Year 2025 (#11111111222233334444555555555555)",
                                   "1099-DA Tax Year 2025 (#aaaa1111bbbb2222cccc333344445555)",
                                   "1099-MISC Tax Year 2025", "Gain Loss Report Tax Year 2021"])
         two = reports + [dict(reports[0], id="ffff0000")]
         rt = [d.title for d in site.tax_rawdocs({}, two)]
-        self.assertEqual(rt, ["Gain Loss Report Tax Year 2021 (#e32dcf1e)", "Gain Loss Report Tax Year 2021 (#ffff0000)"])
-        same_prefix = {2025: [{"id": "930a0ab0-1111", "form_type": "1099-DA"}, {"id": "930a0ab0-2222", "form_type": "1099-DA"}]}
+        self.assertEqual(rt, ["Gain Loss Report Tax Year 2021 (#rpt00001)", "Gain Loss Report Tax Year 2021 (#ffff0000)"])
+        same_prefix = {2025: [{"id": "form0001-1111", "form_type": "1099-DA"}, {"id": "form0001-2222", "form_type": "1099-DA"}]}
         self.assertEqual(len({d.title for d in site.tax_rawdocs(same_prefix, [])}), 2)
         for d in out:
             self.assertTrue(site._TAX_TITLE_RE.match(d.title), d.title)
