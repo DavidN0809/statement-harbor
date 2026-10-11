@@ -108,9 +108,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   cards and letters, saved apart from its EOBs, are kept the same way.
   Where the saved file had been deleted and the attempt left its own copy
   under that name, a copy that failed its check and could not be moved to
-  Manual Review or one an error cut short, the record no longer vouches
-  for it, in receipt and document apps alike, and the next plain run
-  fetches the document again. An American Family bill handed another
+  Manual Review, the record no longer vouches for it, in receipt and
+  document apps alike, and the next plain run fetches it again. An American Family bill handed another
   bill's statement sends both bills to Manual Review, its own copy saved
   before included, as a first run does.
 

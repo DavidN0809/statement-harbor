@@ -332,6 +332,55 @@ def test_download_again_that_saves_nothing_keeps_the_saved_record(app, ending, t
 
 
 @pytest.mark.parametrize("app", APPS, ids=IDS)
+def test_a_copy_left_where_the_saved_one_was_is_never_vouched_for(app, tmp_path, monkeypatch):
+    """The person deleted the saved file, so the attempt saves under its
+    name, and its copy fails its check and cannot be moved to Manual
+    Review, a file another program holds open. The record no longer says
+    the receipt is saved, and the next plain run takes it again."""
+    mod = load(app)
+    out = tmp_path / "out"
+    saved, _before, _found = saved_by_a_first_run(mod, out)
+    inst = app_in(mod, out, redownload=True)
+    moving = Path.replace
+
+    def refused(self, target):
+        if Path(target).parent == inst.paths.manual_review:
+            raise OSError("another program holds the file open")
+        return moving(self, target)
+
+    monkeypatch.setattr(Path, "replace", refused)
+    put_aside_after_the_copy_was_deleted(inst, listed(), saved)
+    monkeypatch.setattr(Path, "replace", moving)
+    assert saved.exists() and saved.stat().st_size < 1000, "the attempt left no copy, so this shows nothing"
+    after = inst.progress.get(listed().key)
+    assert not after.get("downloaded_ok"), "the record says the attempt's copy is the one saved"
+    assert app_in(mod, out, redownload=False)._already_done(listed()) is False
+
+
+GROWN = [details_would_not_open, an_error_partway]
+
+
+@pytest.mark.parametrize("ending", GROWN, ids=[e.__name__ for e in GROWN])
+@pytest.mark.parametrize("app", APPS, ids=IDS)
+def test_a_saved_copy_changed_outside_keeps_its_record(app, ending, tmp_path):
+    """The person ran OCR over the saved PDF, so it is larger than when it
+    was saved, and it is still theirs. A Download again that saves nothing
+    changes nothing in its record but the notes."""
+    mod = load(app)
+    out = tmp_path / "out"
+    saved, before, _found = saved_by_a_first_run(mod, out)
+    with open(saved, "ab") as fh:
+        fh.write(b"\n% a text layer an OCR tool added\n" * 40)
+    inst = app_in(mod, out, redownload=True)
+    ending(inst, listed(), saved)
+    after = inst.progress.get(listed().key)
+    changed = {f: (before.get(f), after.get(f)) for f in sorted(set(before) | set(after))
+               if f not in ("notes", "updated_at") and before.get(f) != after.get(f)}
+    assert not changed, changed
+    assert app_in(mod, out, redownload=False)._already_done(listed()) is True
+
+
+@pytest.mark.parametrize("app", APPS, ids=IDS)
 def test_the_notes_say_how_the_latest_attempt_ended(app, tmp_path):
     """Two Download agains that each saved nothing, one run after the
     other. The saved copy's own notes stay, and one entry says how the

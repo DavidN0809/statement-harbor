@@ -641,19 +641,7 @@ def put_aside_could_not_move(home, app, doc, saved):
 put_aside_could_not_move.state = State.PDF_SAVED
 
 
-def an_error_after_the_copy_was_written(home, app, doc, saved):
-    """The capture wrote its copy where the saved one was, and an error came
-    before download_one wrote anything of it down."""
-    saved.unlink()
-    out_path = where_its_download_saves(app, doc, file_name_for(home, doc))
-    assert out_path == saved
-    failing_copy(out_path)
-    getattr(app, home.record)(doc, State.FAILED, notes="an invented error")
-
-
-an_error_after_the_copy_was_written.state = State.FAILED
-
-LEFT_IN_PLACE = [put_aside_could_not_move, an_error_after_the_copy_was_written]
+LEFT_IN_PLACE = [put_aside_could_not_move]
 
 
 def never_vouched_for(home, app):
@@ -685,6 +673,26 @@ def test_a_record_never_vouches_for_a_copy_the_attempt_left_in_its_place(home, e
 def test_every_document_app_has_an_ending_that_leaves_a_copy_in_place():
     assert all(any(ending.state in states_written(app) for ending in LEFT_IN_PLACE)
                for app in APPS)
+
+
+GROWN = [would_not_capture, an_error_partway]
+
+
+@pytest.mark.parametrize("home,ending", [
+    pytest.param(app, ending, id="%s-%s" % (app.name, ending.__name__))
+    for app in APPS for ending in GROWN if ending.state in states_written(app)],
+    indirect=["home"])
+def test_a_saved_copy_changed_outside_keeps_its_record(home, ending):
+    """The person ran OCR over the saved PDF, so it is larger than when it
+    was saved, and it is still theirs. A Download again that saves nothing
+    changes nothing in its record but the notes."""
+    saved, before, found_before = saved_by_a_first_run(home)
+    with open(saved, "ab") as fh:
+        fh.write(b"\n% a text layer an OCR tool added\n" * 40)
+    app = home.build(redownload=True)
+    doc = a_listed_document(home, app)
+    ending(home, app, doc, saved)
+    the_saved_record_stands(home, saved, before, found_before, app, ended=ending.state)
 
 
 THROUGH_DOWNLOAD_ONE = [d for d in APPS if d.name in ("capitalone", "dominion", "schwab")]

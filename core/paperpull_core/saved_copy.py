@@ -43,8 +43,6 @@ attempt held in this run.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 # The first words of what an attempt that saved nothing adds to the saved
 # copy's notes. A later attempt's entry takes the place of the one found by
 # them, so the notes say only how the latest one ended.
@@ -90,7 +88,11 @@ def holds(app, key: str, rec: dict, also=()) -> bool:
     if not holding(app, key):
         return False
     old = app.progress.get(key) or {}
-    if rec.get("state") != _ON_ITS_WAY and _no_longer_its_copy(old, rec):
+    if rec.get("state") != _ON_ITS_WAY and _names_its_copy(old, rec):
+        # The write takes the record, and no longer says the document is
+        # saved. A receipt's record carries no downloaded_ok of its own and
+        # a write merges into the record, so it is said here.
+        rec["downloaded_ok"] = False
         return False
     patch = {name: rec[name] for name in also if name in rec}
     entry = _ENTRY % ", ".join(_said(rec.get("state"), rec.get("notes")))
@@ -108,32 +110,22 @@ def holds(app, key: str, rec: dict, also=()) -> bool:
 _ON_ITS_WAY = "PDF Saved"
 
 
-def _no_longer_its_copy(old: dict, rec: dict) -> bool:
-    """Whether the file a saved record names is no longer the copy it saved.
+def _names_its_copy(old: dict, rec: dict) -> bool:
+    """Whether the write that ends an attempt names the saved record's own
+    file as the attempt's copy.
 
-    The person deleted it, the usual reason for Download again, so the
-    attempt saved under the very name the record holds. A copy that failed
-    its check and could not be moved to Manual Review stayed there, as did
-    one an error cut short after it was written. A record kept as it was
-    then vouched for that copy as the one saved, and no later run fetched
-    the document again. So when the attempt names the record's own file,
-    or the file there is no longer the size the record saved, the attempt's
-    write takes the record as it did before any of this, and the next plain
-    run fetches the document again. A file that is simply gone is the copy
-    the person let go, and the record stands."""
+    The person deleted the saved file, the usual reason for Download again,
+    so the attempt saved under that very name. A copy that failed its check
+    and could not be moved to Manual Review stayed there. A record kept as
+    it was then vouched for that copy as the one saved, and no later run
+    fetched the document again, so that write takes the record and the next
+    plain run fetches it again. The file's size is not asked. A person who
+    runs OCR over a saved PDF, or annotates it, changes its size, and the
+    saved copy is still theirs. A copy an error cut short before any write
+    named it, or a run ended just after "PDF Saved", is not told apart from
+    the saved one here."""
     path = str(old.get("pdf_path") or "")
-    if not path:
-        return False
-    if str(rec.get("pdf_path") or "") == path:
-        return True
-    try:
-        size = Path(path).stat().st_size
-    except OSError:
-        return False
-    try:
-        return size != int(old.get("pdf_size"))
-    except (TypeError, ValueError):
-        return False
+    return bool(path) and str(rec.get("pdf_path") or "") == path
 
 
 def tried(app, key: str) -> str:
