@@ -874,6 +874,25 @@ def _collect_tax(page, first: str) -> List[RawDoc]:
     return tax_rawdocs(forms, _tax_reports(page))
 
 
+def shown_documents(page) -> List[RawDoc]:
+    """What Diagnose recognizes, with nothing pressed. Every statement row
+    the page shows as it stands, Load more left alone, so only the rows
+    already shown, and every tax document the Taxes page's own list calls
+    name. A tax list that stops partway gives what was read before it."""
+    docs: List[RawDoc] = []
+    for r in _read_rows(page):
+        label = r.get("label") or ""
+        iso = month_to_iso(label)
+        if iso:
+            docs.append(RawDoc(title=f"Monthly Statement {label}", date_text=iso,
+                               row_index=len(docs), kind="statement"))
+    try:
+        docs.extend(_collect_tax(page, _first_transaction(page)))
+    except ListStopped as stop:
+        docs.extend(stop.docs)
+    return docs
+
+
 def collect_download_docs(page) -> List[RawDoc]:
     """Every monthly statement and every tax document. Nothing is pressed
     except Load more. A statements list that stopped partway still has the

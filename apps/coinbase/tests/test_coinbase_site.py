@@ -878,6 +878,62 @@ class StatementMonth(unittest.TestCase):
         self.assertIn("could not be checked", rec["notes"])
 
 
+class DiagnosePressesNothing(unittest.TestCase):
+    """Diagnose says it downloads and presses nothing. It pressed Load more
+    up to sixty times, once itself and once more through the listing."""
+
+    def test_diagnose_leaves_load_more_alone(self):
+        app, _failures = built_app(self)
+        # Diagnose hands the owner's name to the word list, for this run only.
+        self.addCleanup(site.set_private_words, [])
+        rows = [row("Last 30 days", 0), row("September 2026", 1), row("August 2026", 2)]
+
+        class LM:
+            presses = 0
+            def count(s): return 1
+            def is_visible(s): return True
+            def is_enabled(s, **kw): return True
+            @property
+            def first(s): return s
+            def inner_text(s, **kw): return "Load more"
+            def get_attribute(s, a): return None
+            def click(s, **kw): LM.presses += 1
+
+        class Loc:
+            def __init__(s, n): s.n = n
+            def count(s): return s.n
+            @property
+            def first(s): return s
+
+        class Page:
+            url = site.STATEMENTS_URL
+            def title(self): return "Statements"
+            def locator(self, sel):
+                if sel == site._LOAD_MORE:
+                    return LM()
+                return Loc(0 if "password" in sel else 3)
+            def evaluate(self, js, *a): return list(rows)
+            def wait_for_timeout(self, ms): pass
+
+        def answers(page, url):
+            if url.startswith(site.TAX_OWNER_API):
+                return {"first_transaction_date": "2026-08-03"}
+            if url.startswith(site.TAX_FORMS_API):
+                return {"data": [], "next_cursor": ""}
+            return {"data": []}
+        app.page = lambda: Page()
+        with mock.patch.object(site, "goto_documents", lambda page: True), \
+                mock.patch.object(site, "survey", lambda page: {}), \
+                mock.patch.object(site, "_get_json", answers), \
+                mock.patch.object(site.pressing, "click") as click, \
+                mock.patch.object(site.pressing, "press_once") as press_once:
+            app.cmd_diagnose()
+        self.assertEqual((click.call_count, press_once.call_count, LM.presses), (0, 0, 0))
+        info = json.loads((app.paths.diagnostics / "diagnose-documents.json").read_text(encoding="utf-8"))
+        self.assertNotIn("error", info)
+        self.assertEqual(len(info["documents_recognized"]), 2, "the two month rows shown")
+
+
 class Persisted(unittest.TestCase):
     def test_persistable_strips_query_and_fragment(self):
         self.assertEqual(docs.persistable("https://x.s3.amazonaws.com/a.pdf?X-Amz-Signature=abc&token=1#f"),

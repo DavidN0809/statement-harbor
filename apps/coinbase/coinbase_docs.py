@@ -971,8 +971,9 @@ class App:
     def cmd_diagnose(self):
         """Survey the statements area and write a file a tester can attach to
         the GitHub issue. No screenshot, digit runs masked, JSON bodies as
-        shape only. Nothing is downloaded and nothing but a documents link is
-        followed."""
+        shape only. Nothing is downloaded and nothing is pressed, Load more
+        included. The statements page is opened by its address, and the tax
+        documents are read from the list calls the Taxes page makes."""
         self.stats["mode"] = "diagnose"
         words = words_for('Coinbase', site)
         page = self.page()
@@ -988,7 +989,6 @@ class App:
             site.set_private_words([self.config.get("owner", "")])
             info["survey"] = site.survey(page)
             if found:
-                site.expand_all(page)
                 site.scroll_full_page(page)
             info["row_counts"] = {}
             for name, sel in [("doc_row", site.FALLBACK["doc_row"]),
@@ -999,7 +999,7 @@ class App:
                     info["row_counts"][name] = page.locator(sel).count()
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
-            found_docs = site.collect_download_docs(page) if found else []
+            found_docs = site.shown_documents(page) if found else []
             info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "has_pdf_link": bool(b.href)}
                                             for b in found_docs[:40]]
             docs = site.collect_documents(page)
