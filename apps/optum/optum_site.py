@@ -372,7 +372,6 @@ def valid_iso(text: str) -> bool:
         return _date.fromisoformat(t).isoformat() == t
     except ValueError:
         return False
-_STATEMENT_TITLE_RE = re.compile(r"^HSA Statement ((?:19|20)\d{2}-\d{2}-\d{2})(?: \(product (\d{4})\))?$")
 _TAX_YEAR_RE = re.compile(r"\b((?:19|20)\d{2})\b")
 
 # Every link and every option of the statements page that points at a
@@ -453,11 +452,14 @@ def product_ids(entries: list) -> List[str]:
     return out
 
 
-def documents_of(entries: list, pid: str, suffix: str = "") -> List[RawDoc]:
-    """RawDocs for product `pid` from one statements page's entries: a
-    statement per distinct date, a tax document per link. A statement whose
-    text is not a date, two statements with one date, or a document path on
-    another host or another product stops the list."""
+def documents_of(entries: list, pid: str) -> List[RawDoc]:
+    """RawDocs for product `pid` from one statements page's entries, a
+    statement per distinct date and a tax document per link, each carrying
+    the product id as its account. That is part of a document's identity
+    whether the forms page links one product or several, so a second
+    product appearing later changes nothing about the first one's documents.
+    A statement whose text is not a date, two statements with one date, or
+    a document path on another host or another product stops the list."""
     docs: List[RawDoc] = []
     seen_dates: dict = {}
     for e in entries:
@@ -484,16 +486,16 @@ def documents_of(entries: list, pid: str, suffix: str = "") -> List[RawDoc]:
                     raise ListStopped("two statements read %s" % text)
                 continue   # the same statement, linked and listed as an option
             seen_dates[text] = e["path"]
-            title = f"HSA Statement {text}" + (f" (product {suffix})" if suffix else "")
-            docs.append(RawDoc(title=title, date_text=text, href=e["path"],
+            title = f"HSA Statement {text}"
+            docs.append(RawDoc(title=title, account=pid, date_text=text, href=e["path"],
                                text=f"Optum Bank {title}", row_index=len(docs), kind="statement"))
         else:
             if not text:
                 raise ListStopped("a tax document link has no title")
             years = _TAX_YEAR_RE.findall(text)
             date = f"{years[-1]}-12-31" if years else ""
-            title = text + (f" (product {suffix})" if suffix else "")
-            docs.append(RawDoc(title=title, date_text=date, href=e["path"],
+            title = text
+            docs.append(RawDoc(title=title, account=pid, date_text=date, href=e["path"],
                                text=f"Optum Bank {title}", row_index=len(docs), kind="tax"))
     return docs
 
@@ -529,11 +531,10 @@ def collect_download_docs(page) -> List[RawDoc]:
         raise ListStopped("the Forms & documents page names no product")
     docs: List[RawDoc] = []
     for pid in pids:
-        suffix = pid[-4:] if len(pids) > 1 else ""
         if not _goto_statements(page, pid):
             raise ListStopped("a product's statements page did not open", docs)
         try:
-            found = documents_of(_entries(page), pid, suffix)
+            found = documents_of(_entries(page), pid)
         except ListStopped as stop:
             stop.docs = docs + stop.docs
             raise
@@ -593,12 +594,11 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     if pid not in pids:
         log.info("the recorded product is not on the Forms & documents page")
         return False
-    suffix = pid[-4:] if len(pids) > 1 else ""
     if not _goto_statements(page, pid):
         log.info("a product's statements page did not open")
         return False
     try:
-        found = [d for d in documents_of(_entries(page), pid, suffix)
+        found = [d for d in documents_of(_entries(page), pid)
                  if d.href == href and d.title == t and d.date_text == (iso_date or "")]
     except ListStopped as stop:
         log.info("the list stopped while looking for %r: %s", t, stop)

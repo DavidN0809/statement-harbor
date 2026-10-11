@@ -51,6 +51,7 @@ from paperpull_core import browser as browser_launcher
 import optum_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
+from paperpull_core.keys import is_done as _is_done
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
 from paperpull_core.words import Fixed, shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
@@ -122,13 +123,15 @@ class Document:
                  href="", row_index=-1, confidence="", account="",
                  date_text="", document_id="", **kw):
         self.title = title
+        # The product id, which the address of the product's statements page
+        # names. Part of the key, so two products' documents are never one.
         self.account = account
         self.category = category
         self.summary = summary
         self.date = date
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
-        self.document_id = document_id  # unused, the date is the identity
+        self.document_id = document_id  # unused, the product, date and title are the identity
         self.source_url = kw.get("source_url", "")  # page where the doc's download link lives
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
@@ -147,9 +150,10 @@ class Document:
 
     @property
     def key(self) -> str:
-        """Stable identity. Category, date and title. The list is read from
-        the page, so there is no document id to store, and a document's date
-        and kind are what tell one from the next."""
+        """Stable identity. Category, date, title and the product the
+        document belongs to. The list is read from the page, and a
+        document's date, kind and product are what tell one from the next,
+        whether the forms page links one product or several."""
         if self.document_id:
             return f"id:{self.document_id}"
         # Keep the last four. Cutting to forty characters made two cards
@@ -177,6 +181,60 @@ def migrate_legacy_keys(records: dict) -> int:
     return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
 
 
+def adopt_product_keys(records: dict) -> int:
+    """Move records written before a document's product was part of its key.
+
+    A document was keyed by its category, date and title alone while the
+    forms page linked one product, and with " (product NNNN)", the last
+    four of the product id, after its title while the page linked more. So
+    a second product appearing later made every document of the first look
+    new. Each record keeps the path it was listed at, which names the
+    product in full. A record is moved only when it is stored under exactly
+    the key its own fields build and its path names a product, and it moves
+    to the key it has now, with that product as its account and those words
+    taken off its title. A document saved before is still known as saved,
+    so nothing is downloaded again, a file deleted after importing it
+    elsewhere included. Returns how many records moved."""
+    changed = 0
+    for old_key, record in list(records.items()):
+        if not isinstance(record, dict) or record.get("account") or record.get("document_id"):
+            continue
+        m = site.DOCUMENT_PATH_RE.match(str(record.get("href") or ""))
+        if not m:
+            continue
+        try:
+            if Document.from_dict(record).key != old_key:
+                continue
+        except Exception:
+            continue
+        pid = m.group(1)
+        title = str(record.get("title") or "")
+        added = " (product %s)" % pid[-4:]
+        if title.endswith(added):
+            title = title[:-len(added)]
+        moved = dict(record, account=pid, title=title)
+        new_key = Document.from_dict(moved).key
+        current = records.get(new_key)
+        # A record a later run wrote must not erase finished history.
+        records[new_key] = moved if current is None or (
+            _is_done(moved) and not _is_done(current)) else current
+        del records[old_key]
+        changed += 1
+    return changed
+
+
+def told_apart_by(record: dict) -> str:
+    """What a document's file adds to its name when another file already
+    has that name, the same on every run. A product never has two
+    statements of one day, so two statements of one name are two
+    products', told apart by the product, as in " product 5678". The
+    download and Rename both ask this, so a rename tells a file apart the
+    way its download did."""
+    record = record or {}
+    product = str(record.get("account") or "").strip()
+    return "product %s" % product[-4:] if product else ""
+
+
 class App:
     _journal = None
     _requests = None
@@ -201,7 +259,7 @@ class App:
         self.progress.load()
         self.discovery.load()
         for store in (self.progress, self.discovery):
-            if migrate_legacy_keys(store.data):
+            if migrate_legacy_keys(store.data) + adopt_product_keys(store.data):
                 store.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
                                  DOCUMENT_INDEX_COLUMNS, self.paths.backups)
@@ -461,7 +519,8 @@ class App:
             return 0
         doc = Document(title=title, category=category, summary=summary,
                        date=date, confidence=confidence, source_url=persistable(source_url),
-                       href=persistable(getattr(r, "href", "") or ""))
+                       href=persistable(getattr(r, "href", "") or ""),
+                       account=(r.account or "").strip())
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
@@ -614,12 +673,12 @@ class App:
         own control and catches what arrives."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
-        # The last of the document id, used only if the name is taken.
-        # Two documents on one day used to differ by " (2)", which says
-        # nothing about which is which and moves between them when a file
-        # is deleted (#49, and the same complaint on #43).
+        # The product, used only if the name is taken. Two documents on one
+        # day used to differ by " (2)", which says nothing about which is
+        # which and moves between them when a file is deleted (#49, and the
+        # same complaint on #43).
         out_path = unique_path(folder, filename, self.config["max_path_length"],
-                               distinguisher=(doc.document_id or "")[-6:])
+                               distinguisher=told_apart_by(doc.to_dict()))
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
@@ -804,7 +863,8 @@ class App:
         nothing is asked of the provider here (#43, #49). A preview
         unless --apply is given."""
         self.stats["mode"] = "rename"
-        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
+        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)),
+                         told_apart=told_apart_by)
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"

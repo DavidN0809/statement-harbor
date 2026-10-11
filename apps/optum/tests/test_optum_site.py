@@ -113,10 +113,10 @@ class Listing(unittest.TestCase):
             with self.assertRaises(site.ListStopped, msg=str(bad)):
                 site.documents_of(NAV + [bad], PID)
 
-    def test_two_products_get_a_suffix(self):
-        d = site.documents_of([S("2026-08-31")], PID, suffix="5678")
-        self.assertEqual(d[0].title, "HSA Statement 2026-08-31 (product 5678)")
-        m = site._STATEMENT_TITLE_RE.match(d[0].title); self.assertEqual((m.group(1), m.group(2)), ("2026-08-31", "5678"))
+    def test_every_document_carries_its_product_and_no_title_says_how_many(self):
+        d = site.documents_of([S("2026-08-31"), T], PID)
+        self.assertEqual([(x.title, x.account) for x in d],
+                         [("HSA Statement 2026-08-31", PID), ("Rendered EOY 5498-SA Notices-2025", PID)])
 
     def test_rules_classify(self):
         from paperpull_core import doc_types
