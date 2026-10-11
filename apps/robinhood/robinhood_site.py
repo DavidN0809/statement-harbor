@@ -889,17 +889,32 @@ def collect_download_docs(page, tax_page: bool = False) -> List[RawDoc]:
 _CONTROLS_SEL = "a[download], a, button, [role='button']"
 _PICK_ATTR = "data-paperpull-pick"
 
-# The first control, in document order, whose own text or whose nearest
-# ancestor with text says the title, and that offers a download (a download
-# attribute, or the word in its own label), skipping CSV. One pass in the
-# page, where the old loop asked the browser three times for each of up to
-# four hundred controls, which was most of a document's half minute. The
-# control found is marked with an attribute carrying a one-time token, so it
-# is found again by that mark and not by its place in a list a re-render can
-# shuffle; a re-render that rebuilds the node drops the mark, and nothing is
-# pressed. The whole label comes back, never a prefix, so the guard reads all
-# of it.
-_FIND_CONTROL_JS = r"""([needle, year, token, attr]) => {""" + _PAGE_JS_LIB + r"""
+# Whether a control is the one for the title. Its own label says the title,
+# or, when its own label names no statement or form at all, a tax form's
+# Download PDF say, its own card says it. The card is the nearest box around
+# it that holds a document's title and no other document's control (cardOf).
+# The nearest box with any text at all used to do, and on a page of sibling
+# statement links that box was the whole list, which says every title, so
+# January's link was pressed for February and saved as February for good.
+_SAYS_TITLE_JS = r"""
+  function saysTitle(el, own, want) {
+    if (own.toLowerCase().includes(want)) return true;
+    if (TITLE_RE.test(own)) return false;
+    const card = cardOf(el);
+    return !!card && (card.innerText || '').toLowerCase().includes(want);
+  }
+"""
+
+# The first control, in document order, that says the title (saysTitle),
+# and that offers a download (a download attribute, or the word in its own
+# label), skipping CSV. One pass in the page, where the old loop asked the
+# browser three times for each of up to four hundred controls, which was
+# most of a document's half minute. The control found is marked with an
+# attribute carrying a one-time token, so it is found again by that mark
+# and not by its place in a list a re-render can shuffle. A re-render that
+# rebuilds the node drops the mark, and nothing is pressed. The whole label
+# comes back, never a prefix, so the guard reads all of it.
+_FIND_CONTROL_JS = r"""([needle, year, token, attr]) => {""" + _PAGE_JS_LIB + _SAYS_TITLE_JS + r"""
   for (const old of document.querySelectorAll('[' + attr + ']')) old.removeAttribute(attr);
   const want = needle.toLowerCase();
   const els = [...document.querySelectorAll("a[download], a, button, [role='button']")].slice(0, 400);
@@ -909,12 +924,7 @@ _FIND_CONTROL_JS = r"""([needle, year, token, attr]) => {""" + _PAGE_JS_LIB + r"
     const hasDl = el.hasAttribute('download');
     if (!(hasDl || /download/i.test(own))) continue;
     if (/csv/i.test(own)) continue;
-    let hay = own;
-    if (!hay.toLowerCase().includes(want)) {
-      let n = el; hay = '';
-      for (let k = 0; k < 6 && n; k++) { n = n.parentElement; if (n && (n.innerText || '').length > 10) { hay = n.innerText; break; } }
-    }
-    if (!(hay || '').toLowerCase().includes(want)) continue;
+    if (!saysTitle(el, own, want)) continue;
     if (year) { let shown = ''; try { shown = taxYearOf(el) || ''; } catch (e) { shown = ''; } if (shown !== year) continue; }
     el.setAttribute(attr, token);
     return {own: own, hasDl: hasDl};
@@ -924,19 +934,13 @@ _FIND_CONTROL_JS = r"""([needle, year, token, attr]) => {""" + _PAGE_JS_LIB + r"
 
 # Run on the marked element just before it is pressed: the same predicate the
 # pass applied, read again from the live page. False means the page changed.
-_VERIFY_CONTROL_JS = r"""(el, [needle, year, own]) => {""" + _PAGE_JS_LIB + r"""
+_VERIFY_CONTROL_JS = r"""(el, [needle, year, own]) => {""" + _PAGE_JS_LIB + _SAYS_TITLE_JS + r"""
   const now = ((el.innerText || '') + ' ' + (el.getAttribute('aria-label') || '')).trim();
   if (now.replace(/\s+/g, ' ') !== own.replace(/\s+/g, ' ')) return false;
   const hasDl = el.hasAttribute('download');
   if (!(hasDl || /download/i.test(now))) return false;
   if (/csv/i.test(now)) return false;
-  const want = needle.toLowerCase();
-  let hay = now;
-  if (!hay.toLowerCase().includes(want)) {
-    let n = el; hay = '';
-    for (let k = 0; k < 6 && n; k++) { n = n.parentElement; if (n && (n.innerText || '').length > 10) { hay = n.innerText; break; } }
-  }
-  if (!(hay || '').toLowerCase().includes(want)) return false;
+  if (!saysTitle(el, now, needle.toLowerCase())) return false;
   if (year) { let shown = ''; try { shown = taxYearOf(el) || ''; } catch (e) { shown = ''; } if (shown !== year) return false; }
   return true;
 }"""

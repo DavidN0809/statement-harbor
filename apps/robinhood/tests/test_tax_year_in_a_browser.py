@@ -33,6 +33,7 @@ import robinhood_site as site  # noqa: E402
 
 TAX = "https://robinhood.com/account/reports-statements/tax"
 CRYPTO = "https://robinhood.com/account/reports-statements/crypto"
+INDIVIDUAL = "https://robinhood.com/account/reports-statements/individual"
 
 
 @pytest.fixture(scope="module")
@@ -266,4 +267,34 @@ def test_no_control_is_pressed_for_a_year_the_page_does_not_show(show, tmp_path)
                 % card("Consolidated Form 1099", year="2022"))
     out = tmp_path / "form.pdf"
     assert not site.download_named(page, "Consolidated Form 1099", out, year="2020")
+    assert not out.exists()
+
+
+def statement_link(month):
+    return ('<a download href="#" onclick="give(\'%s\'); return false;">'
+            '%s Monthly Statement</a>' % (month, month))
+
+
+def test_a_statement_link_is_pressed_only_for_its_own_title(show, tmp_path):
+    """Sibling statement links in one list. The nearest box with text
+    around January's link was the whole list, which says every title, so
+    January's link was pressed for February and saved as February."""
+    page = show("<h1>Individual investing</h1><main>%s%s"
+                '<a href="#">View More</a></main>' % (
+                    statement_link("January 2022"), statement_link("February 2022")),
+                url=INDIVIDUAL)
+    for month in ("February 2022", "January 2022"):
+        out = tmp_path / ("%s.pdf" % month)
+        assert site.download_named(page, "%s Monthly Statement" % month, out)
+        assert ("tax year %s" % month).encode() in out.read_bytes(), month
+
+
+def test_a_download_pdf_in_a_box_of_several_forms_is_pressed_for_none(show, tmp_path):
+    """A control whose own label names no form is read by its own card,
+    and a box that holds another form's control is no form's card."""
+    page = show(NAV + "<main><div>Consolidated Form 1099</div><div>Form 1099-DIV</div>"
+                "<button onclick=\"give('first')\">Download PDF</button>"
+                "<button onclick=\"give('second')\">Download PDF</button></main>")
+    out = tmp_path / "form.pdf"
+    assert not site.download_named(page, "Form 1099-DIV", out)
     assert not out.exists()
