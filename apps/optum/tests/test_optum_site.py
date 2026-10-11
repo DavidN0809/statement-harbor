@@ -118,6 +118,11 @@ class Listing(unittest.TestCase):
         self.assertEqual([(x.title, x.account) for x in d],
                          [("HSA Statement 2026-08-31", PID), ("Rendered EOY 5498-SA Notices-2025", PID)])
 
+    def test_a_form_linked_twice_is_one_form_and_a_second_form_of_its_title_another(self):
+        t2 = {**T, "path": f"/account/products/{PID}/tax_documents/888.pdf"}
+        d = site.documents_of([T, T, t2, T], PID)
+        self.assertEqual([(x.href.rsplit("/", 1)[-1], x.document_id) for x in d], [("777.pdf", ""), ("888.pdf", "888")])
+
     def test_rules_classify(self):
         from paperpull_core import doc_types
         rules = doc_types.load_rules(HERE / "document_rules.json")
@@ -170,6 +175,12 @@ class Binding(unittest.TestCase):
                        dict(iso_date="2024-12-31", title="Rendered EOY 5498-SA Notices-2025", href=f"/account/products/{PID}/tax_documents/777.pdf")]:
                 self.assertFalse(site.download_bill(page, None, kw["iso_date"], Path(td) / "o.pdf", title=kw["title"], trace=[], href=kw["href"]), kw)
             self.assertEqual(page.context.request.asked, [])
+
+    def test_a_form_linked_twice_is_fetched_rather_than_sent_to_review(self):
+        page = self.make_page(NAV + [T, S("2026-08-31", "1"), T])
+        with tempfile.TemporaryDirectory() as td:
+            self.assertTrue(site.download_bill(page, None, "2025-12-31", Path(td) / "t.pdf", title="Rendered EOY 5498-SA Notices-2025",
+                                               trace=[], href=f"/account/products/{PID}/tax_documents/777.pdf"))
 
     def test_navigation_that_settles_elsewhere_reads_nothing(self):
         page = self.make_page(NAV + [S("2026-08-31", "1")], settled="https://identity.onehealthcareid.com/app/")

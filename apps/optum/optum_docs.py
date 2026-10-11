@@ -131,7 +131,9 @@ class Document:
         self.date = date
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
-        self.document_id = document_id  # unused, the product, date and title are the identity
+        # Empty for nearly every document. A form Optum lists a second time
+        # under one title is known by its own id (optum_site.documents_of).
+        self.document_id = document_id
         self.source_url = kw.get("source_url", "")  # page where the doc's download link lives
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
@@ -155,7 +157,10 @@ class Document:
         document's date, kind and product are what tell one from the next,
         whether the forms page links one product or several."""
         if self.document_id:
-            return f"id:{self.document_id}"
+            # With its product, since two products' forms may be numbered
+            # alike.
+            return f"id:{self.account}:{self.document_id}" if self.account \
+                else f"id:{self.document_id}"
         # Keep the last four. Cutting to forty characters made two cards
         # of the same product collide, because the masked digits that say
         # which one it is sit at the end, and the second card's whole
@@ -227,12 +232,47 @@ def told_apart_by(record: dict) -> str:
     """What a document's file adds to its name when another file already
     has that name, the same on every run. A product never has two
     statements of one day, so two statements of one name are two
-    products', told apart by the product, as in " product 5678". The
-    download and Rename both ask this, so a rename tells a file apart the
-    way its download did."""
+    products', told apart by the product, as in " product 5678". A form
+    Optum lists a second time under one title is told apart by the end of
+    its own id, as other apps' documents are. The download and Rename both
+    ask this, so a rename tells a file apart the way its download did."""
     record = record or {}
+    doc_id = str(record.get("document_id") or "").strip()
+    if doc_id:
+        return doc_id[-6:]
     product = str(record.get("account") or "").strip()
     return "product %s" % product[-4:] if product else ""
+
+
+def hold_known_forms(docs, *stores) -> None:
+    """Which of a product's forms listed under one title keeps the key a
+    form of that title always had.
+
+    Optum can list a corrected form under the title of the one it corrects.
+    The site layer gives the first of them on the page that key and each
+    other one its own id. A page that listed the corrected form first gave
+    it the key the original was saved under, so the corrected one was taken
+    as done and never saved, and the original was saved again under its
+    id. So the one whose path a record of that key already holds keeps it,
+    asked first of what was saved and then of what was listed, and the
+    others take their ids. With no record of that key, the page's order
+    stands."""
+    groups: dict = {}
+    for d in docs:
+        if d.kind == "tax":
+            groups.setdefault((d.account, d.title), []).append(d)
+    for (account, title), group in groups.items():
+        if len(group) < 2:
+            continue
+        for records in stores:
+            held = {str(r.get("href") or "") for r in records.values()
+                    if isinstance(r, dict) and not r.get("document_id")
+                    and (r.get("account") or "") == account and (r.get("title") or "") == title}
+            known = [d for d in group if d.href in held]
+            if len(known) == 1:
+                for d in group:
+                    d.document_id = "" if d is known[0] else site.document_id_of(d.href)
+                break
 
 
 class App:
@@ -520,7 +560,8 @@ class App:
         doc = Document(title=title, category=category, summary=summary,
                        date=date, confidence=confidence, source_url=persistable(source_url),
                        href=persistable(getattr(r, "href", "") or ""),
-                       account=(r.account or "").strip())
+                       account=(r.account or "").strip(),
+                       document_id=(getattr(r, "document_id", "") or "").strip())
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
@@ -548,6 +589,7 @@ class App:
         except site.ListStopped as stop:
             # What was listed is kept, and the listing stays noted as one
             # that stopped, so neither this run nor a Resume calls it whole.
+            hold_known_forms(stop.docs, self.progress.data, self.discovery.data)
             for r in stop.docs:
                 self._record_rawdoc(r, site.BILLING_URL)
             self.discovery.save()
@@ -556,6 +598,7 @@ class App:
             print("   and this run stops rather than call the list read. Run it again.")
             self.write_failure("read the inbox list", "the list stopped partway")
             raise SystemExit(1)
+        hold_known_forms(docs, self.progress.data, self.discovery.data)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         self.discovery.save()
@@ -673,10 +716,10 @@ class App:
         own control and catches what arrives."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
-        # The product, used only if the name is taken. Two documents on one
-        # day used to differ by " (2)", which says nothing about which is
-        # which and moves between them when a file is deleted (#49, and the
-        # same complaint on #43).
+        # The product, or the end of a form's own id, used only if the name
+        # is taken. Two documents on one day used to differ by " (2)", which
+        # says nothing about which is which and moves between them when a
+        # file is deleted (#49, and the same complaint on #43).
         out_path = unique_path(folder, filename, self.config["max_path_length"],
                                distinguisher=told_apart_by(doc.to_dict()))
         if out_path.name != filename:

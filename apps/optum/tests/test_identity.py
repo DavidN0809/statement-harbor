@@ -70,21 +70,24 @@ def statements_url(pid):
 
 @pytest.fixture
 def make_app(tmp_path):
-    config = json.loads((Path(__file__).parents[1] / "config.example.json").read_text())
-    config.update({"owner": "Tester", "output_dir": str(tmp_path / "out")})
-    cfg = tmp_path / "config.json"
-    cfg.write_text(json.dumps(config))
-
-    def make():
+    def make(out="out"):
+        """The app as its own main builds it, over an output folder of its
+        own name, so two builds of one name are two runs of one archive."""
+        config = json.loads((Path(__file__).parents[1] / "config.example.json").read_text())
+        config.update({"owner": "Tester", "output_dir": str(tmp_path / out)})
+        cfg = tmp_path / ("config-%s.json" % out)
+        cfg.write_text(json.dumps(config))
         return docs.App(docs.build_parser().parse_args(["--discover", "--config", str(cfg)]))
     return make
 
 
 def listed(app, pages) -> dict:
-    """Every document the app's own listing records from these pages, by
+    """Every document the app's own Discover records from these pages, by
     key, with its record."""
-    for r in site.collect_download_docs(Page(pages)):
-        app._record_rawdoc(r, site.BILLING_URL)
+    page = Page(pages)
+    app.page = lambda: page
+    app.check_session = lambda _page: None
+    app.cmd_discover(quiet=True)
     return dict(app.discovery.data)
 
 
@@ -94,9 +97,9 @@ def test_a_second_product_changes_nothing_about_the_first_ones_documents(make_ap
     whole history was downloaded again as " (2)" files, a file deleted
     after importing it elsewhere included."""
     first_product = {statements_url(PID): [statement(PID), tax(PID)]}
-    alone = listed(make_app(), {site.FORMS_URL: [latest(PID)], **first_product})
-    both = listed(make_app(), {site.FORMS_URL: [latest(PID), latest(OTHER)], **first_product,
-                               statements_url(OTHER): [statement(OTHER, doc="900011")]})
+    alone = listed(make_app("alone"), {site.FORMS_URL: [latest(PID)], **first_product})
+    both = listed(make_app("both"), {site.FORMS_URL: [latest(PID), latest(OTHER)], **first_product,
+                                     statements_url(OTHER): [statement(OTHER, doc="900011")]})
     assert len(alone) == 2 and set(alone) < set(both)
     assert {r["title"] for r in both.values()} == {f"HSA Statement {DAY}",
                                                   "Rendered EOY 5498-SA Notices-2025"}
@@ -132,13 +135,17 @@ def legacy(title, pid, doc="900001", kind="statements", **extra) -> dict:
     return rec
 
 
+def pid_of(rec):
+    return rec["href"].split("/")[3]
+
+
 def saved_before(app_factory, records):
     """An archive whose progress and discovery hold these records under the
     keys this app gave them then."""
     app = app_factory()
     for rec in records:
         key = docs.Document.from_dict(rec).key
-        assert key.endswith(":"), "a key from before carried no product"
+        assert pid_of(rec) not in key, "a key from before carried no product"
         app.progress.update(key, dict(rec))
         app.discovery.update(key, dict(rec))
     app.progress.save()
@@ -189,3 +196,53 @@ def test_a_finished_record_is_never_replaced_by_one_that_is_not():
                new_key: dict(rec, account=PID, state="Discovered", downloaded_ok=False)}
     assert docs.adopt_product_keys(records) == 1
     assert list(records) == [new_key] and records[new_key]["downloaded_ok"] is True
+
+
+# -- a tax form listed twice ---------------------------------------------------
+
+def form_path(doc):
+    return f"/account/products/{PID}/tax_documents/{doc}.pdf"
+
+
+def forms_of(found) -> dict:
+    """Each tax form the listing recorded, by the id its path ends in."""
+    return {site.document_id_of(r["href"]): r for r in found.values()
+            if r["category"] == "Tax Document"}
+
+
+def test_a_corrected_form_under_the_title_of_the_one_it_corrects_is_listed_too(make_app):
+    """Both were given one key, so the second path overwrote the first and
+    one form was never fetched while the list was called whole. A form
+    linked twice is still one form."""
+    found = forms_of(listed(make_app(), {
+        site.FORMS_URL: [latest(PID)],
+        statements_url(PID): [statement(PID), tax(PID, doc="777"), tax(PID, doc="888"),
+                              tax(PID, doc="777")]}))
+    assert sorted(found) == ["777", "888"]
+    assert (found["777"]["document_id"], found["888"]["document_id"]) == ("", "888")
+
+
+def test_the_form_saved_first_keeps_its_key_in_whatever_order_the_page_lists_them(make_app):
+    """The corrected form listed ahead of the original took the original's
+    key, so it read as saved and was never fetched, and the original was
+    fetched a second time under its id."""
+    first = make_app()
+    listed(first, {site.FORMS_URL: [latest(PID)],
+                   statements_url(PID): [statement(PID), tax(PID, doc="777")]})
+    key, rec = next((k, r) for k, r in first.discovery.data.items()
+                    if r["category"] == "Tax Document")
+    first.progress.update(key, dict(rec, state="Completed", downloaded_ok=True))
+
+    app = make_app()
+    found = forms_of(listed(app, {
+        site.FORMS_URL: [latest(PID)],
+        statements_url(PID): [statement(PID), tax(PID, doc="888"), tax(PID, doc="777")]}))
+    assert found["777"]["document_id"] == "" and found["777"]["href"] == form_path("777")
+    assert app._already_done(docs.Document.from_dict(found["777"]))
+    assert found["888"]["document_id"] == "888"
+    assert not app._already_done(docs.Document.from_dict(found["888"]))
+
+
+def test_a_corrected_form_is_named_apart_by_the_end_of_its_id():
+    assert docs.told_apart_by({"account": PID, "document_id": "4400888"}) == "400888"
+    assert docs.told_apart_by({"account": PID}) == "product 5678"

@@ -347,6 +347,9 @@ class RawDoc:
     text: str = ""
     row_index: int = -1
     kind: str = "doc"
+    # Empty unless Optum lists a second form under one title, which is then
+    # known by its own id (documents_of).
+    document_id: str = ""
 
 
 class ListStopped(Exception):
@@ -452,6 +455,12 @@ def product_ids(entries: list) -> List[str]:
     return out
 
 
+def document_id_of(path: str) -> str:
+    """The id a document's own path ends in, or an empty string."""
+    m = DOCUMENT_PATH_RE.match(path or "")
+    return m.group(3) if m else ""
+
+
 def documents_of(entries: list, pid: str) -> List[RawDoc]:
     """RawDocs for product `pid` from one statements page's entries, a
     statement per distinct date and a tax document per link, each carrying
@@ -459,9 +468,17 @@ def documents_of(entries: list, pid: str) -> List[RawDoc]:
     whether the forms page links one product or several, so a second
     product appearing later changes nothing about the first one's documents.
     A statement whose text is not a date, two statements with one date, or
-    a document path on another host or another product stops the list."""
+    a document path on another host or another product stops the list.
+
+    A tax form linked twice is one form. Two forms under one title, a
+    corrected 5498-SA beside the one it corrects, are two. The first keeps
+    the key a form of that title always had and the next is known by its
+    own id, so neither is dropped and neither is fetched as the other
+    (optum_docs.hold_known_forms says which one is the first)."""
     docs: List[RawDoc] = []
     seen_dates: dict = {}
+    tax_paths: set = set()
+    tax_titles: dict = {}
     for e in entries:
         m = DOCUMENT_PATH_RE.match(e.get("path") or "")
         if not m:
@@ -490,13 +507,18 @@ def documents_of(entries: list, pid: str) -> List[RawDoc]:
             docs.append(RawDoc(title=title, account=pid, date_text=text, href=e["path"],
                                text=f"Optum Bank {title}", row_index=len(docs), kind="statement"))
         else:
+            if e["path"] in tax_paths:
+                continue   # the same form, linked twice
+            tax_paths.add(e["path"])
             if not text:
                 raise ListStopped("a tax document link has no title")
             years = _TAX_YEAR_RE.findall(text)
             date = f"{years[-1]}-12-31" if years else ""
             title = text
+            first = tax_titles.setdefault(title, e["path"])
             docs.append(RawDoc(title=title, account=pid, date_text=date, href=e["path"],
-                               text=f"Optum Bank {title}", row_index=len(docs), kind="tax"))
+                               text=f"Optum Bank {title}", row_index=len(docs), kind="tax",
+                               document_id="" if first == e["path"] else m.group(3)))
     return docs
 
 
