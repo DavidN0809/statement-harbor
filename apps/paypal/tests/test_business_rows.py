@@ -67,7 +67,7 @@ def test_a_status_that_says_ready_is_ready(status):
 
 @pytest.mark.parametrize("status", ["NOT_READY", "IN_PROGRESS", "inProgress", "FAILED",
                                     "EXPIRED", "PENDING", "COMPLETED_WITH_ERRORS", "Not available",
-                                    "REQUESTED", "CANCELLED"])
+                                    "REQUESTED", "CANCELLED", "Creating", "CREATING"])
 def test_a_status_with_any_word_against_it_is_not_ready(status):
     assert site.status_of({"reportStatus": status}) == site.NOT_READY
 

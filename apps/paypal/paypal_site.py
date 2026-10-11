@@ -616,6 +616,9 @@ READY_WORDS = frozenset((
 NOT_READY_WORDS = frozenset((
     "not", "pending", "progress", "processing", "queued", "requested", "request",
     "submitted", "scheduled", "generating", "preparing", "waiting", "running", "initiated",
+    # What the list shows on a report made with Create Report until it can
+    # be downloaded, as a tester saw (#61).
+    "creating",
     "failed", "failure", "fail", "error", "errors", "expired", "cancelled", "canceled",
     "unavailable", "rejected", "deleted", "incomplete"))
 # A kind of file other than a PDF, named in a row or a report's fileFormat.

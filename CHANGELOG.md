@@ -395,6 +395,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   debugging port, so Amazon's Login said no browser would open while every
   other app worked. The server now clears those locks as it starts, before
   any browser can open.
+- **PayPal waits for a business report that is still being made (#61).**
+  A report asked for with Create Report shows in the list as creating
+  until it can be downloaded. The app read that status as one it could not
+  read, so every run until the report was ready counted it as a failure
+  and wrote a failure file. It is now counted as not ready yet, and a later
+  run takes it once PayPal finishes it. Create Report itself is still never
+  pressed.
 
 ### Security
 - **M&T presses a year heading only when nothing covers it, and once.**
