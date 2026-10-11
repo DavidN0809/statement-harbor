@@ -117,7 +117,9 @@ class Document:
         self.date = date
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
-        self.document_id = document_id  # unused, the date is the identity
+        # A tax form's or report's own id from Coinbase's list. A monthly
+        # statement has none, and its month is its identity.
+        self.document_id = document_id
         self.source_url = kw.get("source_url", "")  # page where the doc's download link lives
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
@@ -136,9 +138,10 @@ class Document:
 
     @property
     def key(self) -> str:
-        """Stable identity. Category, date and title. The list is read from
-        the page, so there is no document id to store, and a document's date
-        and kind are what tell one from the next."""
+        """Stable identity. A tax document's own id from Coinbase's list,
+        so a second form of one year, which changes the first's title, never
+        changes its key. A monthly statement has no id, and its category,
+        date and title tell it from the next."""
         if self.document_id:
             return f"id:{self.document_id}"
         # Keep the last four. Cutting to forty characters made two cards
@@ -449,7 +452,8 @@ class App:
             self.stats["skipped_out_of_scope"] += 1
             return 0
         doc = Document(title=title, category=category, summary=summary,
-                       date=date, confidence=confidence, source_url=persistable(source_url))
+                       date=date, confidence=confidence, source_url=persistable(source_url),
+                       document_id=getattr(r, "document_id", "") or "")
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
@@ -616,7 +620,7 @@ class App:
             site.goto_documents(page)
         trace: list = []
         saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
-                                   title=doc.title, trace=trace)
+                                   title=doc.title, trace=trace, document_id=doc.document_id)
         # A capture that failed must not leave a convincing empty file behind.
         # A ZIP the capture took stays, for the branch below that opens it.
         if out_path.exists() and (

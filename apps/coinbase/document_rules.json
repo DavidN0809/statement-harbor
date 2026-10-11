@@ -18,6 +18,10 @@
       "summary": "1099-K Tax Form"
     },
     {
+      "pattern": "\\b1042-?S\\b",
+      "summary": "1042-S Tax Form"
+    },
+    {
       "pattern": "\\b1099\\b",
       "summary": "1099 Tax Form"
     },

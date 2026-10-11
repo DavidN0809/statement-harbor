@@ -384,6 +384,9 @@ class RawDoc:
     text: str = ""
     row_index: int = -1
     kind: str = "doc"
+    # The tax form's or report's own id, which a record is kept under, so a
+    # second form of one year never changes the first's key.
+    document_id: str = ""
 
 
 class ListStopped(Exception):
@@ -744,6 +747,15 @@ def _short(doc_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "", str(doc_id or ""))[:40]
 
 
+# What a form the list names no form_type for is called, in its title and
+# when the list is asked for it again.
+_NO_FORM_TYPE = "Tax Form"
+
+
+def _form_type(item: dict) -> str:
+    return str(item.get("form_type") or "").strip() or _NO_FORM_TYPE
+
+
 def _report_summary(name: str) -> str:
     """"PregeneratedGainLossPDF" -> "Gain Loss Report"."""
     n = re.sub(r"^Pregenerated", "", str(name or ""))
@@ -755,8 +767,10 @@ def _report_summary(name: str) -> str:
 def tax_rawdocs(forms_by_year: dict, reports: list) -> List[RawDoc]:
     """RawDocs for the forms and PDF reports, titled "<form> Tax Year YYYY",
     with a short id suffix only where one year has two of the same form,
-    so a corrected form is not lost under the original's title. href holds
-    the API path and the opaque id only, never a link."""
+    so a corrected form is not lost under the original's title. Each keeps
+    its own id as document_id, which its record is kept under, so a second
+    form of a year never changes the first's. href holds the API path and
+    the opaque id only, never a link."""
     out: List[RawDoc] = []
     # A form or a report without an id of its own, or two sharing one, is a
     # list this cannot tell apart, and a report without a year one it cannot
@@ -776,18 +790,18 @@ def tax_rawdocs(forms_by_year: dict, reports: list) -> List[RawDoc]:
     counts: dict = {}
     for year, items in forms_by_year.items():
         for it in items:
-            ft = str(it.get("form_type") or "Tax Form").strip()
+            ft = _form_type(it)
             counts[(ft, year)] = counts.get((ft, year), 0) + 1
     for year, items in sorted(forms_by_year.items(), reverse=True):
         for it in items:
-            ft = str(it.get("form_type") or "Tax Form").strip()
+            ft = _form_type(it)
             did = _id_of(it, "form")
             title = f"{ft} Tax Year {year}"
             if counts[(ft, year)] > 1:
                 title += f" (#{_short(did)})"
             out.append(RawDoc(title=title, date_text=f"{year}-12-31",
                               href=f"/v2/tax/forms/{did}",
-                              text=f"Coinbase {title}", kind="tax"))
+                              text=f"Coinbase {title}", kind="tax", document_id=did))
     rcounts: dict = {}
     for r in reports:
         year = r.get("year") or r.get("timeframe_year")
@@ -804,7 +818,7 @@ def tax_rawdocs(forms_by_year: dict, reports: list) -> List[RawDoc]:
             title += f" (#{_short(did)})"
         out.append(RawDoc(title=title, date_text=f"{year}-12-31",
                           href=f"/v2/tax/tax-reports/{did}",
-                          text=f"Coinbase {title}", kind="tax"))
+                          text=f"Coinbase {title}", kind="tax", document_id=did))
     return out
 
 
@@ -858,10 +872,12 @@ def _pdf_url_of(item: dict) -> str:
     return ""
 
 
-def _fetch_tax_pdf(page, title: str, out_path: Path, trace: Optional[list]) -> bool:
-    """Ask the list again for the document titled `title`, then fetch its
-    PDF from its short-lived link, only when that link is on an exact
-    download host. The link is used once and written nowhere."""
+def _fetch_tax_pdf(page, title: str, out_path: Path, trace: Optional[list],
+                   document_id: str = "") -> bool:
+    """Ask the list again for the document titled `title`, with the id
+    `document_id` when its record keeps one, then fetch its PDF from its
+    short-lived link, only when that link is on an exact download host. The
+    link is used once and written nowhere."""
     m = _TAX_TITLE_RE.match((title or "").strip())
     if not m:
         return False
@@ -871,11 +887,13 @@ def _fetch_tax_pdf(page, title: str, out_path: Path, trace: Optional[list]) -> b
             items = [r for r in _tax_reports(page) if int(r.get("year") or r.get("timeframe_year") or 0) == year
                      and _report_summary(r.get("name")) == summary]
         else:
-            items = [it for it in _tax_forms_for(page, year)
-                     if str(it.get("form_type") or "").strip() == summary]
-        # The suffix, when the title carries one, names the one document;
-        # without one the title has to name exactly one by itself.
-        if short:
+            items = [it for it in _tax_forms_for(page, year) if _form_type(it) == summary]
+        # The id the record keeps names the one document, and failing that
+        # the suffix, when the title carries one. Without either the title
+        # has to name exactly one by itself.
+        if document_id:
+            items = [it for it in items if str(it.get("id") or "").strip() == document_id]
+        elif short:
             items = [it for it in items if _short(it.get("id")) == short]
         elif len(items) > 1:
             items = []
@@ -1089,7 +1107,7 @@ def _take_event(dl, dl_dir, before, out_path: Path) -> str:
 
 
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
-                  trace: Optional[list] = None) -> bool:
+                  trace: Optional[list] = None, document_id: str = "") -> bool:
     """Save the document titled `title`, dated `iso_date`. A tax document is
     fetched from its listed link, nothing pressed. A monthly statement is
     taken by loading the statements page afresh, pressing its row's own PDF
@@ -1100,7 +1118,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     out_path.parent.mkdir(parents=True, exist_ok=True)
     t = (title or "").strip()
     if _TAX_TITLE_RE.match(t):
-        return _fetch_tax_pdf(page, t, out_path, trace)
+        return _fetch_tax_pdf(page, t, out_path, trace, document_id)
     m = _STATEMENT_TITLE_RE.match(t)
     if not m:
         log.info("not a title this app knows how to fetch: %r", t)

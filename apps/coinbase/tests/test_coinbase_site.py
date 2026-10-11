@@ -290,6 +290,90 @@ class TaxList(unittest.TestCase):
         with self.assertRaises(site.ListStopped):
             site._tax_reports(Page())
 
+    def _fetch(self, title, forms, document_id=""):
+        """_fetch_tax_pdf over a list of these forms, with Coinbase's tax host
+        answering a PDF. Returns whether it saved and what it asked for."""
+        asked = []
+
+        class Resp:
+            ok, status = True, 200
+            def body(self): return b"%PDF-1.4 invented"
+
+        class Req:
+            def get(self, url, **kw): asked.append(url); return Resp()
+
+        class Ctx: request = Req()
+
+        class Page: context = Ctx()
+        with mock.patch.object(site, "_tax_forms_for", lambda p, y: forms):
+            with tempfile.TemporaryDirectory() as td:
+                ok = site._fetch_tax_pdf(Page(), title, Path(td) / "out.pdf", [], document_id)
+        return ok, asked
+
+    @staticmethod
+    def _form(did, form_type=None):
+        out = {"id": did, "files": [{"file_type": "pdf",
+                                     "url": "https://tax-center-forms-production.s3.amazonaws.com/%s.pdf" % did}]}
+        if form_type is not None:
+            out["form_type"] = form_type
+        return out
+
+    def test_a_form_the_list_names_no_type_for_is_found_by_its_title(self):
+        forms = [self._form("form0001")]
+        title = site.tax_rawdocs({2025: forms}, [])[0].title
+        self.assertEqual(title, "Tax Form Tax Year 2025")
+        ok, asked = self._fetch(title, forms)
+        self.assertTrue(ok)
+        self.assertEqual(len(asked), 1)
+
+    def test_each_tax_document_keeps_its_own_id(self):
+        forms = [self._form("form0001", "1099-DA"), self._form("form0002", "1099-DA")]
+        reports = [{"id": "rpt0001", "name": "PregeneratedGainLossPDF", "year": 2024,
+                    "file": {"file_type": "PDF", "url": "https://tax-center-forms-production.s3.amazonaws.com/r.pdf"}}]
+        got = site.tax_rawdocs({2025: forms}, reports)
+        self.assertEqual([d.document_id for d in got], ["form0001", "form0002", "rpt0001"])
+
+    def test_a_second_form_of_a_year_leaves_the_first_s_key_as_it_was(self):
+        first = self._form("form0001", "1099-DA")
+        alone = site.tax_rawdocs({2025: [first]}, [])[0]
+        beside = site.tax_rawdocs({2025: [first, self._form("form0002", "1099-DA")]}, [])[0]
+        self.assertNotEqual(alone.title, beside.title, "the first form's title takes the suffix")
+        key = lambda r: docs.Document(title=r.title, category="Tax Document", date=r.date_text,
+                                      document_id=r.document_id).key
+        self.assertEqual(key(alone), key(beside))
+
+    def test_a_tax_document_is_fetched_by_the_id_its_record_keeps(self):
+        """The first form was listed alone, so its title has no suffix, and
+        a second form of that year came since."""
+        forms = [self._form("form0001", "1099-DA"), self._form("form0002", "1099-DA")]
+        ok, asked = self._fetch("1099-DA Tax Year 2025", forms, document_id="form0001")
+        self.assertTrue(ok)
+        self.assertEqual(asked, ["https://tax-center-forms-production.s3.amazonaws.com/form0001.pdf"])
+        ok, asked = self._fetch("1099-DA Tax Year 2025", forms, document_id="form0009")
+        self.assertFalse(ok, "an id the list no longer names fetches nothing")
+        self.assertEqual(asked, [])
+
+    def test_a_listed_tax_document_is_recorded_and_fetched_by_its_id(self):
+        app, _failures = built_app(self)
+        first = self._form("form0001", "1099-DA")
+        for r in site.tax_rawdocs({2025: [first]}, []):
+            app._record_rawdoc(r, site.BILLING_URL)
+        for r in site.tax_rawdocs({2025: [first, self._form("form0002", "1099-DA")]}, []):
+            app._record_rawdoc(r, site.BILLING_URL)
+        self.assertEqual(sorted(app.discovery.data), ["id:form0001", "id:form0002"])
+        doc = docs.Document.from_dict(app.discovery.get("id:form0001"))
+        self.assertEqual(doc.title, "1099-DA Tax Year 2025")
+        handed = []
+
+        def hands_over(page, dl_dir, iso, out_path, title="", trace=None, document_id=""):
+            handed.append((title, document_id))
+            return False
+        with mock.patch.object(site, "goto_documents", lambda page: True), \
+                mock.patch.object(site, "download_bill", hands_over), \
+                mock.patch.object(docs, "write_shaped", lambda *a, **kw: None):
+            app.download_one(mock.Mock(url=site.TAX_URL), doc, "2025-12-31 Coinbase 1099-DA Tax Form.pdf")
+        self.assertEqual(handed, [("1099-DA Tax Year 2025", "form0001")])
+
     def test_tax_pdf_link_off_host_is_refused(self):
         page = object()
         orig = site._tax_forms_for
@@ -650,6 +734,27 @@ def pdf_saying(text: str) -> bytes:
     return bytes(out)
 
 
+def built_app(case):
+    """The app as its own main builds it, over a made-up config and output
+    folder that go when `case` ends, with nothing that reaches a browser.
+    Returns the run and the list its failure files would be written to."""
+    td = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+    case.addCleanup(td.cleanup)
+    root = Path(td.name)
+    cfg = root / "config.json"
+    cfg.write_text(json.dumps({"owner": "Dana Example", "output_dir": str(root / "out"),
+                               "profile_dir": str(root / "profile"), "min_pdf_bytes": 100,
+                               "document_types": ["Statement", "Tax Document"]}), encoding="utf-8")
+    with mock.patch.object(docs.App, "_setup_logging", lambda self: None):
+        app = docs.App(docs.build_parser().parse_args(["--config", str(cfg)]))
+    app._dl_dir = root / ".dl"
+    app.check_session = lambda page: None
+    failures = []
+    app.write_failure = lambda *a, **kw: failures.append(a)
+    app._journal = mock.MagicMock()
+    return app, failures
+
+
 SEPTEMBER = "Invented monthly statement for the period September 1, 2026 to September 30, 2026"
 OCTOBER = "Invented monthly statement for the period October 1, 2026 to October 31, 2026"
 NO_MONTH = "Invented monthly statement of account activity and balances for this holder"
@@ -679,25 +784,12 @@ class StatementMonth(unittest.TestCase):
         """The app's own download_one for the September statement, with the
         site handing over a PDF that says `text`. Returns the run, the
         document, where it was to be saved and the failures it wrote."""
-        td = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
-        self.addCleanup(td.cleanup)
-        root = Path(td.name)
-        cfg = root / "config.json"
-        cfg.write_text(json.dumps({"owner": "Dana Example", "output_dir": str(root / "out"),
-                                   "profile_dir": str(root / "profile"), "min_pdf_bytes": 100,
-                                   "document_types": ["Statement", "Tax Document"]}), encoding="utf-8")
-        with mock.patch.object(docs.App, "_setup_logging", lambda self: None):
-            app = docs.App(docs.build_parser().parse_args(["--config", str(cfg)]))
-        app._dl_dir = root / ".dl"
-        app.check_session = lambda page: None
-        failures = []
-        app.write_failure = lambda *a, **kw: failures.append(a)
-        app._journal = mock.MagicMock()
+        app, failures = built_app(self)
         doc = docs.Document(title="Monthly Statement September 2026", category="Statement",
                             summary="Monthly Statement", date="2026-09-30")
         saved_to = []
 
-        def hands_over(page, dl_dir, iso, out_path, title="", trace=None):
+        def hands_over(page, dl_dir, iso, out_path, title="", trace=None, **kw):
             Path(out_path).write_bytes(pdf_saying(text))
             saved_to.append(Path(out_path))
             return True
@@ -775,6 +867,8 @@ class Persisted(unittest.TestCase):
         for title, cat, summ in [("1099-DA Tax Year 2025", "Tax Document", "1099-DA Tax Form"),
                                  ("1099-MISC Tax Year 2024", "Tax Document", "1099-MISC Tax Form"),
                                  ("Gain Loss Report Tax Year 2021", "Tax Document", "Gain Loss Report"),
+                                 ("1042-S Tax Year 2025", "Tax Document", "1042-S Tax Form"),
+                                 ("Tax Form Tax Year 2025", "Tax Document", "Tax Document"),
                                  ("Monthly Statement September 2026", "Statement", "Monthly Statement")]:
             c, s, _ = doc_types.classify_document(title, rules)
             self.assertEqual((c, s), (cat, summ), title)
