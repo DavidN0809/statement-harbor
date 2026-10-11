@@ -26,7 +26,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
   no longer files every month again under a bare "Account", a page that
   names no account stops Discover once the months are filed under one, and
   a lookalike address is never suggested for the list of domains.
-- **Optum Bank, HSA statements and tax forms.** From the member site's Forms & documents page and each product's statements page: the newest statements as links, the older ones as the options of the page's date selector, and the 5498-SA and 1099-SA as links, each fetched by GET of its own path on the member host with no redirect followed. No control is pressed anywhere. HealthSafe ID identity hosts are never allowed or download hosts; a tab that lands on one stops the run. A pilot now exits nonzero unless its one document landed as a valid PDF. Full run on a contributor's account saved 21 statements and the 5498-SA.
+- **Optum Bank, HSA statements and tax forms (#73).** Each product the
+  Forms & documents page links a statement for is read from its own
+  statements page, the newest statements from their links, the older ones
+  from the options of the page's date selector, and the 5498-SA and
+  1099-SA from their links. Each is fetched by its own address on the
+  member host with no redirect followed, and no control is pressed
+  anywhere. A tab that lands on a HealthSafe ID sign-in page stops the
+  run, and an Optum pilot exits as a run that stopped unless every
+  document it chose was saved as a valid PDF. Contributed by
+  JasperDale420, whose full run saved 21 statements and the 5498-SA.
+  Before merging, a document was made to carry its product in its key,
+  so a second product appearing later no longer downloads the first
+  one's whole history again, and an archive saved before keeps its keys.
+  A corrected form listed under the title of the one it corrects is now
+  saved too, a placeholder in the date selector no longer stops the list,
+  a tax form whose title names no year stops it, and links to a product
+  that has no statements page no longer stop Discover. More than one
+  product is untested.
 
 ### Changed
 - **A checkout is set up as one environment, not one in every app folder
