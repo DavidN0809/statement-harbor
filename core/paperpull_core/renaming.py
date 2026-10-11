@@ -597,22 +597,50 @@ def update_progress(progress, result: Result, *,
     for key, rec in list(data.items()):
         if not isinstance(rec, dict):
             continue
+        patch = {}
         recorded = (rec.get(path_field) or "").strip()
         if recorded:
             new_path = moved(recorded)
-            if not new_path:
-                continue
-            patch = {path_field: new_path, filename_field: Path(new_path).name}
+            if new_path:
+                patch = {path_field: new_path, filename_field: Path(new_path).name}
         else:
             new_name = result.names.get((rec.get(filename_field) or "").strip())
-            if not new_name:
-                continue
-            patch = {filename_field: new_name}
+            if new_name:
+                patch = {filename_field: new_name}
+        # Whether or not pdf_path moved, since it names one invoice of an
+        # order split into several and Rename may move another.
+        invoices = _follow_invoices(rec.get("invoices"), moved)
+        if invoices is not None:
+            patch["invoices"] = invoices
+        if not patch:
+            continue
         progress.update(key, patch, save=False)
         touched += 1
     if touched:
         progress.save()
     return touched
+
+
+def _follow_invoices(invoices, moved: Callable[[str], Optional[str]]) -> Optional[list]:
+    """A record's list of invoices with each entry whose file moved naming
+    it where it went (`moved` gives that, or None), and None when no entry
+    changed.
+
+    Target keeps every invoice of an order split into several in this list,
+    and only one of them in pdf_path. A rename corrected the rows and
+    pdf_path and left the list naming the old file, which Review Names,
+    Rename and Target's own walk all read as the order's, so a later file
+    given that freed name was taken for this order's as well."""
+    if not isinstance(invoices, list):
+        return None
+    out, changed = [], False
+    for e in invoices:
+        raw = str(e.get("file") or "").strip() if isinstance(e, dict) else ""
+        new = moved(raw) if raw else None
+        if new and new != raw:
+            e, changed = dict(e, file=new), True
+        out.append(e)
+    return out if changed else None
 
 
 def _moved(result: Result):
@@ -1143,6 +1171,11 @@ class _Known:
         raws = [(r.get("PDF Full Path") or "").strip() for r in rows]
         raws += [str(rec.get("pdf_path") or "").strip() for rec in records.values()
                  if isinstance(rec, dict)]
+        # Each invoice of a record's list as well, which update_progress
+        # carries to where its file went (_follow_invoices).
+        raws += [str(e.get("file") or "").strip() for rec in records.values()
+                 if isinstance(rec, dict) and isinstance(rec.get("invoices"), list)
+                 for e in rec["invoices"] if isinstance(e, dict)]
         out = {}
         for raw in raws:
             for old in moving.get(self._file(raw), ()):
@@ -1414,12 +1447,23 @@ def review_names(app, ask, words: ReviewWords = WORDS,
                     orow["Purchase Summary"] = new_summary
                     if saved:
                         orow["Processing Status"] = "Completed"
+            # An entry of the record's list of invoices naming this file
+            # follows it, whether or not the record speaks for it otherwise,
+            # since it names this very file (_follow_invoices).
+            gone = _same_file(str(old_path))
+            invoices = _follow_invoices(
+                prog.get("invoices"),
+                lambda raw: str(new_path) if gone and _same_file(raw) == gone else None)
             if ours:
                 named = {"summary": new_summary, "pdf_filename": new_path.name,
                          "pdf_path": str(new_path), "confidence": "High"}
                 if saved:
                     named["state"] = State.COMPLETED.value
+                if invoices is not None:
+                    named["invoices"] = invoices
                 app.progress.update(key, named)  # key (purchase identifier) unchanged
+            elif invoices is not None:
+                app.progress.update(key, {"invoices": invoices})
             _write_down(app, rows, order_rows, backup=not written)
             pending, written = False, True
             if new_path.name == old_path.name:

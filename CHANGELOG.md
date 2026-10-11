@@ -31,6 +31,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and a second PayPal account on Coinbase's, and the two browsers attached
   to each other's signed-in session. The new port now moves past any port
   another app or account already uses.
+- **A Target order's list of invoices follows its files when Review Names
+  or Rename renames them.** Target keeps every invoice of an order split
+  into several in the order's record, and only one of them as the order's
+  file. Both renames corrected the index rows and that one file and left
+  the list naming the old names. A later file given such a freed name was
+  then taken for this order's too, so Review Names left it out of the
+  review and Rename kept its name. Each invoice in the list now names its
+  file as it is, whichever invoice was renamed. A list an earlier rename
+  left behind still names the old files.
 
 ## [0.46.0] - 2026-10-11
 
