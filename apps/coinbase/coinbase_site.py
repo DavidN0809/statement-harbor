@@ -336,14 +336,15 @@ def is_safe_control(name: str) -> bool:
 
 # ---------------------------------------------------------------------------
 # Hosts. Exact, parsed, no subdomain wildcard, and on the accounts host only
-# the paths this app reads or the page itself calls while it is open.
+# the paths this app reads itself. Each is a fixed path with no part left
+# open, so a path that climbs with ".." never matches one.
 # ---------------------------------------------------------------------------
 ALLOWED_HOSTS = {"accounts.coinbase.com", "www.coinbase.com"}
 DOWNLOAD_HOSTS = {"statements-report-persistent-production.s3.amazonaws.com",
                   "tax-center-forms-production.s3.amazonaws.com"}
 ALLOWED_PATH_RE = re.compile(
     r"^/(statements|taxes|taxes/documents|v2/tax/forms|v2/tax/tax-reports|"
-    r"v2/tax/owner-info|v1/statements(/[A-Za-z0-9._-]+){0,3})/?$")
+    r"v2/tax/owner-info)/?$")
 
 
 def is_safe_url(url: str) -> bool:

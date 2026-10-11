@@ -50,7 +50,12 @@ class Hosts(unittest.TestCase):
             self.assertTrue(site.is_list_url(u), u)
         for u in ["https://accounts.coinbase.com/settings", "https://accounts.coinbase.com/v2/tax/forms/abc/mark-read",
                   "https://accounts.coinbase.com/v2/tax/transactions", "https://www.coinbase.com/advanced-markets",
-                  "https://www.coinbase.com/settings", "https://login.coinbase.com/signin", ""]:
+                  "https://www.coinbase.com/settings", "https://login.coinbase.com/signin", "",
+                  # A path left open below v1/statements took ".." as one of its parts.
+                  "https://accounts.coinbase.com/v1/statements/../settings",
+                  "https://accounts.coinbase.com/v1/statements/../../v2/accounts",
+                  "https://accounts.coinbase.com/v1/statements/abc",
+                  "https://accounts.coinbase.com/v2/tax/forms/../../settings"]:
             self.assertFalse(site.is_list_url(u), repr(u))
 
     def test_download_hosts_exact(self):
