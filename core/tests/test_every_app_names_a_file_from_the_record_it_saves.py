@@ -35,7 +35,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from paperpull_core import storage, testkit
+from paperpull_core import renaming, storage, testkit
 from paperpull_core.storage import sanitize_component
 
 REPO = Path(__file__).resolve().parents[2]
@@ -289,6 +289,59 @@ def test_an_eob_is_named_as_rename_would_name_it(home, monkeypatch, pattern):
     said = home.rename()
     assert NAMED_ALREADY in said, said[-1500:]
     assert sorted(p.name for p in home.files().values()) == before
+
+
+def taken_again_as_before(home, monkeypatch):
+    """Two EOBs of one claim and day saved as 0.45.0 saved them, the second
+    told apart by the end of its id (" EOB1"), and then the second taken
+    again by Download again, which leaves its old copy beside the new one
+    its record names from then on. The paths of the old copy and the new."""
+    today = home.mod.told_apart_by
+    monkeypatch.setattr(home.mod, "told_apart_by", renaming.told_apart_by)
+    records = eobs_taken(home, monkeypatch)
+    second = next(r for r in records if r["pdf_path"].endswith(" EOB1.pdf"))
+    old = Path(second["pdf_path"])
+
+    def again(_page, doc_id, out_path):
+        Path(out_path).write_bytes(pdf_of(doc_id + " taken again"))
+        return True
+
+    monkeypatch.setattr(home.mod.site, "download_document", again)
+    app = home.build()
+    monkeypatch.setattr(app, "_on_its_site",
+                        lambda: SimpleNamespace(url="https://membersecure.anthem.com/member/eob"))
+    monkeypatch.setattr(app, "check_session", lambda *_a, **_kw: None)
+    app.args.redownload = True
+    app.process([home.mod.Document.from_dict(app.discovery.get(k))
+                 for k, rec in app.progress.data.items() if rec is not None
+                 and rec.get("document_id") == second["document_id"]])
+    app.progress.save()
+    new = Path(app.progress.data[next(k for k, r in app.progress.data.items()
+                                      if r.get("document_id") == second["document_id"])]
+               ["pdf_path"])
+    assert old.exists() and new != old and new.name.endswith(" EOB1 (2).pdf"), (old, new)
+    # Today's rule from here on, as after an update.
+    monkeypatch.setattr(home.mod, "told_apart_by", today)
+    return old, new
+
+
+def test_an_old_copy_saved_with_the_end_of_its_id_keeps_its_ending(home, monkeypatch):
+    """The old copy's name ends " EOB1", what a download added before
+    Anthem told files apart in words. Rename asked only today's rule, found
+    no " EOB 1" at the end of the name, and offered the old copy " (2)",
+    which says nothing about which EOB it is. It now reads the old ending
+    and gives the file today's words for it, and a second Rename has
+    nothing left to do."""
+    old, _new = taken_again_as_before(home, monkeypatch)
+    said = home.rename("--apply")
+    names = {p.read_bytes(): p.name for p in home.files().values()}
+    stem = old.name[:-len(" EOB1.pdf")]
+    told = [n for n in names.values() if n.startswith(stem + " ")]
+    assert len(told) == 2, (names, said[-1500:])
+    for name in told:
+        assert name in (stem + " EOB 1.pdf", stem + " EOB 1 (2).pdf"), (name, said[-1500:])
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
 
 
 # -- every app, read from its code ---------------------------------------------------

@@ -79,7 +79,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   claim that has two of one kind on one day adds its kind and Anthem's own
   number, as in " EOB 1", where it added " EOB1" before. A file saved
   before keeps its name until Rename is run, which offers the new name in
-  a preview first.
+  a preview first. The old copy Download again leaves of such an EOB is
+  read by its " EOB1" too and offered " EOB 1", never " (2)".
 - **A receipt already saved keeps its record when Download again saves
   nothing.** Download again takes every purchase in scope again, the ones
   saved before included. In every receipt app, an attempt that ended with

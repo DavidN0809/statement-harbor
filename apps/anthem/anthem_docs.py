@@ -980,8 +980,11 @@ class App:
         nothing is asked of the provider here (#43, #49). A preview
         unless --apply is given."""
         self.stats["mode"] = "rename"
+        # Up to 0.45.0 a second EOB was told apart by the end of its id, as
+        # in " EOB1", and the old copy Download again left keeps that ending.
         renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)),
-                         told_apart=told_apart_by)
+                         told_apart=told_apart_by,
+                         told_apart_before=(renaming.told_apart_by,))
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"

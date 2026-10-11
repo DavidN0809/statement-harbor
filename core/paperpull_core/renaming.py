@@ -657,7 +657,8 @@ def told_apart_by(record) -> str:
 
 
 def run_for(app, apply_changes: bool = False, say=print,
-            told_apart: Optional[Callable[[dict], str]] = None) -> Result:
+            told_apart: Optional[Callable[[dict], str]] = None,
+            told_apart_before: Iterable[Callable[[dict], str]] = ()) -> Result:
     """Rename this app's files to the names it would give them today.
 
     One function rather than forty-eight, because the ledger is the same
@@ -671,6 +672,10 @@ def run_for(app, apply_changes: bool = False, say=print,
     `told_apart` is handed a document's record and returns what the app's
     download adds to its name when another file has that name, for an app
     whose download does not tell its files apart by told_apart_by.
+    `told_apart_before` are the rules an earlier version of the app told
+    its files apart by, so a file whose name only an earlier one can be
+    read from, as the old copy Download again leaves, keeps its ending in
+    the words of `told_apart` (_Known.told_apart_in_its_name).
     """
     # Every app holds its index as self.index_csv, and a receipt app holds
     # the order history as self.order_csv as well. That is the same in all
@@ -721,6 +726,7 @@ def run_for(app, apply_changes: bool = False, say=print,
                                   record=record)
 
     rule = told_apart or told_apart_by
+    before = tuple(told_apart_before)
     limit = app.config.get("max_path_length", 240)
 
     def distinguisher(row):
@@ -747,7 +753,8 @@ def run_for(app, apply_changes: bool = False, say=print,
         # of a document so, "... OC2222.pdf" beside the "... OC2222 (2).pdf"
         # its record now names, and with nothing added it was offered
         # "... (2).pdf" under the very pattern it was saved by.
-        token = current.told_apart_in_its_name(row, rule) if record == {} else ""
+        token = (current.told_apart_in_its_name(row, rule, before)
+                 if record == {} else "")
         # Kept only where it fits whole, a count after it included. Cut to
         # fit, it no longer read as that ending, so the next Rename moved the
         # file again, and the one after that moved another into its name.
@@ -1021,27 +1028,39 @@ class _Known:
             return {}
         return self._view(found[0], saved) if len(found) == 1 else {}
 
-    def told_apart_in_its_name(self, row: dict, rule: Callable[[dict], str]) -> str:
+    def told_apart_in_its_name(self, row: dict, rule: Callable[[dict], str],
+                               before: Iterable[Callable[[dict], str]] = ()) -> str:
         """What the file of a row whose record cannot be told was told apart
         by, when its name already says so, and "" otherwise.
 
         Each document of the row's date and title is asked what its download
         adds to a name (`rule`), and the answer is the one of those the
         file's name ends with, as unique_path writes it, with or without a
-        " (n)" after. Two different ones, or none, give "".
+        " (n)" after. Two different ones, or none, give "". A name that
+        ends with what an earlier version of the app added for a document
+        (`before`) is given what `rule` adds for that same document, its
+        ending in today's words, as Anthem's " EOB1" became " EOB 1".
 
         A name never says whose file it is, and this does not ask it to. The
         file is still named from its row alone, never for any of these
         documents. Only what tells it apart is read, and only an ending the
-        name already has, so a rename keeps that ending and can add nothing
-        the name did not say."""
+        name already has, so a rename keeps that ending, or says it as the
+        app says it today, and can add nothing the name did not say."""
         stem = Path((row.get("PDF Full Path") or "").strip()).stem
         stem = _NUMBERED.sub("", stem).lower()
+
+        def ending(asked, record) -> str:
+            told = str(asked(record) or "").strip()
+            return sanitize_component(told).strip(" .") if told else ""
+
         ends = set()
         for name in self._by_key.get(_record_key(row), ()):
-            told = str(rule(self._view(name, True)) or "").strip()
-            token = sanitize_component(told).strip(" .") if told else ""
-            if token and stem.endswith(" " + token.lower()):
+            record = self._view(name, True)
+            token = ending(rule, record)
+            if not token:
+                continue
+            said = [token] + [ending(older, record) for older in before]
+            if any(e and stem.endswith(" " + e.lower()) for e in said):
                 ends.add(token)
         return ends.pop() if len(ends) == 1 else ""
 
