@@ -428,17 +428,28 @@ class App:
 
         # Ally drives the statements page from its own JSON API, which returns
         # a durable documentId per statement - a far better identity than a
-        # scraped row, and it survives a redesign of the table. Scraping is the
-        # fallback for when that API answers nothing.
+        # scraped row, and it survives a redesign of the table. Reading the
+        # rows instead, when that API answered nothing, took Ally's statements
+        # of one date that read alike as one and kept no documentId, and it
+        # could not tell a list it never heard from an empty one, so a list
+        # that never arrives now stops the run.
         labels = self.config.get("account_labels") or {}
         raw = site.ally_collect_via_api(page, labels)
-        if raw:
-            log.info("Ally: %d statements read from the API", len(raw))
-        else:
-            log.info("Ally: API returned nothing - falling back to row scraping")
-            print("  Ally's statements API returned nothing; reading the page instead.")
-            raw = site.ally_collect(page)
-            log.info("Ally: collected %d document rows", len(raw))
+        if raw is None and (site.looks_signed_out(page)
+                            or site.detect_security_challenge(page)):
+            # The collector can load the page again, and the session can end
+            # or a check come up in between, so this asks for what the page
+            # needs, and once it is given, reads the list again.
+            self.check_session(page)
+            raw = site.ally_collect_via_api(page, labels)
+        if raw is None:
+            print("Your Ally statements page opened, and the list of statements")
+            print("it asks Ally for never arrived, so nothing was listed. Try")
+            print("again in a few minutes.")
+            # A list that was never read stops the run rather than pass for
+            # an empty one (paperpull_core.listing).
+            raise SystemExit(0)
+        log.info("Ally: %d statements read from the API", len(raw))
         n_new = 0
         for d in raw:
             n_new += self._record_ally_doc(d)

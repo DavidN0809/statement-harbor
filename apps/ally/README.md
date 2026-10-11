@@ -40,7 +40,10 @@ column).
   The app walks the year picker (2020–2026) so the full history is seen
   whichever way Ally filters, then de-duplicates by `documentId`. That id is a
   durable identity, so the delete-safe state survives a redesign of the page.
-  Row scraping remains as a fallback if the API ever answers nothing.
+  With one year or none in the picker, the app loads the statements page again
+  while it listens, and a list that never arrives stops the run and says so.
+  (Reading the rows instead took the statements of one date that read alike
+  as one.)
 - **Several statements share a date**, one per account grouping plus a copy of
   each joint statement addressed to each accountholder, and Ally's metadata
   does not say which is which. See *How statements are named* below.

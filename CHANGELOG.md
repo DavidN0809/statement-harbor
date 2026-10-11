@@ -10,6 +10,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **Ally's Discover heard no list for an account with one year of
+  statements.** Ally's statements page asks Ally for a year's list as it
+  opens and again when its year picker moves, and the app reads the list
+  from those answers. It began listening after Discover had opened the
+  page, and by the app's own notes picking the year already shown asks for
+  nothing, so with one year in the picker it heard no list at all, and
+  with the page left on its oldest year it never heard that year. Either
+  way the list was called read. With nothing heard it read the rows
+  instead, which took the statements of one date that read alike as one
+  and kept no document id. Every year is now picked from another one, with
+  one year the page is loaded again while the app listens, and a list that
+  never arrives stops the run rather than pass for an empty one. Proven
+  against a made-up page, not yet run against Ally.
 - **USAA's Discover could miss most of the list from 0.26.0 on.** USAA's
   documents page asks USAA for its whole list as it loads, and the app
   reads the list from those answers. Since 0.26.0 the app opened the page

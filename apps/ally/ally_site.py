@@ -24,7 +24,7 @@ WHAT THE LIVE PROBE ESTABLISHED (2026-08-18):
   * Statements come from
         GET /acs/v1/bank-statements?docType=STATEMENTS&year=YYYY
     answering {"statements":[{iraType, documentId, trustName, documentName,
-    uploadDate}]}. That is the discovery path; row scraping is the fallback.
+    uploadDate}]}. That is the discovery path.
     Driving the year picker 2020..2026 returned 198 statements over 7 years.
   * SEVERAL statements share a date (3/month on this account), and the record
     carries NOTHING that separates them except documentId:
@@ -76,6 +76,7 @@ import html as _html
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -83,7 +84,6 @@ from urllib.parse import urlsplit
 
 from paperpull_core import controls as _controls
 from paperpull_core.urls import is_safe_url as _host_allows
-from paperpull_core.controls import click_next_page as _click_next_page
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.capture import fetch_as_b64 as _fetch_as_b64
 from paperpull_core.capture import is_document as _is_document
@@ -521,18 +521,6 @@ def expand_all(page) -> None:
             break
 
 
-def next_page(page) -> bool:
-    """One page forward, through a control that says it pages forward.
-
-    Judged by an allowlist in the core rather than by FORBIDDEN_CONTROL_RE,
-    because that blocklist refuses the word "next". Correctly, since "Next"
-    is also what a wizard's commit button says, and fatally here, because it
-    meant this could never page forward at all and the run reported success
-    having seen only the first page.
-    """
-    return _click_next_page(page, FALLBACK["next_page"])
-
-
 @dataclass
 class RawDoc:
     title: str
@@ -586,8 +574,8 @@ _ROW_JS = r"""() => {
 
 
 def collect_documents(page) -> List[RawDoc]:
-    """Rows currently rendered. Used by --diagnose (and as the generic
-    fallback inside ally_collect)."""
+    """Rows currently rendered. Used by --diagnose, and to tell a page of
+    documents."""
     docs: List[RawDoc] = []
     seen = set()
     try:
@@ -853,15 +841,71 @@ def _normalize_api_statement(s: dict, labels: Optional[dict] = None) -> Optional
             "ambiguous": False}
 
 
-def ally_collect_via_api(page, labels: Optional[dict] = None) -> List[dict]:
-    """Every statement Ally still has, read from its own JSON API.
+# How long the statements page may take to draw once the collector loads it
+# again, and how long its list may take to arrive.
+DRAW_WAIT_S = 12
+ANSWER_WAIT_S = 30
 
-    The year picker is walked so that whichever way Ally filters - server-side
-    per year, or client-side over one payload - the full history is seen. All
-    responses are merged and de-duplicated by documentId, so re-fetching the
-    same year costs nothing.
+
+def _drawn_within(page) -> bool:
+    """statements_page_drawn, given the page a few seconds to draw. A page
+    that signs the person out is not waited on."""
+    deadline = time.monotonic() + DRAW_WAIT_S
+    while True:
+        if statements_page_drawn(page):
+            return True
+        if looks_signed_out(page) or time.monotonic() >= deadline:
+            return False
+        page.wait_for_timeout(500)
+
+
+def _answered_within(page, answers: list) -> bool:
+    """Whether an answer to the statements list has come, given it
+    ANSWER_WAIT_S to come. A page that signs the person out is not waited
+    on."""
+    deadline = time.monotonic() + ANSWER_WAIT_S
+    while not answers:
+        if looks_signed_out(page) or time.monotonic() >= deadline:
+            return False
+        page.wait_for_timeout(500)
+    return True
+
+
+def _load_again(page) -> None:
+    """Load the statements page again, so the list it asks for as it opens
+    is asked for while the collector listens. A load that draws some other
+    page, as the dashboard an address can land on, is followed by the
+    SPA's own navigation to the statements page, as goto_documents does."""
+    log.info("loading the statements page again to hear its list")
+    try:
+        page.reload(wait_until="domcontentloaded", timeout=60000)
+    except Exception as e:
+        log.info("the statements page did not load again: %s", str(e).splitlines()[0][:90])
+    dismiss_timeout(page)
+    if not _drawn_within(page) and not looks_signed_out(page):
+        ensure_statements(page)
+
+
+def ally_collect_via_api(page, labels: Optional[dict] = None) -> Optional[List[dict]]:
+    """Every statement Ally still has, read from its own JSON API, or None
+    when no list arrived.
+
+    The page asks for one year's list as it opens, and again whenever the
+    year its picker shows changes, so the year picker is walked and every
+    answer heard is merged and de-duplicated by documentId.
+
+    Discover opens the page before this listens, so the list the page asked
+    for as it opened is not heard here, and picking the year already shown
+    asks for nothing. Walking the years from the oldest, a picker of one
+    year asked for nothing at all, and a page left on its oldest year never
+    asked for that year, and either way the list was called read. So the
+    oldest year is picked again at the end, which makes every pick move the
+    picker, and with one year or none to pick, the page is loaded again
+    while this listens. An answer with no statement in it is an empty list.
+    No answer at all is not, and returns None.
     """
     captured: List[dict] = []
+    answers: List[str] = []
 
     def on_resp(r):
         try:
@@ -872,6 +916,7 @@ def ally_collect_via_api(page, labels: Optional[dict] = None) -> List[dict]:
             data = json.loads(r.text())
             items = data.get("statements") if isinstance(data, dict) else None
             if isinstance(items, list):
+                answers.append(r.url)
                 captured.extend(items)
                 log.info("captured %d statements from %s", len(items), r.url)
         except Exception as e:
@@ -884,15 +929,18 @@ def ally_collect_via_api(page, labels: Optional[dict] = None) -> List[dict]:
         page.wait_for_timeout(2500)
 
         sel, years = year_select(page)
-        if sel is not None and years:
-            # Start from the far end so the first pick always changes the
-            # value (selecting the year already shown fires no request).
-            ordered = sorted(years, reverse=False)          # oldest .. newest
-            for y in ordered:
+        if sel is not None and len(years) > 1:
+            ordered = sorted(years)                         # oldest .. newest
+            for y in ordered + ordered[:1]:
                 if _select_option(page, sel, y):
                     page.wait_for_timeout(1200)
-        else:
-            log.info("no year picker found; reading the default view only")
+        elif not answers:
+            if not years:
+                log.info("no year picker found; reading the default view only")
+            _load_again(page)
+        if not _answered_within(page, answers):
+            log.warning("no list of statements arrived within %d s", ANSWER_WAIT_S)
+            return None
     finally:
         try:
             page.remove_listener("response", on_resp)
@@ -929,58 +977,6 @@ def ally_collect_via_api(page, labels: Optional[dict] = None) -> List[dict]:
 
     out.sort(key=lambda r: (r["date"], r.get("occurrence", 0)), reverse=True)
     return out
-
-
-def ally_collect(page) -> List[dict]:
-    """Every statement Ally still has: a list of {account, date, title}.
-
-    Walks the account dropdown (if there is one) and, within each account,
-    every year in the period dropdown - so the full history is captured, not
-    just the default view.
-
-    This is the DOM fallback. ally_collect_via_api is tried first; this runs
-    only if the API answered nothing (a redesign, or a locked-down session).
-    """
-    docs: List[dict] = []
-    seen = set()
-
-    def grab(acct: str):
-        expand_all(page)
-        scroll_full_page(page, rounds=3)
-        for r in collect_documents(page):
-            date, _ = parse_period_date(r.date_text or r.text)
-            if not date:
-                continue
-            key = (acct, date, r.title)
-            if key in seen:
-                continue
-            seen.add(key)
-            docs.append({"account": acct, "date": date,
-                         "title": r.title or "Statement"})
-
-    def walk_years(acct: str):
-        sel, years = year_select(page)
-        if sel is not None and years:
-            for y in years:
-                if _select_option(page, sel, y):
-                    grab(acct)
-        else:
-            grab(acct)
-            # no year dropdown: try pagination instead
-            for _ in range(30):
-                if not next_page(page):
-                    break
-                grab(acct)
-
-    acct_sel, accounts = account_select(page)
-    if acct_sel is not None and accounts:
-        for a in accounts:
-            if not _select_option(page, acct_sel, a):
-                continue
-            walk_years(re.sub(r"\s+", " ", a).strip())
-    else:
-        walk_years("")
-    return docs
 
 
 # ---------------------------------------------------------------------------

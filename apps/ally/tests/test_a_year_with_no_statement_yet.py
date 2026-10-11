@@ -8,7 +8,9 @@ open now stops the run, that would have stopped every such run. The page
 is now told by its own address, which the live probe found,
 and its year picker. The Tax Forms tab, whose address only begins with the
 statements page's, and a statements address that drew no list at all,
-still do not count, and Discover stops on the second.
+still do not count, and Discover stops on the second. The page asks Ally's
+statements API for the year it shows, as Ally's does, and hears that the
+year holds nothing.
 
 In a real browser attached over CDP, as at home. Ally is a made-up host
 name the browser is told to find on this machine, and every other name
@@ -47,6 +49,17 @@ STATEMENTS_PAGE = """<!doctype html><html><head><title>Statements and Tax Forms<
 <table><thead><tr><th>Date Posted</th><th>Statement Title</th></tr></thead>
 <tbody></tbody></table>
 <p>There are no statements for this year.</p>
+<script>
+const sel = document.getElementById('statementYear');
+let asked = '';
+function ask(year) {
+  if (year === asked) return;
+  asked = year;
+  fetch('/acs/v1/bank-statements?docType=STATEMENTS&year=' + year);
+}
+sel.addEventListener('change', () => ask(sel.value));
+ask(sel.value);
+</script>
 </main></body></html>"""
 
 # The Tax Forms tab, with a year picker of its own and no form yet.
@@ -83,6 +96,14 @@ class _Handler(BaseHTTPRequestHandler):
             page = STATEMENTS_PAGE if SITE.statements_draw else BROKEN_PAGE
         elif path == TAX_PATH:
             page = TAX_PAGE
+        elif path == "/acs/v1/bank-statements":
+            data = json.dumps({"statements": []}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         else:
             self.send_error(404)
             return
