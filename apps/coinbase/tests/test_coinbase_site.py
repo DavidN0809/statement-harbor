@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
@@ -186,9 +187,18 @@ class TaxList(unittest.TestCase):
 
 
 class StatementDownload(unittest.TestCase):
-    """The one PDF button is pressed; a download from any host but the exact one is refused."""
+    """The one PDF button is pressed, through the core, and a download from
+    any host but the exact one is refused."""
 
-    def make_page(self, dl_url):
+    ROWS = [{"label": "Last 30 days", "button": "PDF", "i": 0},
+            {"label": "September 2026", "button": "PDF", "i": 1},
+            {"label": "August 2026", "button": "PDF", "i": 2}]
+
+    def make_page(self, dl_url, rows=None):
+        """A statements page with these rows, whose PDF buttons, pressed,
+        hand the browser one download from `dl_url`. Each button reads its
+        own row's label as the page shows it (page.row_says), so a test can
+        draw a row anew under a button."""
         site_ref = site
         class Download:
             url = dl_url; suggested_filename = "x.pdf"; cancelled = False; event_bytes = b"%PDF-1.4 fake"
@@ -199,35 +209,51 @@ class StatementDownload(unittest.TestCase):
             ok, status = True, 200
             def body(self): return b"%PDF-1.4 fetched"
         class Req:
-            asked = []
+            def __init__(self): self.asked = []
             def get(self, url, **kw): self.asked.append((url, kw.get("max_redirects"))); return Resp()
-        class Ctx: request = Req()
+        class Ctx:
+            def __init__(self): self.request, self.pages = Req(), []
+        class El:
+            """One PDF button held as an element. The core's own reads of it
+            find nothing, as on a page that lets no script answer, and its
+            row label is read from the page."""
+            def __init__(self, page, i): self.page, self.i = page, i
+            def evaluate(self, js, arg=None):
+                if js == site_ref._LABEL_OF_JS:
+                    return self.page.row_says.get(self.i, self.page.rows[self.i]["label"])
+                return None
+            def scroll_into_view_if_needed(self, **kw): pass
+            def dispose(self): self.page.disposed += 1
+            def click(self, **kw):
+                self.page.clicked += 1
+                for ev, cb in list(self.page.handlers):
+                    if ev == "download":
+                        cb(dl)
+        class Button:
+            def __init__(self, page, i): self.page, self.i = page, i
+            def element_handle(self, **kw): return El(self.page, self.i)
         class Loc:
             def __init__(self, n, page): self.n, self.page = n, page
             def count(self): return self.n
             def is_visible(self): return self.n > 0
             @property
             def first(self): return self
-            def nth(self, i): return El(self.page)
-        class El:
-            def __init__(self, page): self.page = page
-            def scroll_into_view_if_needed(self, **kw): pass
-            def click(self, **kw):
-                self.page.clicked += 1
-                for cb in self.page.handlers: cb(dl)
+            def nth(self, i): return Button(self.page, i)
         class Page:
-            clicked = 0; handlers = []; context = Ctx()
             url = site_ref.STATEMENTS_URL
-            def on(self, ev, cb): self.handlers.append(cb)
-            def remove_listener(self, ev, cb): self.handlers.remove(cb)
+            main_frame = object()
+            def __init__(self):
+                self.clicked, self.disposed, self.handlers, self.context = 0, 0, [], Ctx()
+                self.rows, self.row_says = list(rows if rows is not None else StatementDownload.ROWS), {}
+            def on(self, ev, cb): self.handlers.append((ev, cb))
+            def remove_listener(self, ev, cb): self.handlers.remove((ev, cb))
             def locator(self, sel):
-                return Loc(0, self) if sel == site_ref._LOAD_MORE else Loc(3, self)
-            def evaluate(self, js):
-                return [{"label": "Last 30 days", "button": "PDF", "i": 0},
-                        {"label": "September 2026", "button": "PDF", "i": 1},
-                        {"label": "August 2026", "button": "PDF", "i": 2}]
+                return Loc(0, self) if sel == site_ref._LOAD_MORE else Loc(len(self.rows), self)
+            def evaluate(self, js): return list(self.rows)
             def wait_for_timeout(self, ms): pass
         return Page(), dl
+
+    S3 = "https://statements-report-persistent-production.s3.amazonaws.com/a__pdf.pdf"
 
     def test_off_host_download_is_refused_and_cancelled(self):
         page, dl = self.make_page("https://evil.example/statement.pdf")
@@ -239,34 +265,26 @@ class StatementDownload(unittest.TestCase):
             self.assertEqual(trace[-1], {"note": "download refused", "host": "evil.example"})
 
     def test_exact_host_download_is_taken(self):
-        page, dl = self.make_page("https://statements-report-persistent-production.s3.amazonaws.com/a__pdf.pdf")
+        page, dl = self.make_page(self.S3)
         with tempfile.TemporaryDirectory() as td:
             trace = []
             ok = site._catch_statement(page, Path(td) / "dl", "September 2026", Path(td) / "out.pdf", trace)
             self.assertTrue(ok); self.assertEqual(page.clicked, 1)
             self.assertTrue((Path(td) / "out.pdf").read_bytes().startswith(b"%PDF-"))
+        self.assertEqual(page.handlers, [], "every listener was removed")
+        self.assertEqual(page.disposed, 1, "the held button was let go")
 
     def test_present_row_needs_no_load_more(self):
-        page, dl = self.make_page("https://statements-report-persistent-production.s3.amazonaws.com/a.pdf")
-        page.load_more_presses = 0
-        real_locator = page.locator
-        class LM:
-            def __init__(s, pg): s.pg = pg
-            def count(s): return 1
-            def is_visible(s): return True
-            @property
-            def first(s): return s
-            def inner_text(s, **kw): return "Load more"
-            def get_attribute(s, a): return None
-            def click(s, **kw): s.pg.load_more_presses += 1
-        page.locator = lambda sel: LM(page) if sel == site._LOAD_MORE else real_locator(sel)
-        with tempfile.TemporaryDirectory() as td:
-            ok = site._catch_statement(page, Path(td) / "dl", "September 2026", Path(td) / "out.pdf", [])
-            self.assertTrue(ok); self.assertEqual(page.load_more_presses, 0)
+        page, dl = self.make_page(self.S3)
+        with mock.patch.object(site.pressing, "click") as load_more:
+            with tempfile.TemporaryDirectory() as td:
+                ok = site._catch_statement(page, Path(td) / "dl", "September 2026", Path(td) / "out.pdf", [])
+                self.assertTrue(ok)
+        self.assertEqual(load_more.call_count, 0)
         self.assertEqual(page.handlers, [], "the download listener was removed")
 
     def test_empty_event_file_is_not_a_document_and_nothing_else_is_taken(self):
-        page, dl = self.make_page("https://statements-report-persistent-production.s3.amazonaws.com/a__pdf.pdf")
+        page, dl = self.make_page(self.S3)
         dl.event_bytes = b""
         with tempfile.TemporaryDirectory() as td:
             dl_dir = Path(td) / "dl"; dl_dir.mkdir()
@@ -285,19 +303,128 @@ class StatementDownload(unittest.TestCase):
             self.assertEqual(page.context.request.asked, [])
 
     def test_ambiguous_row_is_not_pressed(self):
-        page, dl = self.make_page("https://statements-report-persistent-production.s3.amazonaws.com/a.pdf")
-        page.evaluate = lambda js: [{"label": "August 2026", "button": "PDF", "i": 0},
-                                    {"label": "August 2026", "button": "PDF", "i": 1}]
+        page, dl = self.make_page(self.S3, rows=[{"label": "August 2026", "button": "PDF", "i": 0},
+                                                 {"label": "August 2026", "button": "PDF", "i": 1}])
         with tempfile.TemporaryDirectory() as td:
             ok = site._catch_statement(page, Path(td) / "dl", "August 2026", Path(td) / "out.pdf", [])
             self.assertFalse(ok); self.assertEqual(page.clicked, 0)
 
     def test_unsafe_button_label_is_not_pressed(self):
-        page, dl = self.make_page("https://statements-report-persistent-production.s3.amazonaws.com/a.pdf")
-        page.evaluate = lambda js: [{"label": "August 2026", "button": "Generate", "i": 0}]
+        page, dl = self.make_page(self.S3, rows=[{"label": "August 2026", "button": "Generate", "i": 0}])
         with tempfile.TemporaryDirectory() as td:
             ok = site._catch_statement(page, Path(td) / "dl", "August 2026", Path(td) / "out.pdf", [])
             self.assertFalse(ok); self.assertEqual(page.clicked, 0)
+
+    def test_the_press_goes_through_the_core_with_the_guard_and_the_row(self):
+        page, dl = self.make_page(self.S3)
+        real = site.pressing.press_once
+        asked = []
+
+        def recorded(pg, el, **kw):
+            asked.append(dict(kw, check_said=kw["check"]()))
+            return real(pg, el, **kw)
+        with mock.patch.object(site.pressing, "press_once", recorded):
+            with tempfile.TemporaryDirectory() as td:
+                ok = site._catch_statement(page, Path(td) / "dl", "September 2026", Path(td) / "out.pdf", [])
+        self.assertTrue(ok)
+        self.assertEqual(len(asked), 1)
+        self.assertIs(asked[0]["guard"], site.is_safe_control)
+        self.assertEqual(asked[0]["check_said"], "", "the row reads its month at the press")
+        self.assertTrue(asked[0]["brought"](), "a download that came is what the press brought")
+
+    def test_a_row_that_reads_another_month_at_the_press_is_not_pressed(self):
+        """The list was read when the button was found, and the row under it
+        reads August by the press. Nothing is pressed."""
+        page, dl = self.make_page(self.S3)
+        page.row_says[1] = "August 2026"
+        with tempfile.TemporaryDirectory() as td:
+            trace = []
+            ok = site._catch_statement(page, Path(td) / "dl", "September 2026", Path(td) / "out.pdf", trace)
+        self.assertFalse(ok); self.assertEqual(page.clicked, 0)
+        self.assertEqual(trace[-1]["note"], "the PDF button's row no longer reads this month")
+
+    def test_press_once_s_check_says_when_the_row_changed(self):
+        page, dl = self.make_page(self.S3)
+        said = []
+
+        def drawn_anew_then_pressed(pg, el, **kw):
+            pg.row_says[1] = "August 2026"
+            said.append(kw["check"]())
+            return site.pressing.Pressed(site.pressing.GONE)
+        with mock.patch.object(site.pressing, "press_once", drawn_anew_then_pressed):
+            with tempfile.TemporaryDirectory() as td:
+                ok = site._catch_statement(page, Path(td) / "dl", "September 2026", Path(td) / "out.pdf", [])
+        self.assertFalse(ok)
+        self.assertEqual(said, ["its row reads another month"])
+
+    def test_a_turned_off_button_leaves_the_statement_and_the_run_goes_on(self):
+        page, dl = self.make_page(self.S3)
+        off = site.pressing.TurnedOff("press a control", "the control is turned off", ["off"])
+        with mock.patch.object(site.pressing, "press_once", side_effect=off):
+            with tempfile.TemporaryDirectory() as td:
+                trace = []
+                ok = site._catch_statement(page, Path(td) / "dl", "September 2026", Path(td) / "out.pdf", trace)
+        self.assertFalse(ok)
+        self.assertIn("turned off", trace[-1]["note"])
+        self.assertEqual(page.handlers, [])
+
+    def test_something_over_the_button_stops_the_run(self):
+        """A prompt drawn over the list is no challenge to
+        detect_security_challenge while rows show, and the core's own look
+        at the press stops the run."""
+        page, dl = self.make_page(self.S3)
+        covered = site.pressing.Covered("press a control", "something on the page is over the control",
+                                        ["covered"], after_a_press=True)
+        with mock.patch.object(site.pressing, "press_once", side_effect=covered):
+            with tempfile.TemporaryDirectory() as td:
+                with self.assertRaises(site.pressing.Covered):
+                    site._catch_statement(page, Path(td) / "dl", "September 2026", Path(td) / "out.pdf", [])
+        self.assertEqual(page.handlers, [])
+
+    def _with_load_more(self, page, adds):
+        """Give the page a Load more that shows, and rows `adds` drawn once
+        it is pressed through the core."""
+        real_locator = page.locator
+
+        class LM:
+            def count(s): return 1
+            def is_visible(s): return True
+            def is_enabled(s, **kw): return True
+            @property
+            def first(s): return s
+            def inner_text(s, **kw): return "Load more"
+            def get_attribute(s, a): return None
+        page.locator = lambda sel: LM() if sel == site._LOAD_MORE else real_locator(sel)
+        presses = []
+
+        def click(pg, loc, **kw):
+            presses.append(kw)
+            pg.rows.extend(adds)
+        return presses, click
+
+    def test_load_more_is_pressed_through_the_core(self):
+        page, dl = self.make_page(self.S3)
+        presses, click = self._with_load_more(page, [{"label": "July 2026", "button": "PDF", "i": 3}])
+        with mock.patch.object(site.pressing, "click", click):
+            with tempfile.TemporaryDirectory() as td:
+                ok = site._catch_statement(page, Path(td) / "dl", "July 2026", Path(td) / "out.pdf", [])
+        self.assertTrue(ok)
+        self.assertEqual(len(presses), 1)
+        self.assertEqual(presses[0]["css"], site._LOAD_MORE)
+        self.assertEqual(presses[0]["step"], "load more of the list")
+
+    def test_something_over_load_more_stops_the_run(self):
+        """A stop at the press of Load more is not taken for a list that
+        stopped partway, which would only leave the statement for review."""
+        page, dl = self.make_page(self.S3)
+        self._with_load_more(page, [])
+        covered = site.pressing.Covered("load more of the list", "something on the page is over the control",
+                                        ["covered"])
+        with mock.patch.object(site.pressing, "click", side_effect=covered):
+            with tempfile.TemporaryDirectory() as td:
+                with self.assertRaises(site.pressing.Covered):
+                    site._catch_statement(page, Path(td) / "dl", "July 2026", Path(td) / "out.pdf", [])
+        self.assertEqual(page.clicked, 0)
 
 
 class Persisted(unittest.TestCase):

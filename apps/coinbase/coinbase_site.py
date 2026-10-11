@@ -11,8 +11,9 @@ ways a document arrives:
     button makes the page itself ask Coinbase to build that month's PDF
     (a POST the page makes, not this app), poll for it, and then the browser
     downloads it from statements-report-persistent-production.s3.amazonaws.com.
-    `_catch_statement` presses the one button and takes the download event
-    only when its address is on that exact host. The "Last 30 days" row is
+    `_catch_statement` presses the one button, through the core's
+    press_once, and takes the download event only when its address is on
+    that exact host. The "Last 30 days" row is
     a moving window, not a statement, and is skipped.
   * A tax form. The page's own list call, GET /v2/tax/forms?...&year=YYYY,
     returns each form with a short-lived link to its PDF on
@@ -33,7 +34,9 @@ SAFETY (this is a crypto exchange account that can move money):
   deposits, transfers, stakes, borrows, pays, creates an order, API key,
   address or custom statement, or edits any setting. The only controls
   this app presses are a statement row's own PDF button and the list's
-  "Load more", each through is_safe_control first. FORBIDDEN_CONTROL_RE is
+  "Load more", each through is_safe_control first and then through the
+  core (pressing.press_once and pressing.click), which presses nothing
+  that something covers and stops the run instead. FORBIDDEN_CONTROL_RE is
   the guard; a control must ALSO look like a document action
   (SAFE_DOC_CONTROL_RE), and the shared core guards are consulted every
   time. A control whose label cannot be read is never clicked. The custom
@@ -65,6 +68,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
+from paperpull_core import pressing
 from paperpull_core import redirects
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import redact, set_private_words  # noqa: F401  (re-exported)
@@ -78,7 +82,6 @@ from paperpull_core.capture import set_download_dir  # noqa: F401
 from paperpull_core.capture import snapshot as _snapshot
 from paperpull_core.capture import take_download as _take_download
 from paperpull_core.capture import clear_copies as _clear_copies
-from paperpull_core.controls import escape_for_locator
 from paperpull_core.words import words_for as _words_for
 
 log = logging.getLogger("coinbase_docs.site")
@@ -274,7 +277,10 @@ def looks_signed_out(page) -> bool:
 def detect_security_challenge(page) -> Optional[str]:
     """Names the passcode, CAPTCHA or throttling prompt on screen, or None.
     Visible text only. A page that shows a statement row is not a
-    challenge, whatever its text says further down."""
+    challenge, whatever its text says further down. A prompt drawn over the
+    list is not missed for that, since every press goes through the core,
+    which reads what is on top of the control and stops the run when
+    something covers it (pressing.click, pressing.press_once)."""
     try:
         if page.locator(FALLBACK["doc_row"]).count() > 0:
             return None
@@ -386,18 +392,25 @@ _STATEMENT_TITLE_RE = re.compile(r"^Monthly Statement ((?:January|February|March
                                  r"July|August|September|October|November|December) (?:19|20)\d{2})$")
 _TAX_TITLE_RE = re.compile(r"^(.+?) Tax Year ((?:19|20)\d{2})(?: \(#([A-Za-z0-9]{1,40})\))?$")
 
-# Each PDF button with the label of the row it sits in, "September 2026" or
-# "Last 30 days", read from the page without pressing anything. The row is
-# the nearest ancestor whose text starts with such a label.
-_ROWS_JS = r"""() => [...document.querySelectorAll("button[data-testid='statements-pdf-v2']")].map((b, i) => {
+# The label of the row one PDF button sits in, "September 2026" or "Last 30
+# days", read from the page without pressing anything. The row is the
+# nearest ancestor whose text starts with such a label.
+_LABEL_OF_JS = r"""(b) => {
   let el = b;
   for (let k = 0; k < 8 && el; k++, el = el.parentElement) {
     const t = (el.innerText || '').trim();
     const m = t.match(/^(Last 30 days|[A-Z][a-z]+ (?:19|20)\d{2})(?!\S)/);
-    if (m) return {label: m[1], button: (b.innerText || b.getAttribute('aria-label') || '').trim(), i: i};
+    if (m) return m[1];
   }
-  return {label: '', button: (b.innerText || b.getAttribute('aria-label') || '').trim(), i: i};
-})"""
+  return '';
+}"""
+
+# Each PDF button with the label of its row (_LABEL_OF_JS) and its own words.
+_ROWS_JS = r"""() => {
+  const labelOf = %s;
+  return [...document.querySelectorAll("button[data-testid='statements-pdf-v2']")].map((b, i) => (
+    {label: labelOf(b), button: (b.innerText || b.getAttribute('aria-label') || '').trim(), i: i}));
+}""" % _LABEL_OF_JS
 
 
 def month_to_iso(label: str) -> str:
@@ -464,9 +477,11 @@ def scroll_full_page(page, rounds: int = 8, delay_ms: int = 600) -> None:
 
 def _press_load_more(page) -> bool:
     """Press the list's Load more once. False when there is none left. Its
-    own label goes through the guard first. Pressed with the rows still the
-    same after about ten seconds, or refused, raises ListStopped: both used
-    to read as the end of the list."""
+    own label goes through the guard first, and the press goes through the
+    core, which presses nothing that something covers and stops the run
+    instead (pressing.click). Pressed with the rows still the same after
+    about ten seconds, or refused, raises ListStopped, since both used to
+    read as the end of the list."""
     try:
         btn = page.locator(_LOAD_MORE).first
         if btn.count() == 0 or not btn.is_visible():
@@ -477,10 +492,8 @@ def _press_load_more(page) -> bool:
     if not is_safe_control(label):
         raise ListStopped("the guard refused its Load more button")
     before = page.locator(_PDF_BTN).count()
-    try:
-        btn.click(timeout=5000)
-    except Exception as e:
-        raise ListStopped("its Load more could not be pressed (%s)" % type(e).__name__)
+    pressing.click(page, btn, css=_LOAD_MORE, what="the Load more button of the statements list",
+                   words=_words(), step="load more of the list")
     for _ in range(34):
         page.wait_for_timeout(300)
         if page.locator(_PDF_BTN).count() > before:
@@ -780,7 +793,27 @@ def _catch_statement(page, dl_dir, label: str, out_path: Path, trace: Optional[l
     if not is_safe_control(btn_label):
         log.info("refusing unsafe control %r for %s", btn_label, label)
         return False
-    el = page.locator(_PDF_BTN).nth(idx)
+    # The one button, held as an element from here on, so every read and the
+    # press reach that button and no other, even should the list be drawn
+    # anew in between (pressing.press_once).
+    try:
+        el = page.locator(_PDF_BTN).nth(idx).element_handle(timeout=3000)
+    except Exception:
+        el = None
+    if el is None:
+        if trace is not None:
+            trace.append({"note": "the PDF button could not be held"})
+        return False
+
+    def row_changed() -> str:
+        """press_once's own check, "" while the button's row still reads
+        `label`, and otherwise why it is not the button that was chosen."""
+        try:
+            now = el.evaluate(_LABEL_OF_JS)
+        except Exception:
+            return "its row could not be read"
+        return "" if now == label else "its row reads another month"
+
     downloads: list = []
     def on_download(dl):
         # A plain function: Playwright tags the handler it is given, which a
@@ -789,18 +822,47 @@ def _catch_statement(page, dl_dir, label: str, out_path: Path, trace: Optional[l
     page.on("download", on_download)
     before = _snapshot(dl_dir)
     try:
-        try:
-            el.scroll_into_view_if_needed(timeout=4000)
-        except Exception:
-            pass
-        try:
-            el.click(timeout=8000)
-        except Exception as e:
+        # The row is read again at the press, not only when the button was
+        # found.
+        if row_changed():
             if trace is not None:
-                trace.append({"note": "click failed", "control": redact(btn_label)[:40], "error": str(e)[:160]})
+                trace.append({"note": "the PDF button's row no longer reads this month"})
+            return False
+        # Playwright's own press, and through the page only when nothing
+        # covered the button, its press never reached the page, nothing it
+        # should bring came and its row still reads this month. Something
+        # over the button stops the run, and the button is never pressed
+        # twice (pressing.press_once).
+        try:
+            outcome = pressing.press_once(
+                page, el, what="the PDF button of this month's statement", words=_words(),
+                guard=is_safe_control, check=row_changed, dl_dir=dl_dir,
+                brought=lambda: bool(downloads))
+        except pressing.TurnedOff:
+            # The page has turned the button off, so nothing was pressed and
+            # nothing this statement brings can come. It is left for review
+            # and the next run while the run goes on (pressing.TurnedOff).
+            if trace is not None:
+                trace.append({"note": "the PDF button is turned off on the page, so nothing was pressed"})
             return False
         if trace is not None:
-            trace.append({"note": "clicked", "control": redact(btn_label)[:40]})
+            if outcome.error is None:
+                trace.append({"note": "clicked", "control": redact(btn_label)[:40]})
+            else:
+                trace.append({"note": "click failed", "control": redact(btn_label)[:40],
+                              "error": str(outcome.error)[:160]})
+            if outcome.how == pressing.MADE:
+                trace.append({"note": "the press reached the page although it raised, "
+                                      "so it was not made again"})
+            elif outcome.how == pressing.THROUGH_THE_PAGE and outcome.page_error is None:
+                trace.append({"note": "clicked through the DOM instead"})
+            elif outcome.how == pressing.THROUGH_THE_PAGE:
+                trace.append({"note": "DOM click failed too", "error": str(outcome.page_error)[:160]})
+        if outcome.how == pressing.GONE:
+            # Nothing was pressed, so nothing this statement brings can come.
+            if trace is not None:
+                trace.append({"note": "the PDF button left the page before it was pressed"})
+            return False
         # The page asks Coinbase to build the month's PDF and polls for it;
         # measured at well under a minute.
         for _ in range(120):
@@ -833,6 +895,10 @@ def _catch_statement(page, dl_dir, label: str, out_path: Path, trace: Optional[l
             pass
         try:
             _clear_copies(dl_dir, before, out_path)
+        except Exception:
+            pass
+        try:
+            el.dispose()
         except Exception:
             pass
 
