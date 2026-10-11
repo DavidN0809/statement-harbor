@@ -902,18 +902,22 @@ def _part_of(row: dict):
     when the name is taken, the row's own order number, a " (2)", or both.
     Read only at the very end, the part of a file a download or Review
     Names told apart was lost, "... Invoice (1 of 2) 1234.pdf" renamed to
-    "... Invoice.pdf". Anything else after it is not a part."""
+    "... Invoice.pdf". Anything else after it is not a part, and nothing
+    after it is for a row with no order number, a document's, which is
+    read only at the very end as it always was."""
     name = (row.get("PDF Filename") or "").strip()
     stem, ext = os.path.splitext(name)
     found = list(_PART.finditer(stem)) if ext.lower() == ".pdf" else []
     if not found:
         return None
     last = found[-1]
-    rest = _NUMBERED.sub("", stem[last.end():]).lower()
-    number = (row.get("Order or Receipt Number") or "").strip()
-    told = sanitize_component(number).strip(" .").lower() if number else ""
-    if rest and not (told and rest == " " + told):
-        return None
+    rest = stem[last.end():].lower()
+    if rest:
+        number = (row.get("Order or Receipt Number") or "").strip()
+        told = sanitize_component(number).strip(" .").lower() if number else ""
+        # An order number may itself end with what reads as a count.
+        if not told or not {rest, _NUMBERED.sub("", rest)} & {"", " " + told}:
+            return None
     return (int(last.group(1)), int(last.group(2)))
 
 

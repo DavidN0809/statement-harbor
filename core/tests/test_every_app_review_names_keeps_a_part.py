@@ -279,6 +279,32 @@ def test_a_part_a_download_told_apart_is_kept(app, tmp_path, monkeypatch):
     assert renamed == 0, "Rename agrees with the name the review gave, %s" % said
 
 
+@pytest.mark.parametrize("name, number, part", [
+    ("X Invoice (1 of 2).pdf", "ORDER-0001", (1, 2)),
+    ("X Invoice (1 of 2) ORDER-0001.pdf", "ORDER-0001", (1, 2)),
+    ("X Invoice (1 of 2) order-0001 (3).pdf", "ORDER-0001", (1, 2)),
+    ("X Invoice (1 of 2) (2).pdf", "ORDER-0001", (1, 2)),
+    ("X Invoice (2 of 3) ORD0001.pdf", "ORD/0001.", (2, 3)),
+    ("X Invoice (1 of 2) A (3).pdf", "A (3)", (1, 2)),
+    ("X Invoice (1 of 2) A (3) (2).pdf", "A (3)", (1, 2)),
+    ("Pack (1 of 2) Invoice (2 of 2) ORDER-0001.pdf", "ORDER-0001", (2, 2)),
+    ("X Invoice (1 of 2) ORDER-0002.pdf", "ORDER-0001", None),
+    ("X (1 of 2) Invoice.pdf", "ORDER-0001", None),
+    ("X Invoice (1 of 2) ORDER-0001 Copy.pdf", "ORDER-0001", None),
+    ("X Invoice (1 of 2).zip", "ORDER-0001", None),
+    ("X Invoice.pdf", "ORDER-0001", None),
+    ("X Notice (1 of 2).pdf", "", (1, 2)),
+    ("X Notice (1 of 2) (2).pdf", "", None),
+    ("X Notice (1 of 2) 4F2A9C.pdf", "", None),
+])
+def test_a_part_is_read_only_where_unique_path_could_have_put_it(name, number, part):
+    """A part ends the name, or is followed only by what unique_path adds for
+    the row, its own order number, a count, or both. A row with no order
+    number, a document's, has its part read only at the very end, as before."""
+    row = {"PDF Filename": name, "Order or Receipt Number": number}
+    assert renaming._part_of(row) == part
+
+
 def test_target_keeps_the_part_of_an_invoice_it_saved(tmp_path, monkeypatch):
     """Target's own run, from the invoice it placed to the rows it wrote,
     for an order whose two invoices both name its item. Each is placed by
