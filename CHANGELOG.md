@@ -26,6 +26,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   no longer files every month again under a bare "Account", a page that
   names no account stops Discover once the months are filed under one, and
   a lookalike address is never suggested for the list of domains.
+- **Coinbase, monthly statements and tax documents.** Statements from accounts.coinbase.com/statements, one per complete month, each taken by pressing its row's PDF button once and accepting the download only from Coinbase's own statements bucket; tax forms (1099-DA) and pregenerated gain/loss reports from the Taxes page's own list call, fetched by their short-lived link with nothing pressed, so the page's mark-read and mark-downloaded calls never happen. Exact hosts and a path contract; a list it cannot read whole stops the run. Full run on a retail account saved 66 statements and 2 tax documents, every one a valid PDF.
 
 ### Changed
 - **A checkout is set up as one environment, not one in every app folder
