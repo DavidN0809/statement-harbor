@@ -580,11 +580,15 @@ class App:
                                             place=getattr(self, "_placed", {}).get(doc.key))
         if not taken and why:
             # Refused rather than guessed, so nothing is saved twice and no
-            # document is marked done while another is never taken.
+            # document is marked done while another is never taken. A
+            # Download again of one saved before keeps its record as it was
+            # (paperpull_core.saved_copy).
+            kept = saved_copy.holding(self, doc.key)
             self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=why)
             self._write_row(doc, "Not told apart", "Needs Manual Review")
             self.stats["manual_review"] += 1
-            print(f"  !! {why}. Marked for manual review.")
+            print(f"  !! {why}. " + ("The copy saved before is kept." if kept
+                                    else "Marked for manual review."))
             return
         if not taken:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,

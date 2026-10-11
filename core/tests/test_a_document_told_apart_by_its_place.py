@@ -483,6 +483,25 @@ def test_a_new_document_beside_one_saved_is_left_for_a_person_when_ids_do_not_la
 
 
 @each_app
+def test_download_again_keeps_two_alike_saved_when_their_ids_did_not_last(home):
+    """Two alike saved last session, and Download again this session, whose
+    list says nothing of which is which. Neither is taken, both saved
+    records stand as they were, and no later run fetches either again."""
+    home.provider.lasting = False
+    home.provider.ids = ["ST0001", "ST0002"]
+    home.run_all()
+    before = home.held()
+
+    home.provider.new_session()
+    said = home.run_all("--redownload", "--year", DATE[:4])
+    assert home.held() == before
+    assert NOT_TOLD in said and "The copy saved before is kept" in said, said[-600:]
+    home.provider.new_session()
+    home.run_all()
+    assert home.on_disk() == ["ST0001", "ST0002"], home.held()
+
+
+@each_app
 def test_a_failed_document_is_left_for_a_person_when_ids_do_not_last(home):
     home.provider.lasting = False
     home.provider.ids = ["ST0001", "ST0002"]

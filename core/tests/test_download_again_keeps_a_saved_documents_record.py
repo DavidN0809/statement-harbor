@@ -454,7 +454,10 @@ def test_an_id_a_later_listing_gave_never_reaches_a_saved_record(home):
     saved, before, found_before = saved_by_a_first_run(home)
     app = home.build()
     lists = getattr(app, relists_with_a_new_id(home.app))
-    others = [set()] * (len(inspect.signature(lists).parameters) - 1)
+    # Only what the method has no default for, so one telling whether the
+    # listing surely named the document keeps its own answer.
+    others = [set() for p in list(inspect.signature(lists).parameters.values())[1:]
+              if p.default is p.empty]
     lists(dict(app.discovery.get(home.key), document_id=LATER_ID), *others)
     app.discovery.save()
     assert app.discovery.get(home.key)["document_id"] == LATER_ID, (
