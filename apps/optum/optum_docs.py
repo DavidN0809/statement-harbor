@@ -680,9 +680,10 @@ class App:
             self._delay()
 
     def download_one(self, page, doc: Document, filename: str):
-        """Save one document. The site layer fetches the row's PDF link from
-        inside the page when there is one, and otherwise clicks the row's
-        own control and catches what arrives."""
+        """Save one document. The site layer reads the product's statements
+        page again and fetches the document by its own path, only when one
+        entry there carries the recorded path, title and date. Nothing is
+        pressed."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
         # The product, or the end of a form's own id, used only if the name
