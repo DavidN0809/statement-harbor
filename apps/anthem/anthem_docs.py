@@ -789,9 +789,12 @@ class App:
                 self.stats["failed"] += 1
                 continue
             if not pdf:
-                self.progress.update(key, {
-                    "state": State.NEEDS_MANUAL_REVIEW.value, "title": label,
-                    "notes": "Could not fetch the document"})
+                rec = {"state": State.NEEDS_MANUAL_REVIEW.value, "title": label,
+                       "notes": "Could not fetch the document", "downloaded_ok": False}
+                # A document saved before keeps its record while a Download
+                # again saves no copy of its own (paperpull_core.saved_copy).
+                if not saved_copy.holds(self, key, rec):
+                    self.progress.update(key, rec)
                 self.stats["manual_review"] += 1
                 print(f"  Could not fetch - marked for manual review: {label}")
                 continue
@@ -816,16 +819,19 @@ class App:
                     out_path.replace(quarantine)
                 except OSError:
                     quarantine = out_path
-                self.progress.update(key, dict(
-                    record, state=State.NEEDS_MANUAL_REVIEW.value,
-                    pdf_path=str(quarantine),
-                    notes=f"PDF validation failed: {result.reason}"))
+                rec = dict(record, state=State.NEEDS_MANUAL_REVIEW.value,
+                           pdf_path=str(quarantine), downloaded_ok=False,
+                           notes=f"PDF validation failed: {result.reason}")
+                if not saved_copy.holds(self, key, rec):
+                    self.progress.update(key, rec)
                 self.stats["manual_review"] += 1
                 print(f"  !! Validation failed for {label}; moved to Manual Review.")
                 continue
-            self.progress.update(key, dict(
-                record, state=State.COMPLETED.value, downloaded_ok=True,
-                pdf_path=str(out_path), pdf_filename=out_path.name))
+            rec = dict(record, state=State.COMPLETED.value, downloaded_ok=True,
+                       pdf_path=str(out_path), pdf_filename=out_path.name,
+                       pdf_size=result.size_bytes)
+            saved_copy.holds(self, key, rec)
+            self.progress.update(key, rec)
             self.index_csv.append_rows([{
                 "Account Holder": self.config.get("owner", ""),
                 "Document Date": fdate,

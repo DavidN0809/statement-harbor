@@ -104,7 +104,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   changes nothing in a saved document's record until it has saved a copy
   of its own, as with receipts. The record's notes say how it ended and
   that only another Download again tries it, and the Pilot report of that
-  run lists it among what needs attention.
+  run lists it among what needs attention. Anthem's member documents, ID
+  cards and letters, saved apart from its EOBs, are kept the same way.
+  Where the saved file had been deleted and the attempt left its own copy
+  under that name, a copy that failed its check and could not be moved to
+  Manual Review or one an error cut short, the record no longer vouches
+  for it, in receipt and document apps alike, and the next plain run
+  fetches the document again. An American Family bill handed another
+  bill's statement sends both bills to Manual Review, its own copy saved
+  before included, as a first run does.
 
 ### Security
 - **M&T presses a year heading only when nothing covers it, and once.**

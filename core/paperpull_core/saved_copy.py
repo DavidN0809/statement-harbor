@@ -43,6 +43,8 @@ attempt held in this run.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 # The first words of what an attempt that saved nothing adds to the saved
 # copy's notes. A later attempt's entry takes the place of the one found by
 # them, so the notes say only how the latest one ended.
@@ -88,6 +90,8 @@ def holds(app, key: str, rec: dict, also=()) -> bool:
     if not holding(app, key):
         return False
     old = app.progress.get(key) or {}
+    if rec.get("state") != _ON_ITS_WAY and _no_longer_its_copy(old, rec):
+        return False
     patch = {name: rec[name] for name in also if name in rec}
     entry = _ENTRY % ", ".join(_said(rec.get("state"), rec.get("notes")))
     patch["notes"] = "; ".join(
@@ -96,6 +100,40 @@ def holds(app, key: str, rec: dict, also=()) -> bool:
     app.progress.update(key, patch)
     _kept_on(app, _HELD_NOW, {})[key] = entry
     return True
+
+
+# The state an app writes between putting a copy on disk and checking it.
+# The copy is on its way, to be kept or put aside, so the attempt is judged
+# by the write that ends it.
+_ON_ITS_WAY = "PDF Saved"
+
+
+def _no_longer_its_copy(old: dict, rec: dict) -> bool:
+    """Whether the file a saved record names is no longer the copy it saved.
+
+    The person deleted it, the usual reason for Download again, so the
+    attempt saved under the very name the record holds. A copy that failed
+    its check and could not be moved to Manual Review stayed there, as did
+    one an error cut short after it was written. A record kept as it was
+    then vouched for that copy as the one saved, and no later run fetched
+    the document again. So when the attempt names the record's own file,
+    or the file there is no longer the size the record saved, the attempt's
+    write takes the record as it did before any of this, and the next plain
+    run fetches the document again. A file that is simply gone is the copy
+    the person let go, and the record stands."""
+    path = str(old.get("pdf_path") or "")
+    if not path:
+        return False
+    if str(rec.get("pdf_path") or "") == path:
+        return True
+    try:
+        size = Path(path).stat().st_size
+    except OSError:
+        return False
+    try:
+        return size != int(old.get("pdf_size"))
+    except (TypeError, ValueError):
+        return False
 
 
 def tried(app, key: str) -> str:

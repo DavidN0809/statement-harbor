@@ -651,6 +651,12 @@ class App:
                  if isinstance(r, dict) and r.get("pdf_sha256") == digest and r.get("date") == doc.date
                  and (r.get("account") or "") != (doc.account or "")]
         if twins:
+            # This bill's own copy saved before is no more to be trusted than
+            # the other bill's, since the same bytes could be either bill's,
+            # so a Download again sends it to Manual Review as well rather
+            # than keep its record (paperpull_core.saved_copy).
+            if saved_copy.holding(self, doc.key):
+                twins.append(doc.key)
             for key in twins:
                 self._distrust(key)
             quarantine = unique_path(self.paths.manual_review, out_path.name,

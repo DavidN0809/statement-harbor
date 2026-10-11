@@ -935,6 +935,28 @@ def test_a_statement_with_another_bills_bytes_sends_both_to_manual_review(billin
     assert tabs_left(s.page) == []
 
 
+def test_download_again_handed_another_bills_bytes_trusts_neither_bill(billing_site, tmp_path):
+    """A and B were saved, each with its own statement. A Download again of
+    A's statement of 09/12/2026 is handed B's. The same bytes could be
+    either bill's, so the copy of A's saved before is no more to be trusted
+    than B's. Both go to Manual Review and neither is deleted, as on a
+    first run."""
+    first = billing_site(billing_page({"A": "route", "B": "route"}))
+    run(app_on(first.page, tmp_path))
+    assert saved(tmp_path) == expected("A", "B")
+
+    again = billing_site(billing_page({"A": "route", "B": "route"},
+                                      wrong={"A|09/12/2026": ("B", "09/12/2026")}))
+    app = app_on(again.page, tmp_path)
+    app.args.redownload = True
+    run(app)
+    got = states(app)
+    assert got[(part_of("A"), "2026-09-12")] == (REVIEW, False), got
+    assert got[(part_of("B"), "2026-09-12")] == (REVIEW, False), got
+    kept = list(saved(tmp_path).values()) + list(saved(tmp_path, "Manual Review").values())
+    assert pdf("A", "09/12/2026") in kept and pdf("B", "09/12/2026") in kept
+
+
 def test_a_bill_drawn_before_the_one_listed_is_never_pressed_in_its_place(billing_site, tmp_path):
     """X's card is drawn first just as A's Bill details is about to be
     pressed, so the place A was listed at is X's by then."""

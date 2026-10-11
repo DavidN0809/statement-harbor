@@ -616,6 +616,117 @@ def test_download_again_that_saves_a_copy_takes_the_record(home):
     assert app.discovery.get(doc.key)["state"] == State.COMPLETED.value
 
 
+# -- an attempt that left its own copy where the saved one was ----------------------
+#
+# The person deleted the saved file, so the attempt saves under the very name
+# the record holds. When the attempt's copy then stays there, a copy that
+# failed its check and could not be moved to Manual Review, or one an error
+# cut short after it was written, a record kept as it was vouched for that
+# copy as the one saved, and no later run fetched the document again.
+
+def put_aside_could_not_move(home, app, doc, saved):
+    """download_one's steps when the move to Manual Review fails, a file
+    another program holds open, and the copy stays where it was saved."""
+    saved.unlink()
+    out_path = where_its_download_saves(app, doc, file_name_for(home, doc))
+    assert out_path == saved
+    record = getattr(app, home.record)
+    failing_copy(out_path)
+    doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
+    record(doc, State.PDF_SAVED)
+    record(doc, State.NEEDS_MANUAL_REVIEW, notes="PDF validation failed: an invented reason")
+    app._write_row(doc, "Validation failed", "Needs Manual Review")
+
+
+put_aside_could_not_move.state = State.PDF_SAVED
+
+
+def an_error_after_the_copy_was_written(home, app, doc, saved):
+    """The capture wrote its copy where the saved one was, and an error came
+    before download_one wrote anything of it down."""
+    saved.unlink()
+    out_path = where_its_download_saves(app, doc, file_name_for(home, doc))
+    assert out_path == saved
+    failing_copy(out_path)
+    getattr(app, home.record)(doc, State.FAILED, notes="an invented error")
+
+
+an_error_after_the_copy_was_written.state = State.FAILED
+
+LEFT_IN_PLACE = [put_aside_could_not_move, an_error_after_the_copy_was_written]
+
+
+def never_vouched_for(home, app):
+    """The record does not call the attempt's copy the saved one, and the
+    next plain run takes the document again."""
+    key = home.key
+    rec = app.progress.get(key)
+    held = Path(rec.get("pdf_path") or "")
+    assert not (rec.get("downloaded_ok") and held.is_file()
+                and held.stat().st_size != rec.get("pdf_size")), (
+        "%s's record says the attempt's copy is the one saved" % home.app.name)
+    plain = home.build()
+    assert plain._already_done(home.mod.Document.from_dict(plain.discovery.get(key))) is False, (
+        "%s's next plain run would never fetch the document again" % home.app.name)
+
+
+@pytest.mark.parametrize("home,ending", [
+    pytest.param(app, ending, id="%s-%s" % (app.name, ending.__name__))
+    for app in APPS for ending in LEFT_IN_PLACE if ending.state in states_written(app)],
+    indirect=["home"])
+def test_a_record_never_vouches_for_a_copy_the_attempt_left_in_its_place(home, ending):
+    saved, _before, _found = saved_by_a_first_run(home)
+    app = home.build(redownload=True)
+    doc = a_listed_document(home, app)
+    ending(home, app, doc, saved)
+    never_vouched_for(home, app)
+
+
+def test_every_document_app_has_an_ending_that_leaves_a_copy_in_place():
+    assert all(any(ending.state in states_written(app) for ending in LEFT_IN_PLACE)
+               for app in APPS)
+
+
+THROUGH_DOWNLOAD_ONE = [d for d in APPS if d.name in ("capitalone", "dominion", "schwab")]
+
+
+@pytest.mark.parametrize("home", THROUGH_DOWNLOAD_ONE, ids=[d.name for d in THROUGH_DOWNLOAD_ONE],
+                         indirect=True)
+def test_a_copy_that_could_not_be_moved_is_never_vouched_for_through_download_one(home):
+    """The same through each app's own download_one, with the site handing
+    over a copy that fails its check and the move to Manual Review refused."""
+    saved, _before, _found = saved_by_a_first_run(home)
+    saved.unlink()
+    app = home.build(redownload=True)
+    doc = a_listed_document(home, app)
+    filename = file_name_for(home, doc)
+    assert where_its_download_saves(app, doc, filename) == saved
+
+    def hand_over(*args, **kwargs):
+        for value in list(args) + list(kwargs.values()):
+            if isinstance(value, Path) and value.suffix == ".pdf":
+                failing_copy(value)
+                return ("COPY0001", "") if home.app.name in ("capitalone", "schwab") else True
+        return None
+
+    site = handing_nothing(home.mod.site)
+    for name in ("download_document", "download_statement", "download_bill"):
+        setattr(site, name, hand_over)
+    home.monkeypatch.setattr(home.mod, "site", site)
+    home.monkeypatch.setattr(app, "check_session", lambda *_a, **_kw: None)
+    moving = Path.replace
+
+    def refused(self, target):
+        if Path(target).parent == app.paths.manual_review:
+            raise OSError("another program holds the file open")
+        return moving(self, target)
+
+    home.monkeypatch.setattr(Path, "replace", refused)
+    app.download_one(Blank(), doc, filename)
+    assert saved.exists() and saved.stat().st_size < 1000, "the attempt left no copy, so this shows nothing"
+    never_vouched_for(home, app)
+
+
 @pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
 def test_a_first_download_put_aside_is_recorded_as_before(home):
     """A document never saved has no copy to keep, so its record names the
