@@ -22,6 +22,7 @@ from __future__ import annotations
 from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import not_shown
+from paperpull_core import pressing
 from paperpull_core import renaming
 from paperpull_core import saved_copy
 from paperpull_core.journal import Journal
@@ -1580,7 +1581,7 @@ class App:
         return self._journal
 
     def write_failure(self, step: str, reason: str, text: str = "",
-                      postmortem: dict = None) -> None:
+                      postmortem: dict = None, extra: dict = None) -> None:
         """What the page looked like when this went wrong, to a file.
 
         Written without anybody having to know to ask for it, because a
@@ -1592,7 +1593,8 @@ class App:
         is still sitting on the thing that broke."""
         if self.stats.get("failure_files"):
             return
-        extra = {"postmortem": postmortem} if postmortem else None
+        # `extra` is what a stop at a press knows (pressing.stop_run).
+        extra = dict(extra or {}, **({"postmortem": postmortem} if postmortem else {})) or None
         # A checkpoint at the moment it gave up. It is also what makes the
         # journal when nothing had written to it yet, and every tester file
         # sent in on 2026-09-25 came back without one for that reason.
@@ -1842,6 +1844,10 @@ def main(argv=None):
         else:
             build_parser().print_help()
             return 0
+    except pressing.Stop as stop:
+        # A press it would not make stops the run here, with the reason said
+        # and the failure file written.
+        pressing.stop_run(app, stop)
     except KeyboardInterrupt:
         print("\nStopped by user. Progress saved.")
         return 130

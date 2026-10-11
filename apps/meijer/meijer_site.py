@@ -58,6 +58,7 @@ from typing import List, Optional
 from urllib.parse import urljoin, urlsplit
 
 from paperpull_core import page_check as _page_check
+from paperpull_core import pressing
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from storage import now_iso
 
@@ -65,6 +66,7 @@ from paperpull_core.redact import private_words, set_private_words  # noqa: F401
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.capture import fetch_with_status as _fetch_with_status
 from paperpull_core.dates import checked as _checked_date
+from paperpull_core.words import words_for as _words_for
 
 log = logging.getLogger("meijer_receipts.site")
 
@@ -223,6 +225,13 @@ def detect_security_challenge(page) -> Optional[str]:
         if m in hay:
             return f"Possible rate limiting detected: '{m}'"
     return None
+
+
+def _words():
+    """This app's own words for paperpull_core.words, from what its source
+    calls it, for saying what covered a control."""
+    import sys
+    return _words_for("Meijer", sys.modules[__name__])
 
 
 def is_safe_control(name: str) -> bool:
@@ -1235,12 +1244,35 @@ def press_row_receipt(page, purchase, trace=None, facts=None):
         ctx.on("response", on_response)
         page.on("download", on_download)
         page.on("popup", on_popup)
+        # Playwright's own press, given the core's time for it, and through
+        # the page only when nothing covered the control, its press never
+        # reached the page and nothing it should bring came. Something over
+        # the control stops the run and says what it was, and the control is
+        # never pressed twice (pressing.press_once). The last receipt of a
+        # long In-Store tab timed out on a bare five-second click on every
+        # run, with nothing to say why (#42).
         try:
-            el.click(timeout=5000)
-        except Exception as e:
+            outcome = pressing.press_once(
+                page, el, what="the receipt link on this purchase's row", words=_words(),
+                guard=is_safe_control,
+                brought=lambda: bool(got or downloads or popups))
+        except pressing.TurnedOff:
+            # Turned off on the page, so nothing was pressed and nothing this
+            # receipt brings can come. It is tried again on the next run.
+            said["outcome"] = NO_PDF
             if trace is not None:
-                trace.append({"note": "click failed", "control": mask_text(label)[:40],
-                              "error": type(e).__name__})
+                trace.append({"note": "the control is turned off on the page, so nothing was pressed"})
+            return None
+        if outcome.error is not None and trace is not None:
+            trace.append({"note": "click failed", "control": mask_text(label)[:40],
+                          "error": type(outcome.error).__name__})
+        if outcome.how == pressing.GONE:
+            # The row was drawn anew before the press, so nothing was pressed
+            # and whatever shows now is not this press's.
+            said["outcome"] = NO_PDF
+            if trace is not None:
+                trace.append({"note": "the control left the page before it was pressed"})
+            return None
         for _ in range(20):
             page.wait_for_timeout(500)
             if got or downloads:

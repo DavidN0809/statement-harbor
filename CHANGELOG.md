@@ -402,6 +402,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and wrote a failure file. It is now counted as not ready yet, and a later
   run takes it once PayPal finishes it. Create Report itself is still never
   pressed.
+- **Meijer presses a receipt's link the way the other apps press theirs
+  (#42).** The receipt link on a purchase's row was pressed with a bare
+  click given five seconds. On the last receipt of a long In-Store tab
+  that click ran out of time on every run, and the run said only that the
+  press brought no PDF. It is now pressed through the same place in the
+  core as every other app's controls, given the same time, and never
+  pressed twice. Something drawn over the link stops the run and says
+  what it was, with the failure file written.
 
 ### Security
 - **M&T presses a year heading only when nothing covers it, and once.**

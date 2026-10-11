@@ -256,19 +256,25 @@ def test_a_row_whose_words_sit_in_a_block_beside_the_control(browser_ctx):
     assert body and pg.evaluate("window.__pressed") == ["view receipt pdf 0919"], trace
 
 
-# 12. What a failed click writes into the file testers attach.
-def test_a_failed_click_writes_no_page_words(browser_ctx):
+# 12. A control something covers stops the run through the core's press,
+#     and what the stop says and what the trace keeps carry no page words.
+#     It was a bare five-second click, which on the last receipt of a long
+#     tab timed out on every run with nothing to say why (#42).
+def test_a_covered_receipt_control_stops_the_run_with_no_page_words(browser_ctx, monkeypatch):
+    from paperpull_core import pressing
+    monkeypatch.setattr(pressing, "PRESS_MS", 1500)
     head = ("<style>#veil{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9}</style>")
     controls = link()
     html = page_of([row("09/19/2026", controls)], head=head).replace(
         "<main>", "<main><div id='veil'>Dana Quill card ending 4242 saved</div>")
     pg = open_orders(browser_ctx, html)
     trace = []
-    site.press_row_receipt(pg, purchase_for(pg, "2026-09-19"), trace)
-    print("\nTRACE 12:", trace)
-    fails = [t for t in trace if t.get("note") == "click failed"]
-    assert fails, trace
-    assert "4242" not in str(fails) and "Dana" not in str(fails), fails
+    with pytest.raises(pressing.Stop) as stopped:
+        site.press_row_receipt(pg, purchase_for(pg, "2026-09-19"), trace)
+    print("\nTRACE 12:", trace, stopped.value.lines)
+    said = " ".join(stopped.value.lines) + str(stopped.value.facts) + str(trace)
+    assert "4242" not in said and "Dana" not in said, said
+    assert pg.evaluate("window.__pressed") == [], "a covered control was pressed"
 
 
 def test_two_rows_that_fit_one_purchase_press_nothing_and_say_so(browser_ctx):
