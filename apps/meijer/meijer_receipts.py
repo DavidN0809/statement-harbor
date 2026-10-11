@@ -1322,20 +1322,25 @@ class App:
             else:
                 log.warning("Validation failed (%s)", result.reason)
         if not result.ok:
-            # Quarantine the questionable file; never mark Completed.
-            self._last_reason = result.reason
-            quarantine = self._put_aside(out_path)
-            purchase.pdf_path = str(quarantine)
-            purchase.pdf_filename = quarantine.name
-            self._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
-                               notes=f"PDF validation failed: {result.reason}")
-            self._write_csv_rows(purchase, receipt_status="Validation Failed",
-                                 processing_status=State.NEEDS_MANUAL_REVIEW.value,
-                                 notes_extra=f"Validation: {result.reason}")
-            self.stats["manual_review"] += 1
-            print(f"  !! Validation failed ({_reason_words(result.reason)}); moved to Manual Review.")
-            if stopped is not None:
-                raise stopped
+            try:
+                # Quarantine the questionable file; never mark Completed.
+                self._last_reason = result.reason
+                quarantine = self._put_aside(out_path)
+                purchase.pdf_path = str(quarantine)
+                purchase.pdf_filename = quarantine.name
+                self._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
+                                   notes=f"PDF validation failed: {result.reason}")
+                self._write_csv_rows(purchase, receipt_status="Validation Failed",
+                                     processing_status=State.NEEDS_MANUAL_REVIEW.value,
+                                     notes_extra=f"Validation: {result.reason}")
+                self.stats["manual_review"] += 1
+                print(f"  !! Validation failed ({_reason_words(result.reason)}); moved to Manual Review.")
+            finally:
+                # A stop from the retry's press goes on even when putting the
+                # copy aside or writing its rows raised, a CSV held open in
+                # Excel say, so the run never goes on to the next purchase.
+                if stopped is not None:
+                    raise stopped
             return False
 
         purchase.receipt_count = 1
