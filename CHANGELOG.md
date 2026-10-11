@@ -72,9 +72,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   letters of one subject on one day can, the second was saved with " (2)"
   and Rename offered it the end of its id. Each file is now named from the
   record written down for it, and the second of two files of one name is
-  told apart by the last six characters of its id, as an EOB already was.
-  A file saved before keeps its name until Rename is run, which offers the
-  new name in a preview first.
+  told apart in words rather than by the end of an id, which read as
+  " rmal1" for a second ID card. A second ID card of one member and kind
+  adds " No. 2", a 1095-B listed under both of its type codes adds
+  " type 1095", a letter the end of its message's own id, and an EOB of a
+  claim that has two of one kind on one day adds its kind and Anthem's own
+  number, as in " EOB 1", where it added " EOB1" before. A file saved
+  before keeps its name until Rename is run, which offers the new name in
+  a preview first.
 - **A receipt already saved keeps its record when Download again saves
   nothing.** Download again takes every purchase in scope again, the ones
   saved before included. In every receipt app, an attempt that ended with

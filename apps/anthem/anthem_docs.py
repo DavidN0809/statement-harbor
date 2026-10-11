@@ -128,6 +128,34 @@ def migrate_legacy_keys(records: dict) -> int:
     return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
 
 
+def told_apart_by(record: dict) -> str:
+    """What a document's file adds to its name when another file already
+    has that name, the same on every run, read from the id its record
+    keeps. The last six characters of the id, as other apps add, said
+    nothing a person could read here, " rmal1" for a second ID card and
+    " A1095" for a 1095-B listed under its other type code. So an EOB adds
+    its kind and Anthem's own sequence number, as in " EOB 1", a member
+    document its type code, as in " type 1095", since the bare code is
+    already in its label, an ID card its place among the member's cards
+    of that kind, as in " No. 2", and a letter the end of its message's
+    own id. Any other id is told apart the usual way
+    (renaming.told_apart_by). The download and Rename both ask this, so a
+    rename tells a file apart the way its download did."""
+    doc_id = str((record or {}).get("document_id") or "").strip()
+    eob = site.parse_doc_id(doc_id)
+    if eob is not None:
+        _claim_type, _claim_id, kind, seq = eob
+        return "%s %d" % (kind, seq)
+    parts = doc_id.split("|")
+    if parts[0] == "MemberDoc" and len(parts) == 3 and parts[2]:
+        return "type " + parts[2]
+    if parts[0] == "IdCard" and len(parts) == 4 and parts[3].isdigit():
+        return "No. %d" % (int(parts[3]) + 1)
+    if parts[0] == "Letter" and len(parts) == 2 and parts[1]:
+        return parts[1][-6:]
+    return renaming.told_apart_by(record)
+
+
 class App:
     _journal = None
     _requests = None
@@ -532,12 +560,12 @@ class App:
         """
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
-        # The last of the document id, used only if the name is taken.
-        # Two documents on one day used to differ by " (2)", which says
-        # nothing about which is which and moves between them when a file
-        # is deleted (#49, and the same complaint on #43).
+        # What tells this one apart, used only if the name is taken
+        # (told_apart_by). Two documents on one day used to differ by
+        # " (2)", which says nothing about which is which and moves between
+        # them when a file is deleted (#49, and the same complaint on #43).
         out_path = unique_path(folder, filename, self.config["max_path_length"],
-                               distinguisher=(doc.document_id or "")[-6:])
+                               distinguisher=told_apart_by(doc.to_dict()))
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
@@ -800,11 +828,11 @@ class App:
                 continue
             folder = getattr(self.paths, r["folder_attr"])
             folder.mkdir(parents=True, exist_ok=True)
-            # The last of the document id, used only if the name is taken,
-            # as for the EOBs. Two letters of one subject on one day were
-            # " (2)" apart, and Rename offered the second the end of its id.
+            # What tells this one apart, used only if the name is taken, as
+            # for the EOBs (told_apart_by). Two letters of one subject on one
+            # day were " (2)" apart, and Rename offered the second more.
             out_path = unique_path(folder, filename, self.config["max_path_length"],
-                                   distinguisher=(record["document_id"] or "")[-6:])
+                                   distinguisher=told_apart_by(record))
             try:
                 out_path.write_bytes(pdf)
             except Exception as e:
@@ -952,7 +980,8 @@ class App:
         nothing is asked of the provider here (#43, #49). A preview
         unless --apply is given."""
         self.stats["mode"] = "rename"
-        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
+        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)),
+                         told_apart=told_apart_by)
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"

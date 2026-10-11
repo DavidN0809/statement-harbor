@@ -181,6 +181,62 @@ def test_a_pattern_with_the_number_names_each_file_as_rename_would(home, monkeyp
             "%r carries nothing of %s" % (path.name, doc_id))
 
 
+# What the second of each two adds to the name both wanted, by the id of
+# the document saved second. The end of an id said nothing a person could
+# read, " rmal1" for a second ID card and " A1095" for a 1095-B listed
+# under its other type code.
+READABLE = {
+    site_id: ending for site_id, ending in (
+        ("MemberDoc|%s|1095B" % PERIOD, " type 1095B"),
+        ("MemberDoc|%s|1095" % PERIOD, " type 1095"),
+        ("IdCard|Jane Doe|normal|0", " No. 1"),
+        ("IdCard|Jane Doe|normal|1", " No. 2"),
+        ("Letter|%s" % LETTER_UIDS[0], " 7301aa"),
+        ("Letter|%s" % LETTER_UIDS[1], " 7302bb"),
+    )}
+# Two documents of one day and summary under it, whatever their own names.
+ONE_NAME = "{date:yyyy-mm-dd} {summary}"
+
+
+def second_endings(files) -> dict:
+    """What each file of a pair adds to the shorter name of its pair, by its
+    document's id, for the ones that add anything."""
+    by_folder = {}
+    for doc_id, (path, _rec) in files.items():
+        by_folder.setdefault(path.parent, []).append((doc_id, path.stem))
+    out = {}
+    for pair in by_folder.values():
+        plain = min(stem for _id, stem in pair)
+        for doc_id, stem in pair:
+            if stem != plain:
+                assert stem.startswith(plain), (plain, stem)
+                out[doc_id] = stem[len(plain):]
+    return out
+
+
+def test_the_second_of_two_files_of_one_name_is_told_apart_readably(home, monkeypatch):
+    app = taken(home, monkeypatch)
+    endings = second_endings(saved_files(home, app))
+    assert len(endings) == 3, endings
+    for doc_id, ending in endings.items():
+        assert ending == READABLE[doc_id], (doc_id, ending)
+
+
+def test_a_pattern_change_keeps_each_readable_ending(home, monkeypatch):
+    """Rename tells a file apart the way its download did, so a pattern
+    giving both files of a pair one new name gives the second its ending,
+    and a second Rename has nothing left to do."""
+    app = taken(home, monkeypatch)
+    before = second_endings(saved_files(home, app))
+    home.set_pattern(ONE_NAME)
+    said = home.rename("--apply")
+    assert "Renamed 6 file(s)" in said, said[-1500:]
+    after = second_endings(saved_files(home, home.build()))
+    assert after == before, (before, after)
+    said = home.rename()
+    assert NAMED_ALREADY in said, said[-1500:]
+
+
 # -- Anthem's EOBs, which its own download_one saves ---------------------------------
 
 CLAIM = "1234500AA0001"
@@ -226,6 +282,9 @@ def test_an_eob_is_named_as_rename_would_name_it(home, monkeypatch, pattern):
         home.set_pattern(pattern)
     names = [Path(r["pdf_path"]).name for r in eobs_taken(home, monkeypatch)]
     assert len(set(names)) == 2 and not any(n.endswith(" (2).pdf") for n in names), names
+    if not pattern:
+        # Anthem's own sequence number, where the end of the id said "EOB1".
+        assert sorted(names)[0].endswith(" EOB 1.pdf"), names
     before = sorted(p.name for p in home.files().values())
     said = home.rename()
     assert NAMED_ALREADY in said, said[-1500:]
