@@ -178,8 +178,6 @@ FALLBACK = {
     "page_ready": ("table, [role='row'], [class*='statement'], [class*='document'], "
                    "main, [role='main']"),
     "account_select": "select, [role='combobox'], [role='listbox']",
-    "next_page": ("a[aria-label*='Next' i], button[aria-label*='Next' i], "
-                  ".pagination-next, [class*='next']"),
     "show_more": "button, a",
 }
 
@@ -841,54 +839,78 @@ def _normalize_api_statement(s: dict, labels: Optional[dict] = None) -> Optional
             "ambiguous": False}
 
 
-# How long the statements page may take to draw once the collector loads it
-# again, and how long its list may take to arrive.
+# How long the statements page may take to draw once the collector has it
+# drawn again, and how long its list may take to arrive.
 DRAW_WAIT_S = 12
 ANSWER_WAIT_S = 30
 
 
-def _drawn_within(page) -> bool:
-    """statements_page_drawn, given the page a few seconds to draw. A page
-    that signs the person out is not waited on."""
+def _statements_call(url: str) -> bool:
+    """A call for the list of statements. The Tax Forms tab asks the same
+    endpoint for its forms, and that call is not one."""
+    url = url or ""
+    return bool(STATEMENTS_API_RE.search(url)) and "tax" not in url.lower()
+
+
+def _drawn_or_heard(page, heard: list) -> bool:
+    """Whether the statements page drew, or its list was heard, given the
+    page DRAW_WAIT_S to draw. A page that signs the person out is not
+    waited on."""
     deadline = time.monotonic() + DRAW_WAIT_S
     while True:
-        if statements_page_drawn(page):
+        if heard or statements_page_drawn(page):
             return True
         if looks_signed_out(page) or time.monotonic() >= deadline:
             return False
         page.wait_for_timeout(500)
 
 
-def _answered_within(page, answers: list) -> bool:
-    """Whether an answer to the statements list has come, given it
-    ANSWER_WAIT_S to come. A page that signs the person out is not waited
-    on."""
-    deadline = time.monotonic() + ANSWER_WAIT_S
-    while not answers:
+def _settled_within(page, heard: list, asking: set, seconds: float) -> bool:
+    """Whether a list was heard, given `seconds` for one to come and for
+    every call still being answered to finish. The last pick's answer can
+    still be on its way when the walk ends, and for a year the page was
+    left showing it is the only one. A page that signs the person out is
+    not waited on."""
+    deadline = time.monotonic() + seconds
+    while not heard or asking:
         if looks_signed_out(page) or time.monotonic() >= deadline:
-            return False
+            break
         page.wait_for_timeout(500)
-    return True
+    return bool(heard)
 
 
-def _load_again(page) -> None:
-    """Load the statements page again, so the list it asks for as it opens
-    is asked for while the collector listens. A load that draws some other
-    page, as the dashboard an address can land on, is followed by the
-    SPA's own navigation to the statements page, as goto_documents does."""
-    log.info("loading the statements page again to hear its list")
+def _draw_list_again(page, heard: list, asking: set) -> None:
+    """Have the statements list drawn anew while the collector listens, so
+    the page asks for the year it shows.
+
+    Inside the page first. The Tax Forms tab is opened and the statements
+    page reached again the way goto_documents reaches it, by the page's own
+    navigation, which leaves the session as it is. Only when that brings
+    no list is the statements address loaded, since the notes above
+    ensure_statements warn that a hard load could sign out a session the
+    page holds in memory. That has not been seen, and a sign-in page stops
+    the run and says so. A load that draws some other page, as the
+    dashboard an address can land on, is followed by the page's own
+    navigation again."""
+    if click_tax_tab(page):
+        ensure_statements(page)
+        if _drawn_or_heard(page, heard) and _settled_within(page, heard, asking, DRAW_WAIT_S):
+            return
+    if heard or looks_signed_out(page):
+        return
+    log.info("loading the statements address again to hear its list")
     try:
-        page.reload(wait_until="domcontentloaded", timeout=60000)
+        page.goto(URLS["documents"], wait_until="domcontentloaded", timeout=60000)
     except Exception as e:
-        log.info("the statements page did not load again: %s", str(e).splitlines()[0][:90])
+        log.info("the statements address did not load: %s", str(e).splitlines()[0][:90])
     dismiss_timeout(page)
-    if not _drawn_within(page) and not looks_signed_out(page):
+    if not _drawn_or_heard(page, heard) and not looks_signed_out(page):
         ensure_statements(page)
 
 
 def ally_collect_via_api(page, labels: Optional[dict] = None) -> Optional[List[dict]]:
     """Every statement Ally still has, read from its own JSON API, or None
-    when no list arrived.
+    when no whole list arrived.
 
     The page asks for one year's list as it opens, and again whenever the
     year its picker shows changes, so the year picker is walked and every
@@ -900,52 +922,71 @@ def ally_collect_via_api(page, labels: Optional[dict] = None) -> Optional[List[d
     year asked for nothing at all, and a page left on its oldest year never
     asked for that year, and either way the list was called read. So the
     oldest year is picked again at the end, which makes every pick move the
-    picker, and with one year or none to pick, the page is loaded again
-    while this listens. An answer with no statement in it is an empty list.
-    No answer at all is not, and returns None.
+    picker, and with one year or none to pick, the list is drawn again
+    while this listens (_draw_list_again). An answer with no statement in
+    it is an empty list. No answer at all is not, and returns None, and so
+    does a picker of one year or none found past a dropdown that could not
+    be read, since the years past it are not known to be none.
     """
     captured: List[dict] = []
-    answers: List[str] = []
+    heard: List[str] = []
+    asking: set = set()
+
+    def on_request(req):
+        if _statements_call(req.url):
+            asking.add(req)
+
+    def on_failed(req):
+        asking.discard(req)
 
     def on_resp(r):
         try:
-            if not STATEMENTS_API_RE.search(r.url):
+            if not _statements_call(r.url):
                 return
             if "json" not in (r.headers.get("content-type", "") or "").lower():
                 return
             data = json.loads(r.text())
             items = data.get("statements") if isinstance(data, dict) else None
             if isinstance(items, list):
-                answers.append(r.url)
+                heard.append(r.url)
                 captured.extend(items)
                 log.info("captured %d statements from %s", len(items), r.url)
         except Exception as e:
             log.info("could not read statements response: %s", e)
+        finally:
+            asking.discard(r.request)
 
-    page.on("response", on_resp)
+    listeners = (("request", on_request), ("response", on_resp), ("requestfailed", on_failed))
+    for event, handler in listeners:
+        page.on(event, handler)
     try:
         if not ensure_statements(page):
             log.info("statements page not reachable for the API read")
         page.wait_for_timeout(2500)
 
-        sel, years = year_select(page)
+        sel, years, unread = _year_picker(page)
+        if unread and len(years) < 2:
+            log.warning("a dropdown could not be read, so other years' statements "
+                        "are not known to be none")
+            return None
         if sel is not None and len(years) > 1:
             ordered = sorted(years)                         # oldest .. newest
             for y in ordered + ordered[:1]:
                 if _select_option(page, sel, y):
                     page.wait_for_timeout(1200)
-        elif not answers:
+        elif not heard:
             if not years:
-                log.info("no year picker found; reading the default view only")
-            _load_again(page)
-        if not _answered_within(page, answers):
+                log.info("no year picker found, so the year shown is the list")
+            _draw_list_again(page, heard, asking)
+        if not _settled_within(page, heard, asking, ANSWER_WAIT_S):
             log.warning("no list of statements arrived within %d s", ANSWER_WAIT_S)
             return None
     finally:
-        try:
-            page.remove_listener("response", on_resp)
-        except Exception:
-            pass
+        for event, handler in listeners:
+            try:
+                page.remove_listener(event, handler)
+            except Exception:
+                pass
 
     out, seen = [], set()
     for s in captured:

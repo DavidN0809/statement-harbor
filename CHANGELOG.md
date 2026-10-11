@@ -19,10 +19,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   with the page left on its oldest year it never heard that year. Either
   way the list was called read. With nothing heard it read the rows
   instead, which took the statements of one date that read alike as one
-  and kept no document id. Every year is now picked from another one, with
-  one year the page is loaded again while the app listens, and a list that
-  never arrives stops the run rather than pass for an empty one. Proven
-  against a made-up page, not yet run against Ally.
+  and kept no document id. Every year is now picked from another one, and
+  the last pick's answer is waited for. With one year in the picker the
+  list is drawn again while the app listens, through the page's Tax Forms
+  tab and back, and only when that brings nothing is the statements
+  address loaded again. A list that never arrives, or a year picker that
+  could not be read, stops the run rather than pass for an empty list.
+  Proven against a made-up page, not yet run against Ally.
 - **USAA's Discover could miss most of the list from 0.26.0 on.** USAA's
   documents page asks USAA for its whole list as it loads, and the app
   reads the list from those answers. Since 0.26.0 the app opened the page

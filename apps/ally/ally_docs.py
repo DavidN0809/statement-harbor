@@ -443,9 +443,14 @@ class App:
             self.check_session(page)
             raw = site.ally_collect_via_api(page, labels)
         if raw is None:
-            print("Your Ally statements page opened, and the list of statements")
-            print("it asks Ally for never arrived, so nothing was listed. Try")
-            print("again in a few minutes.")
+            if site.looks_signed_out(page) or site.detect_security_challenge(page):
+                print("Ally asked for a sign-in or a check again while its list of")
+                print("statements loaded, so nothing was listed. Sign in in the")
+                print("browser window, then try again.")
+            else:
+                print("Your Ally statements page opened, and its list of statements")
+                print("did not arrive whole, so nothing was listed. Try again in a")
+                print("few minutes.")
             # A list that was never read stops the run rather than pass for
             # an empty one (paperpull_core.listing).
             raise SystemExit(0)
