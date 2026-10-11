@@ -154,7 +154,7 @@ def _listing(*years):
 def _discover(app, monkeypatch, listing):
     monkeypatch.setattr(site, "document_source_urls", lambda: [(site.TAX_URL, "tax")])
     monkeypatch.setattr(site, "collect_download_docs", lambda page, **kw: list(listing))
-    monkeypatch.setattr(site, "expand_all", lambda page: None)
+    monkeypatch.setattr(site, "expand_all", lambda page: True)
     monkeypatch.setattr(site, "scroll_full_page", lambda page, **kw: None)
     app.cmd_discover(quiet=True)
 

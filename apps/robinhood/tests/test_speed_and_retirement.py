@@ -120,5 +120,70 @@ class Sources(unittest.TestCase):
             self.assertTrue(site.is_safe_url(u), u)
 
 
+# -- View More, pressed to the end of the list or said to be short -------------
+
+class _MorePage:
+    """A list behind a View More link. It takes `presses` presses to reach
+    the end of it, never when None, and a press raises when `covered`."""
+
+    def __init__(self, presses=0, covered=False):
+        self.left, self.covered = presses, covered
+        self.tried, self.timeouts = 0, []
+
+    def bring_to_front(self):
+        pass
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def get_by_role(self, role, name=None):
+        page = self
+
+        class First:
+            def is_visible(self):
+                return True
+
+            def inner_text(self, **kw):
+                return "View More"
+
+            def click(self, **kw):
+                page.tried += 1
+                page.timeouts.append(kw.get("timeout"))
+                if page.covered:
+                    raise TimeoutError("another element would receive the click")
+                if page.left is not None:
+                    page.left -= 1
+
+        class Found:
+            first = First()
+
+            def count(self):
+                return 1 if role == "link" and page.left != 0 else 0
+        return Found()
+
+
+def test_view_more_is_pressed_to_the_end_of_the_list():
+    page = _MorePage(presses=3)
+    assert site.expand_all(page) is True
+    assert page.tried == 3 and page.left == 0
+
+
+def test_a_view_more_that_cannot_be_pressed_says_the_list_is_short():
+    """Pressed once and given up on, never sixty times, and never said to
+    be the end of the list."""
+    page = _MorePage(presses=3, covered=True)
+    assert site.expand_all(page) is False
+    assert page.tried == 1
+    # A press keeps the thirty seconds the context gives it, not the eight
+    # it was cut to.
+    assert all(t is None or t >= 30000 for t in page.timeouts), page.timeouts
+
+
+def test_a_view_more_that_never_ends_says_the_list_is_short():
+    page = _MorePage(presses=None)
+    assert site.expand_all(page) is False
+    assert page.tried == 60
+
+
 if __name__ == "__main__":
     unittest.main()

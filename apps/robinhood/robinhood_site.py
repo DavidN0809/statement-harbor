@@ -339,10 +339,15 @@ def _to_front(page) -> None:
         pass
 
 
-def expand_all(page) -> None:
+def expand_all(page) -> bool:
     """Click 'View More' / 'Show more' repeatedly until the full list loads.
     Robinhood's 'View More' is an <a> link (not a button), so both roles are
-    tried. The tab is brought forward first (_to_front)."""
+    tried. The tab is brought forward first (_to_front).
+
+    True once no such control is left on the page. False when one could not
+    be pressed, or was still there after sixty presses, since the list on
+    the page may then be short, and a caller must not take it for the whole
+    list."""
     _to_front(page)
     pat = re.compile(r"^\s*(show|load|view|see)\s+more\s*$|^\s*view\s+all\s*$|^\s*older\s*$", re.I)
     for _ in range(60):
@@ -354,23 +359,25 @@ def expand_all(page) -> None:
                     label = loc.first.inner_text(timeout=1000) or ""
                     if not FORBIDDEN_CONTROL_RE.search(label):
                         # A press that cannot land, the link under a consent
-                        # layer say, raises after its timeout. It used to be
-                        # swallowed and asked again sixty times, half an hour
-                        # of waiting on one page; now it ends the expanding,
-                        # and the run says what it could not find.
+                        # layer say, raises once its time is up. It used to
+                        # be swallowed, and the expanding ended there with
+                        # the list cut short and nothing said. Now the list
+                        # is said to be short.
                         try:
-                            loc.first.click(timeout=8000)
+                            loc.first.click()
                         except Exception as e:
-                            log.info("View More could not be pressed (%s); the list stays as it is",
-                                     type(e).__name__)
-                            return
+                            log.warning("View More could not be pressed (%s), so the list "
+                                        "may be short", type(e).__name__)
+                            return False
                         page.wait_for_timeout(1600)
                         clicked = True
                         break
             except Exception:
                 continue
         if not clicked:
-            break
+            return True
+    log.warning("View More still showed after sixty presses, so the list may be short")
+    return False
 
 
 def next_page(page) -> bool:

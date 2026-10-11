@@ -641,6 +641,10 @@ class App:
         self._listed_now = set()
         self._individual_listed = set()
         individual_read = False
+        # A page that would not open, or whose View More stopped before the
+        # end of its list, leaves the list short, and a short list is never
+        # noted as whole, or a Resume after it would call the run finished.
+        short = False
         # Robinhood lists documents as click-to-download <a download> links on
         # per-section pages (Individual statements, Crypto statements, Tax
         # center). Scan each page and scrape its download links.
@@ -655,6 +659,9 @@ class App:
                 page.wait_for_timeout(4000)
             except Exception as e:
                 log.info("could not open %s: %s", url, e)
+                self._note(f"The {label} page would not open, so its list was not read. "
+                           "Run again to read it.")
+                short = True
                 continue
             # Signing in again at a console leaves the page on the first
             # documents page, not this section, and its links would be
@@ -670,10 +677,12 @@ class App:
                 self._note(f"The {label} page opened another address and was not read.")
                 continue
             # Robinhood paginates statements behind a "View More" button; click
-            # it (and any lazy-load) until the full list is present.
-            site.expand_all(page)
+            # it (and any lazy-load) until the full list is present. What a
+            # page shows when its View More stopped early is read and kept,
+            # and the list is not called whole.
+            whole = site.expand_all(page)
             site.scroll_full_page(page, rounds=6)
-            site.expand_all(page)
+            whole = site.expand_all(page) and whole
             if account and not site.at_address(page.url, url):
                 self._note(f"The {label} page moved to another address and was not read.")
                 continue
@@ -684,6 +693,11 @@ class App:
             self.discovery.save()
             log.info("%s (%s): %d download links, %d new", label, url,
                      len(docs), n_new - before)
+            if not whole:
+                self._note(f"The {label} page's View More stopped before the end of "
+                           "its list, so older documents on it may not have been "
+                           "listed. Run again to read the rest.")
+                short = True
             if url == site.STATEMENT_URLS[0]:
                 individual_read = True
             self._delay(0.4)
@@ -704,9 +718,11 @@ class App:
         if moved:
             print(f"  {moved} tax form(s) saved without a date now have the date "
                   "their page shows. Rename gives their files that date.")
-        # The whole list is in, and only now may a Resume that carries on
-        # from it call the run finished (paperpull_core.listing).
-        listing.read_whole(self)
+        # The whole list is in, unless a page would not open or stopped
+        # short, and only then may a Resume that carries on from it call the
+        # run finished (paperpull_core.listing).
+        if not short:
+            listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
         if not quiet:

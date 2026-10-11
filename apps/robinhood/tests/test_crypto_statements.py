@@ -32,6 +32,7 @@ import storage  # noqa: E402  binds this provider's AppSpec
 import robinhood_docs  # noqa: E402
 import robinhood_site as site  # noqa: E402
 from paperpull_core import doc_types  # noqa: E402
+from paperpull_core import listing  # noqa: E402
 from paperpull_core import storage as core_storage  # noqa: E402
 
 INDIVIDUAL = "https://robinhood.com/account/reports-statements/individual"
@@ -189,7 +190,9 @@ class _Tab:
         pass
 
 
-def _run(tmp_path, monkeypatch, listings, **tab):
+def _run(tmp_path, monkeypatch, listings, stops=(), **tab):
+    """Discover over made-up pages. `stops` are the pages whose View More
+    stops before the end of their list."""
     app = _app(tmp_path)
     app.config.update(delay_min_seconds=0, delay_max_seconds=0)
     app.stats = {"mode": "all", "started": "", "ended": "", "discovered": 0,
@@ -203,7 +206,7 @@ def _run(tmp_path, monkeypatch, listings, **tab):
     app.check_session = lambda page: False
     monkeypatch.setattr(site, "collect_download_docs", lambda page, **kw: [
         site.RawDoc(title=t, date_text=d, text=t) for t, d in listings.get(page.url, [])])
-    monkeypatch.setattr(site, "expand_all", lambda page: None)
+    monkeypatch.setattr(site, "expand_all", lambda page: page.url not in stops)
     monkeypatch.setattr(site, "scroll_full_page", lambda page, **kw: None)
     app.cmd_discover(quiet=True)
     return app
@@ -233,3 +236,30 @@ def test_the_crypto_page_waits_for_the_individual_one(tmp_path, monkeypatch):
                broken=(INDIVIDUAL,))
     assert _docs(app) == {}
     assert any("were not read in this run" in n for n in app.stats["notes"])
+
+
+# -- a list cut short is never called whole -------------------------------------
+
+def test_a_list_read_to_its_end_is_noted_whole(tmp_path, monkeypatch):
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2022-01-31")]})
+    assert listing.last(app) == listing.COMPLETE
+
+
+def test_a_page_that_would_not_open_leaves_the_list_short(tmp_path, monkeypatch):
+    """The tax page went unread, and a Resume after it called the run
+    finished all the same."""
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2022-01-31")]},
+               broken=(TAX,))
+    assert [d.account for d in _docs(app).values()] == [""], "what was read is kept"
+    assert any("tax page would not open" in n for n in app.stats["notes"])
+    assert listing.last(app) == listing.STOPPED
+
+
+def test_a_view_more_that_stopped_leaves_the_list_short(tmp_path, monkeypatch):
+    """What the page showed is kept, and the older statements behind the
+    View More that could not be pressed are not taken as not there."""
+    app = _run(tmp_path, monkeypatch, {INDIVIDUAL: [(TITLE, "2022-01-31")]},
+               stops=(INDIVIDUAL,))
+    assert [d.account for d in _docs(app).values()] == [""], "what showed is kept"
+    assert any("statements page's View More stopped" in n for n in app.stats["notes"])
+    assert listing.last(app) == listing.STOPPED
