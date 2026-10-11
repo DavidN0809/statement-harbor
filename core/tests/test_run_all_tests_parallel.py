@@ -179,11 +179,11 @@ def test_side_by_side_the_longest_start_first():
 def test_the_parts_cover_every_suite_once_and_finish_close_together():
     times = rat.load_times(REPO / "tools" / "suite_times.json")
     names = sorted(times) + ["a_new_app"]
-    parts = [rat.shard_of(names, times, k, 4) for k in range(1, 5)]
+    parts = [rat.shard_of(names, times, k, 6) for k in range(1, 7)]
     assert sorted(n for p in parts for n in p) == sorted(names)
-    assert parts == [rat.shard_of(names, times, k, 4) for k in range(1, 5)], "not the same parts twice"
+    assert parts == [rat.shard_of(names, times, k, 6) for k in range(1, 7)], "not the same parts twice"
     loads = [sum(rat.expected(n, times) for n in p) for p in parts]
-    assert max(loads) <= sum(loads) / 4 + max(times.values())
+    assert max(loads) <= sum(loads) / 6 + max(times.values())
 
 
 def test_a_part_runs_only_its_own_suites(fake_run, tmp_path, monkeypatch, capsys):

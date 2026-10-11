@@ -8,11 +8,18 @@
 # It runs on a push to main, on a pull request, and on a version tag, so the
 # packaging workflows and this one both answer for the same commit.
 #
-# The suites are split into four parts that run on four runners at once.
+# The suites are split into six parts that run on six runners at once.
 # On one runner the suite grew from 37 minutes on 2026-09-27 to 82 by
 # 2026-10-03, and twice a run that passed every test was cut off by the job
 # limit and ended CANCELLED. Each part is balanced by tools/suite_times.json,
-# and the job named "tests" answers for all four, as the single job did.
+# and the job named "tests" answers for all six, as the single job did.
+#
+# There were four parts until 2026-10-11. By then the suites took about
+# 8,500 s on CI, so even an even split of four was 35 minutes of tests a
+# part and 39 with setup, and a slow runner took core's part past the limit
+# (69d43fa8, cancelled at 45 minutes with nothing failed). Six parts plan
+# at about 24 minutes of tests each, so a part has room for a runner half
+# again as slow, and for the suites to grow.
 #
 # The runner's own tests also run on Linux and macOS, and "tests" answers
 # for them too. The parts run on Windows, where the runner's POSIX branches
@@ -35,15 +42,15 @@ permissions:
 
 jobs:
   part:
-    name: tests part ${{ matrix.part }} of 4
+    name: tests part ${{ matrix.part }} of 6
     runs-on: windows-latest
     # A guard against a run that hangs, not a budget. A part takes about a
-    # quarter of the whole.
+    # sixth of the whole.
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4]
+        part: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v4
 
@@ -71,7 +78,7 @@ jobs:
         # opens with a click. The log is all there is of a CI run, and a
         # failure that does not come back on a rerun has to be explained
         # from it.
-        run: python tools/run_all_tests.py --shard ${{ matrix.part }}/4 --jobs 1
+        run: python tools/run_all_tests.py --shard ${{ matrix.part }}/6 --jobs 1
 
   posix:
     name: the runner on ${{ matrix.system }}
