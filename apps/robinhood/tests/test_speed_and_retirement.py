@@ -71,7 +71,7 @@ class FindControl(unittest.TestCase):
         hit = {"own": "Download PDF", "hasDl": False}
         self.assertIsNone(site.find_control(FakePage(hit, verify=False), "Form 1099"), "the live element no longer matches")
         self.assertIsNone(site.find_control(FakePage(hit, marked=0), "Form 1099"), "a re-render dropped the mark")
-        self.assertIsNone(site.find_control(FakePage(hit, marked=2), "Form 1099"), "two marks: nothing is pressed")
+        self.assertIsNone(site.find_control(FakePage(hit, marked=2), "Form 1099"), "two marks, so nothing is pressed")
         self.assertIsNone(site.find_control(FakePage(hit), ""))
 
     def test_year_is_passed_to_the_page(self):

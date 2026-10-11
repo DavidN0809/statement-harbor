@@ -142,9 +142,9 @@ def migrate_legacy_keys(records: dict) -> int:
 
 
 def source_rank(source_url: str) -> int:
-    """The order documents are taken in, by the page they are on: the
-    statements pages in the order the site layer lists them, the tax page
-    last, and a document without a page after everything."""
+    """The order documents are taken in, by the page they are on. The
+    statements pages come in the order the site layer lists them, the tax
+    page last, and a document without a page after everything."""
     pages = list(site.STATEMENT_URLS) + [site.TAX_URL]
     return pages.index(source_url) if source_url in pages else len(pages)
 
@@ -160,9 +160,11 @@ def date_desc_key(date: str) -> str:
 
 def is_crypto_duplicate(source_url: str, key, individual_listed) -> bool:
     """Whether a document the crypto page lists is one the individual page
-    listed in this run, title and date alike (#62). The crypto page alone:
-    the retirement page lists its own statements, which can share a title
-    and a date with the individual account's and are that account's own."""
+    listed in this run, title and date alike (#62). The crypto page alone,
+    since the retirement page lists its own statements, which can share a
+    title and a date with the individual account's and are that account's
+    own. It is told apart by its own heading instead (site.names_account),
+    and a file that is the individual one is refused once saved."""
     return (site.account_for(source_url) == "Crypto"
             and individual_listed is not None and key in individual_listed)
 
@@ -668,13 +670,17 @@ class App:
         # noted as whole, or a Resume after it would call the run finished.
         short = False
         # Robinhood lists documents as click-to-download <a download> links on
-        # per-section pages (Individual statements, Crypto statements, Tax
-        # center). Scan each page and scrape its download links.
+        # per-section pages (Individual, Retirement and Crypto statements, and
+        # the Tax center). Scan each page and scrape its download links. An
+        # account page is read after the individual one, since the crypto
+        # page is checked against its list and a retirement statement against
+        # its saved files.
         for url, label in site.document_source_urls():
             account = site.account_for(url)
             if account and not individual_read:
                 self._note(f"The {label} page was not read, because the individual "
-                           "statements it is checked against were not read in this run.")
+                           "statements, which it is told apart from, were not read "
+                           "in this run.")
                 continue
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=60000)
@@ -795,14 +801,14 @@ class App:
         docs = [d for d in docs if self._in_scope(d)]
         limit = limit if limit is not None else self.args.max_docs
         if limit or not grouped:
-            # A few, the pilot's or --max-docs N: the newest across every
+            # A few, the pilot's or --max-docs N, are the newest across every
             # page, as documented, so a few see more than one account's page.
             # A page's place breaks a tie, so the individual statement of a
             # month is taken before another account's of that month.
             docs.sort(key=lambda d: (date_desc_key(d.date), source_rank(d.source_url)))
         else:
-            # All of them, newest first, but page by page: every document of
-            # the individual page, then the retirement page, then crypto,
+            # All of them go newest first, but page by page, every document
+            # of the individual page, then the retirement page, then crypto,
             # then tax. Sorted by date alone, December's individual,
             # retirement and crypto statements came one after another, so
             # each document opened and expanded a different page than the

@@ -583,10 +583,11 @@ def download_by_url(page, url: str, out_path) -> bool:
 # does got none of them (#62). The page was on this list before and is read
 # the same way as the individual one, under the same guards.
 #
-# The Retirement page (IRA statements) was likewise missing: the hub at
+# The Retirement page (IRA statements) was likewise missing. The hub at
 # /account/reports-statements lists Individual, Retirement, Crypto and Tax,
 # and an account with an IRA got none of its statements (seen 2026-10-09,
-# ten download links on the page before View More).
+# ten download links on the page before View More). It is read only when it
+# names a retirement account of its own (names_account).
 STATEMENT_PAGES = [
     (f"{BASE}/account/reports-statements/individual", ""),
     (f"{BASE}/account/reports-statements/retirement", "Retirement"),
@@ -900,10 +901,6 @@ _COLLECT_JS = r"""(readYears) => {""" + _PAGE_JS_LIB + r"""
   return out;
 }"""
 
-_YEAR_OF_JS = r"""el => {""" + _PAGE_JS_LIB + r"""
-  return taxYearOf(el);
-}"""
-
 TAX_TITLE_RE = re.compile(r"\b(1099|1042-?S|5498)\b", re.I)
 
 
@@ -976,7 +973,6 @@ def collect_download_docs(page, tax_page: bool = False) -> Listed:
     return Listed([d for d in docs if d.date_text or d.title not in dated], repeated)
 
 
-_CONTROLS_SEL = "a[download], a, button, [role='button']"
 _PICK_ATTR = "data-paperpull-pick"
 
 # Whether a control is the one for the title. Its own label says the title,
@@ -1022,8 +1018,9 @@ _FIND_CONTROL_JS = r"""([needle, year, token, attr]) => {""" + _PAGE_JS_LIB + _S
   return null;
 }"""
 
-# Run on the marked element just before it is pressed: the same predicate the
-# pass applied, read again from the live page. False means the page changed.
+# Run on the marked element just before it is pressed, the same predicate
+# the pass applied, read again from the live page. False means the page
+# changed.
 _VERIFY_CONTROL_JS = r"""(el, [needle, year, own]) => {""" + _PAGE_JS_LIB + _SAYS_TITLE_JS + r"""
   const now = ((el.innerText || '') + ' ' + (el.getAttribute('aria-label') || '')).trim();
   if (now.replace(/\s+/g, ' ') !== own.replace(/\s+/g, ' ')) return false;
@@ -1043,10 +1040,10 @@ def _squash(text: str) -> str:
 def find_control(page, title: str, year: str = ""):
     """The download control for `title`, or None. Found in one pass in the
     page and marked there, then checked here against the guard with its
-    whole label: never a forbidden label unless the control is a plain
-    download link, never a CSV. Located again by its mark, and the whole
-    predicate is read once more from the live element right before it is
-    handed back, so a page that changed in between presses nothing."""
+    whole label, never a forbidden label unless the control is a plain
+    download link, and never a CSV. Located again by its mark, and the
+    whole predicate is read once more from the live element right before
+    it is handed back, so a page that changed in between presses nothing."""
     import secrets
     needle = _squash(title)[:30]
     if not needle:
@@ -1070,10 +1067,11 @@ def find_control(page, title: str, year: str = ""):
     try:
         if el.count() != 1:
             return None
-        # The node itself, not a locator: a locator is resolved again at the
+        # The node itself, not a locator. A locator is resolved again at the
         # press, and a page that re-rendered in between could put another
-        # node under the same mark. A handle is bound to this one node; if
-        # the page replaces it, the press fails instead of landing elsewhere.
+        # node under the same mark. A handle is bound to this one node, and
+        # if the page replaces it the press fails instead of landing
+        # elsewhere.
         handle = el.first.element_handle(timeout=5000)
         if handle is None:
             return None
@@ -1104,8 +1102,8 @@ def challenge_text(page) -> Optional[str]:
         body = page.locator("body").inner_text(timeout=5000).lower()
     except Exception:
         body = ""
-    # The whole body, not its first lines: a prompt over a long list of
-    # statements comes after the list in the page's text.
+    # The whole body, not its first lines, since a prompt over a long list
+    # of statements comes after the list in the page's text.
     hay = title + "\n" + body
     for m in SECURITY_CHALLENGE_MARKERS:
         if m in hay:
