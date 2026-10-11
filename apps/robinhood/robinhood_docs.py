@@ -404,19 +404,22 @@ class App:
 
     # -- session safety ----------------------------------------------------
 
-    def check_session(self, page) -> bool:
+    def check_session(self, page, challenge: Optional[str] = None) -> bool:
         """Raise/pause on sign-out or security challenges.
 
         True when the person was asked to sign in again and the page was
         left on the documents page, so a caller that had opened something
         else has to open it again before it reads anything. False
-        otherwise."""
+        otherwise.
+
+        `challenge` is a prompt the caller found on the page itself, which
+        is asked about, or stops the run, as one found here is."""
         # Both of these used to wait at a prompt. Under the panel there is
         # nobody to answer, and waiting there took the run down with an
         # end-of-file rather than saying what had happened, so when there
         # is no console the run stops on its own terms and says what to do
         # about it. Progress is already saved either way (#48).
-        challenge = site.detect_security_challenge(page)
+        challenge = challenge or site.detect_security_challenge(page)
         if challenge:
             self.progress.save(backup=True)
             print(f"\n!! {challenge}")
@@ -988,37 +991,44 @@ class App:
         # Go to the section page that holds this document's download link, then
         # click the link matching its title.
         source = doc.source_url or site.STATEMENT_URLS[0]
+        year = getattr(doc, "tax_year", "") or ""
         # The page this document is on, already open and expanded by the
         # last download, is left as it is when it still shows this
         # document's control. Opening and expanding it again for every one
         # of a hundred documents was a quarter of a minute each.
-        year = getattr(doc, "tax_year", "") or ""
-        if not asked and site.at_address(page.url or "", source) \
-                and not site.looks_signed_out(page) and site.challenge_text(page) is None \
-                and site.has_control(page, doc.title, year):
-            pass
-        else:
-          try:
-            page.goto(source, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(3000)
-            # Signing in again at a console leaves the page on the first
-            # documents page, and this document was looked for by its title
-            # there. So its own section is opened again for as long as the
-            # check had to ask.
-            while self.check_session(page):
+        kept = not asked and site.at_address(page.url or "", source)
+        if kept:
+            # The check above trusts a page that shows rows, and a prompt can
+            # land over the rows of a page kept open. One found anywhere in
+            # its text stops the run as the check's own would, rather than
+            # only open the page again and press on under it.
+            prompt = site.challenge_text(page)
+            if prompt:
+                self.check_session(page, challenge=prompt)
+                kept = False
+        kept = kept and not site.looks_signed_out(page) and site.has_control(page, doc.title, year)
+        if not kept:
+            try:
                 page.goto(source, wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(3000)
-            site.to_front(page)
-            # Older statements are hidden behind "View More" pagination, so the
-            # list must be fully expanded before the control can be found. An
-            # account page that opened another address is not pressed on at
-            # all, and the document is refused below.
-            if not site.account_for(source) or site.at_address(page.url or "", source):
-                site.expand_all(page)
-                site.scroll_full_page(page, rounds=6)
-                site.expand_all(page)
-          except Exception as e:
-            log.info("could not open source page %s: %s", source, e)
+                # Signing in again at a console leaves the page on the first
+                # documents page, and this document was looked for by its
+                # title there. So its own section is opened again for as
+                # long as the check had to ask.
+                while self.check_session(page):
+                    page.goto(source, wait_until="domcontentloaded", timeout=60000)
+                    page.wait_for_timeout(3000)
+                site.to_front(page)
+                # Older statements are hidden behind "View More" pagination,
+                # so the list must be fully expanded before the control can
+                # be found. An account page that opened another address is
+                # not pressed on at all, and the document is refused below.
+                if not site.account_for(source) or site.at_address(page.url or "", source):
+                    site.expand_all(page)
+                    site.scroll_full_page(page, rounds=6)
+                    site.expand_all(page)
+            except Exception as e:
+                log.info("could not open source page %s: %s", source, e)
         # An account page is pressed on only at its own address, and the
         # retirement page only while it names a retirement account of its
         # own. Anywhere else the statement of this title is another

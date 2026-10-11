@@ -336,6 +336,43 @@ def test_the_tab_is_brought_forward_once_for_each_page_it_opens(tmp_path, monkey
     assert page.fronted == 1
 
 
+def _prompt_over_the_rows(app, monkeypatch, answer):
+    """A page kept open, still showing the statement's control, with a
+    prompt over its rows that only its whole text shows. The app's own
+    check runs, with `answer` from the console, None for nobody there."""
+    from paperpull_core import browser as browser_launcher
+    del app.check_session
+    monkeypatch.setattr(site, "has_control", lambda page, title, year="": True)
+    monkeypatch.setattr(site, "detect_security_challenge", lambda page: None)
+    monkeypatch.setattr(site, "challenge_text",
+                        lambda page: "Security challenge detected: 'enter the code'")
+    monkeypatch.setattr(browser_launcher, "ask_or_none", lambda prompt: answer)
+
+
+def test_a_prompt_over_a_kept_page_stops_the_run(tmp_path, monkeypatch):
+    """The check trusts a page that shows rows, and the prompt only sent
+    the page to be opened again, after which the check trusted the rows
+    once more and the press went ahead."""
+    app = _app(tmp_path)
+    pressed = _presses(monkeypatch)
+    _prompt_over_the_rows(app, monkeypatch, answer=None)
+    page = _Tab(url=INDIVIDUAL)
+    with pytest.raises(SystemExit) as stopped:
+        _take(app, page, _statement())
+    assert stopped.value.code == 0
+    assert pressed == [] and page.opened == []
+
+
+def test_a_prompt_answered_at_the_console_opens_the_page_again(tmp_path, monkeypatch):
+    app = _app(tmp_path)
+    pressed = _presses(monkeypatch)
+    _prompt_over_the_rows(app, monkeypatch, answer="")
+    page = _Tab(url=INDIVIDUAL)
+    rec = _take(app, page, _statement())
+    assert page.opened == [INDIVIDUAL] and pressed == [INDIVIDUAL]
+    assert rec["downloaded_ok"]
+
+
 # -- a retirement statement is the retirement account's own ------------------
 
 def test_a_retirement_statement_is_not_pressed_on_another_address(tmp_path, monkeypatch):
