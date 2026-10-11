@@ -193,7 +193,7 @@ def twins(record, existing, fields=("title", "date")) -> int:
 
 
 def told_apart(rows, existing=None, fields=("title", "date"), id_field="document_id",
-               kind_field=None, saved=None):
+               saved=None):
     """Number the rows as stable_occurrences does, the provider's id first,
     and say of each row whether its number surely names that document.
 
@@ -206,10 +206,16 @@ def told_apart(rows, existing=None, fields=("title", "date"), id_field="document
     So a row the provider lists under the id a record keeps takes that
     record's number. A record answers first to the id it was saved under,
     from `saved` (the app's progress), and then to the one in `existing`
-    (discovery), which a listing that surely named it wrote. When ids come back for a kind of document
-    (`kind_field`), a row no record answers to is a new document. It takes
-    the number of a record alike that was never saved, or else a number no
-    record alike holds.
+    (discovery), which a listing that surely named it wrote.
+
+    When a row answered by its id, the ids of the documents alike to it
+    came back, so a row alike that no record answers to is a new document.
+    It takes the number of a record alike that was never saved, or else a
+    number no record alike holds. Only a row alike says so. A document of
+    another day answering by an id this session gave it says nothing of the
+    ids documents alike were saved under in another session. So a document
+    listed in place of one saved, with nothing alike beside it, is taken for
+    the saved one, as stable_occurrences took it.
 
     The rest are numbered by place as stable_occurrences numbers them, which
     is sure when no record alike is left over, when none left over was
@@ -233,9 +239,6 @@ def told_apart(rows, existing=None, fields=("title", "date"), id_field="document
 
     def listed_id(key):
         return _tidy(records[key].get(id_field))
-
-    def kind_of(row):
-        return _tidy(row.get(kind_field)) if kind_field else ""
 
     alike = {}
     for key, record in records.items():
@@ -262,13 +265,14 @@ def told_apart(rows, existing=None, fields=("title", "date"), id_field="document
                 matched.add(key)
                 out[i] = occurrence
                 break
-    lasting = {kind_of(rows[i]) for i in range(len(rows)) if out[i] is not None}
+    answered = {_what_it_is(rows[i], fields) for i in range(len(rows))
+                if out[i] is not None}
 
     rest = [i for i in range(len(rows)) if out[i] is None]
     left = {what: [key for key in keys if key not in matched]
             for what, keys in alike.items()}
     new = [i for i in rest if left.get(_what_it_is(rows[i], fields))
-           and kind_of(rows[i]) in lasting]
+           and _what_it_is(rows[i], fields) in answered]
     placed = [i for i in rest if i not in new]
     news = {_what_it_is(rows[i], fields) for i in new}
     unmatched = {key: records[key] for key in records if key not in matched

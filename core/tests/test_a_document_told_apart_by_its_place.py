@@ -349,17 +349,47 @@ def test_an_id_kept_for_a_document_is_never_another_documents(home):
 
 
 @each_app
-def test_a_document_listed_in_place_of_one_saved_is_downloaded_when_ids_last(home):
+def test_a_new_document_beside_one_saved_is_downloaded_while_another_is_no_longer_listed(home):
+    """Two alike saved. The list then gives the first again and a new one,
+    and no longer the second. The first answering by its id says these ids
+    last, so the new one is a document of its own and not the second."""
+    home.provider.ids = ["ST0001", "ST0002"]
+    home.run_all()
+    home.provider.ids = ["ST0001", "ST0003"]
+    home.run_all()
+    assert home.on_disk() == ["ST0001", "ST0002", "ST0003"], home.held()
+
+
+@each_app
+def test_a_new_document_beside_one_saved_is_downloaded_later_in_its_session(home):
+    """Ids that change each session. The session's first run gave the
+    statement saved last session this session's id, and a second statement
+    alike is listed beside it later that session."""
+    home.provider.lasting = False
+    home.provider.ids = ["ST0001"]
+    home.run_all()
+
+    home.provider.new_session()
+    home.run_all()
+    home.provider.ids = ["ST0002", "ST0001"]
+    home.run_all()
+    assert home.on_disk() == ["ST0001", "ST0002"], home.held()
+    assert home.left_for_a_person() == {}
+
+
+@each_app
+def test_a_document_listed_in_place_of_one_saved_is_taken_for_it_as_before(home):
     """A corrected statement listed instead of the one saved, on its day and
-    under its title. The ids of the other days' documents came back, which
-    says this provider's ids last, so an id no record keeps is a document
-    of its own."""
+    under its title, with nothing alike beside it. That the other days'
+    documents answered by their ids says nothing of this one's, so it is
+    taken for the one saved, as before, and nothing is downloaded twice."""
     home.provider.days = {"ST0009": "2026-08-12"}
     home.provider.ids = ["ST0009", "ST0001"]
     home.run_all()
     home.provider.ids = ["ST0009", "ST0002"]
     home.run_all()
-    assert home.on_disk() == ["ST0001", "ST0002", "ST0009"], home.held()
+    assert home.on_disk() == ["ST0001", "ST0009"], home.held()
+    assert home.left_for_a_person() == {}
 
 
 @each_app
@@ -506,6 +536,41 @@ def test_a_second_run_in_one_session_takes_nothing_again_when_ids_do_not_last(ho
 
 
 @each_app
+def test_two_alike_saved_before_are_not_taken_again_by_a_second_run_in_one_session(home):
+    """The first run of a session gave the lone statement of another day this
+    session's id. That it then answered by that id in the second run says
+    nothing of the ids the two alike were saved under last session."""
+    home.provider.lasting = False
+    home.provider.days = {"ST0009": "2026-08-12"}
+    home.provider.ids = ["ST0001", "ST0002", "ST0009"]
+    home.run_all()
+    assert home.on_disk() == ["ST0001", "ST0002", "ST0009"]
+
+    for _ in range(2):
+        home.provider.new_session()
+        home.run_all()
+        home.run_all()
+    assert home.on_disk() == ["ST0001", "ST0002", "ST0009"], home.held()
+
+
+@each_app
+def test_one_of_two_alike_failed_is_never_taken_as_the_other_by_a_second_run(home):
+    home.provider.lasting = False
+    home.provider.days = {"ST0009": "2026-08-12"}
+    home.provider.ids = ["ST0001", "ST0002", "ST0009"]
+    home.provider.refused = {"ST0002"}
+    home.run_all()
+    home.provider.refused = set()
+
+    home.provider.new_session()
+    home.provider.ids = ["ST0002", "ST0001", "ST0009"]
+    home.run_all()
+    home.run_all()
+    saved = home.on_disk()
+    assert len(set(saved)) == len(saved), home.held()
+
+
+@each_app
 def test_two_documents_are_each_taken_once_when_each_list_gives_new_ids(home):
     """Ids that change on every list the provider gives, and an id from an
     earlier list refused. Two alike, listed for the first time, were taken
@@ -581,5 +646,5 @@ def test_with_no_id_kept_the_numbers_are_those_an_archive_already_has():
     ]
     for rows, existing in cases:
         got = [occurrence for occurrence, _sure in told_apart(
-            rows, existing, fields=fields, kind_field="doc_type")]
+            rows, existing, fields=fields)]
         assert got == stable_occurrences(rows, existing, fields=fields), (rows, existing)

@@ -428,8 +428,7 @@ class App:
         self._placed = {}
         alike = ("doc_type", "title", "date")
         for d, (occ, sure), place in zip(raw, _told_apart(
-                raw, self.discovery.data, fields=alike,
-                kind_field="doc_type", saved=self.progress.data),
+                raw, self.discovery.data, fields=alike, saved=self.progress.data),
                 _places(raw, fields=alike)):
             d["occurrence"] = occ
             d["place"] = place
