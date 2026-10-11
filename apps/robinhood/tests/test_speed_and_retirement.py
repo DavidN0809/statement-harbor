@@ -20,6 +20,8 @@ from paperpull_core.models import State  # noqa: E402
 
 INDIVIDUAL = "https://robinhood.com/account/reports-statements/individual"
 RETIREMENT = "https://robinhood.com/account/reports-statements/retirement"
+CRYPTO = "https://robinhood.com/account/reports-statements/crypto"
+TAX = "https://robinhood.com/account/reports-statements/tax"
 
 
 @pytest.fixture(autouse=True)
@@ -334,6 +336,25 @@ def test_the_tab_is_brought_forward_once_for_each_page_it_opens(tmp_path, monkey
     _take(app, page, _statement())
     assert page.opened == [INDIVIDUAL] and pressed == [INDIVIDUAL, INDIVIDUAL]
     assert page.fronted == 1
+
+
+def _listed(app, *items):
+    """Each (page, date) in discovery as a statement that page listed."""
+    for source, date in items:
+        doc = _statement("Statement of %s" % date, date, source=source,
+                         account=site.account_for(source))
+        app.discovery.update(doc.key, doc.to_dict())
+
+
+def test_max_docs_takes_the_newest_across_every_page(tmp_path):
+    """--max-docs N in Run All took N statements of the individual page
+    first, once a run took its documents page by page."""
+    app = _app(tmp_path)
+    _listed(app, (INDIVIDUAL, "2026-02-28"), (CRYPTO, "2026-03-31"), (INDIVIDUAL, "2026-01-31"),
+            (RETIREMENT, "2026-03-31"), (INDIVIDUAL, "2026-03-31"))
+    app.args.max_docs = 3
+    assert [(d.source_url, d.date) for d in app._select()] == [
+        (INDIVIDUAL, "2026-03-31"), (RETIREMENT, "2026-03-31"), (CRYPTO, "2026-03-31")]
 
 
 def _prompt_over_the_rows(app, monkeypatch, answer):

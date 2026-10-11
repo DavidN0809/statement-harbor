@@ -793,20 +793,22 @@ class App:
     def _select(self, limit: Optional[int] = None, grouped: bool = True) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
         docs = [d for d in docs if self._in_scope(d)]
-        if not grouped:
-            # The pilot's few: the newest across every page, as documented,
-            # so a pilot sees more than one account's page.
-            docs.sort(key=lambda d: date_desc_key(d.date))
-            limit = limit if limit is not None else self.args.max_docs
-            return docs[:limit] if limit else docs
-        # Newest first, but page by page: every document of the individual
-        # page, then the retirement page, then crypto, then tax. Sorted by
-        # date alone, December's individual, retirement and crypto statements
-        # came one after another, so each document opened and expanded a
-        # different page than the one before, and the run paid the open and
-        # the View More presses for every single document.
-        docs.sort(key=lambda d: (source_rank(d.source_url), date_desc_key(d.date)))
         limit = limit if limit is not None else self.args.max_docs
+        if limit or not grouped:
+            # A few, the pilot's or --max-docs N: the newest across every
+            # page, as documented, so a few see more than one account's page.
+            # A page's place breaks a tie, so the individual statement of a
+            # month is taken before another account's of that month.
+            docs.sort(key=lambda d: (date_desc_key(d.date), source_rank(d.source_url)))
+        else:
+            # All of them, newest first, but page by page: every document of
+            # the individual page, then the retirement page, then crypto,
+            # then tax. Sorted by date alone, December's individual,
+            # retirement and crypto statements came one after another, so
+            # each document opened and expanded a different page than the
+            # one before, and the run paid the open and the View More presses
+            # for every single document.
+            docs.sort(key=lambda d: (source_rank(d.source_url), date_desc_key(d.date)))
         return docs[:limit] if limit else docs
 
     def _already_done(self, doc: Document) -> bool:
