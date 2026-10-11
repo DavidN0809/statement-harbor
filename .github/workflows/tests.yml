@@ -70,7 +70,10 @@ jobs:
           python -m pip install ./core
 
       - name: Install the browser the privacy canary needs
-        run: python -m playwright install --with-deps chromium
+        # Without --with-deps. On Windows that installs the Media Foundation
+        # feature, about 3 minutes of every part on 2026-10-11 against 15 s
+        # for the browser itself, and no test plays audio or video.
+        run: python -m playwright install chromium
 
       - name: Run this part of the suites
         # A failing suite prints each failure with every frame of its
