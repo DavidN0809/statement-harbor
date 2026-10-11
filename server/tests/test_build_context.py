@@ -221,6 +221,22 @@ def test_only_the_panel_listens_beyond_the_container_and_only_as_the_server():
     assert [line for line in dockerfile.splitlines() if line.startswith("EXPOSE")] == ["EXPOSE 8765"]
 
 
+def test_a_profiles_lock_from_the_last_start_goes_before_anything_opens():
+    """A lock a browser left in its profile when the container stopped named
+    the old process, or the old container, so Chrome took the profile for
+    one in use and Amazon's sign-in window never opened its debugging port
+    (#78). Only Chrome's three lock names go, only in a profile folder
+    itself, and before the panel can start a browser."""
+    text = (SERVER / "start.sh").read_text(encoding="utf-8")
+    sweep = text[text.index('find "${PAPERPULL_PROFILES:-/profiles}"'):]
+    sweep = sweep[:sweep.index("2>/dev/null")]
+    assert "-mindepth 2 -maxdepth 2" in sweep
+    assert sorted(re.findall(r"-name (\S+)", sweep)) == [
+        "SingletonCookie", "SingletonLock", "SingletonSocket"]
+    assert "-exec rm -f {} +" in sweep
+    assert text.index(sweep) < text.index("Xvfb :99") < text.index("exec python -m uvicorn")
+
+
 def test_novnc_is_its_web_files_and_not_its_dependencies():
     """Installed, Debian's novnc package brings Node.js and NumPy, about 90
     MB the image never uses, and the panel carries the connection itself."""

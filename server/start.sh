@@ -19,6 +19,17 @@ export PAPERPULL_SERVER=1
 # yet, so it is stale.
 rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
 
+# Each signed-in profile's own lock, for the same reason. Chrome names its
+# lock after the computer and the browser's process, and a container started
+# again has new process numbers, and a new computer name once it is made
+# anew from a newer image. A lock left by a browser that was open when the
+# container stopped made Chrome take the profile for one in use elsewhere,
+# so the sign-in window never opened its debugging port (#78). No browser is
+# open yet, and only this container's browsers use /profiles.
+find "${PAPERPULL_PROFILES:-/profiles}" -mindepth 2 -maxdepth 2 \
+  \( -name SingletonLock -o -name SingletonSocket -o -name SingletonCookie \) \
+  -exec rm -f {} + 2>/dev/null
+
 Xvfb :99 -screen 0 "${SCREEN:-1600x1000x24}" -nolisten tcp >"$LOGS/xvfb.log" 2>&1 &
 i=0
 while [ ! -e /tmp/.X11-unix/X99 ] && [ $i -lt 40 ]; do sleep 0.25; i=$((i + 1)); done

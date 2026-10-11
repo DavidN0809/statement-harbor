@@ -386,6 +386,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   sit on such a drive, Login ran the hidden copy and stopped with "source
   code cannot contain null bytes". A hidden file is never taken as an app
   now, in the panel, the server and `paperpull`.
+- **PaperPull Server clears the browser locks a stopped container left
+  (#78).** Chrome marks a profile in use with a lock naming the computer
+  and the browser's process. A sign-in browser still open when the
+  container stopped left its lock behind, and once the container started
+  again, with new process numbers, or was made anew from a newer image,
+  Chrome took that profile for one in use elsewhere and never opened the
+  debugging port, so Amazon's Login said no browser would open while every
+  other app worked. The server now clears those locks as it starts, before
+  any browser can open.
 
 ### Security
 - **M&T presses a year heading only when nothing covers it, and once.**
