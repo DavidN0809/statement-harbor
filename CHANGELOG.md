@@ -47,6 +47,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   told apart by its order number lost its part in both commands. Review
   Names now adds the order number as the others do, and a part followed by
   the order number or a " (2)" is kept.
+- **Resume in every receipt app keeps to the year or dates it is given.**
+  The panel passes the Scope row to Resume, and Pilot and Run All keep to
+  it, but the fourteen receipt apps' Resume took every incomplete purchase
+  of every year, and ignored the configured start date too. From a
+  terminal, `--resume --redownload --year 2025` fetched every purchase of
+  every year again. Resume now chooses its purchases the way Pilot and Run
+  All do, as the document apps' Resume already did, and Walmart places an
+  online order with no date by its order page, as its Run All does. A
+  Resume with no scope carries on with everything left, as before.
 
 ## [0.46.0] - 2026-10-11
 

@@ -1001,8 +1001,10 @@ class App:
         # stops (paperpull_core.listing).
         if listing.read_again_first(self):
             self.cmd_discover(quiet=True, finish=False, need_history=False)
-        pend = [Purchase.from_dict(r) for r in self.discovery.data.values()
-                if isinstance(r, dict) and r.get("order_number")]
+        # Only the purchases inside the run's scope, chosen as Pilot and Run
+        # All choose them, so a Resume with a year chosen takes that year
+        # alone. The limit waits until the done ones are left out.
+        pend = self._select_purchases(None, limit=0)
         pend = [p for p in pend if not self._already_done(p)]
         pend.sort(key=lambda p: p.purchase_date or "0000", reverse=True)
         if self.args.max_purchases:

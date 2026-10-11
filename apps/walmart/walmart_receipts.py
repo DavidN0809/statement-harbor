@@ -1313,8 +1313,10 @@ class App:
         # the run (paperpull_core.listing).
         if listing.read_again_first(self):
             self.cmd_discover(quiet=True)
-        known = [Purchase.from_dict(r) for r in self.discovery.data.values()
-                 if isinstance(r, dict) and r.get("order_number")]
+        # Only the purchases inside the run's scope, chosen as Pilot and Run
+        # All choose them, so a Resume with a year chosen takes that year
+        # alone. The limit waits until the done ones are left out.
+        known = self._select_purchases(None, limit=0)
         pend, aside = [], []
         for p in known:
             if not self._already_done(p):
@@ -1333,7 +1335,12 @@ class App:
                   "Nothing to resume - all discovered purchases are complete.")
             return
         print(f"Resuming: {len(pend)} incomplete purchase(s).")
-        self.process_purchases(pend, dry_run=self.args.dry_run)
+        # An order whose card shows no date is placed by its order page, as
+        # in Run All, so one outside the scope is left alone.
+        by_dates = self._dates_asked()
+        self._about_undated(pend, by_dates)
+        self.process_purchases(pend, dry_run=self.args.dry_run, by_dates=by_dates)
+        self._say_left_alone()
 
     def _say_put_aside(self, aside: List[Purchase]) -> None:
         """How many purchases an earlier run put aside, which a run skips, how
