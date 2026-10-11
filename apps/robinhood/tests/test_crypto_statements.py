@@ -259,7 +259,8 @@ def test_the_crypto_page_waits_for_the_individual_one(tmp_path, monkeypatch):
 def test_a_retirement_page_showing_the_individual_list_is_not_read(tmp_path, monkeypatch):
     """An account without a retirement account can be shown the individual
     list at the retirement address, as the crypto address did, and every
-    individual statement was saved again as a Retirement Monthly Statement.
+    individual statement would be saved again as a Retirement Monthly
+    Statement.
     Nothing in the list says whose it is, and the page's own heading does."""
     same = [(TITLE, "2022-01-31")]
     app = _run(tmp_path, monkeypatch, {INDIVIDUAL: same, RETIREMENT: same},
@@ -295,7 +296,7 @@ def test_a_retirement_page_that_names_its_account_is_read(tmp_path, monkeypatch)
 
 def test_a_retirement_page_that_shows_a_title_twice_is_not_read(tmp_path, monkeypatch):
     """Two IRAs can each list a statement of the same month under one
-    title, and the second was dropped as the first without a word."""
+    title, and the second would be dropped as the first without a word."""
     same = [(TITLE, "2022-01-31")]
     app = _run(tmp_path, monkeypatch, {INDIVIDUAL: same, RETIREMENT: same},
                repeated={RETIREMENT: [TITLE]}, headings={RETIREMENT: ["Retirement"]})

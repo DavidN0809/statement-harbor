@@ -726,9 +726,9 @@ class App:
                 continue
             docs = site.collect_download_docs(page, tax_page=(url == site.TAX_URL))
             # Two retirement accounts can each list a statement of the same
-            # month under the same title, and the second was dropped as the
-            # first without a word. Until what such a page shows is known,
-            # it is not read, and the list is not called whole.
+            # month under the same title, and the second would be dropped as
+            # the first without a word. Until what such a page shows is
+            # known, it is not read, and the list is not called whole.
             if account in site.SHARED_PAGES and getattr(docs, "repeated", None):
                 self._note(f"The {label} page lists a statement title more than once, "
                            f"which can be two {account.lower()} accounts, a traditional "

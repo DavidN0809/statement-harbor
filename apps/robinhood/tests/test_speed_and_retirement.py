@@ -448,8 +448,9 @@ def test_a_prompt_answered_at_the_console_opens_the_page_again(tmp_path, monkeyp
 # -- a retirement statement is the retirement account's own ------------------
 
 def test_a_retirement_statement_is_not_pressed_on_another_address(tmp_path, monkeypatch):
-    """An account holder whose retirement address opened another page had
-    the statement of that title there pressed and filed as retirement."""
+    """An account holder whose retirement address opened another page
+    would have the statement of that title there pressed and filed as
+    retirement."""
     app = _app(tmp_path)
     pressed = _presses(monkeypatch)
     expanded = []

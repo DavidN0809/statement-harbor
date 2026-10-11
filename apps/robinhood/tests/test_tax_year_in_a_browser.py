@@ -278,8 +278,8 @@ def statement_link(month):
 
 def test_a_statement_link_is_pressed_only_for_its_own_title(show, tmp_path):
     """Sibling statement links in one list. The nearest box with text
-    around January's link was the whole list, which says every title, so
-    January's link was pressed for February and saved as February."""
+    around January's link is the whole list, which says every title, so
+    January's link would be pressed for February and saved as February."""
     page = show("<h1>Individual investing</h1><main>%s%s"
                 '<a href="#">View More</a></main>' % (
                     statement_link("January 2022"), statement_link("February 2022")),
@@ -319,8 +319,8 @@ def test_the_retirement_page_is_known_by_a_heading_of_its_own(show):
 
 def test_a_title_shown_twice_is_said_and_a_hidden_twin_is_not(show):
     """Two IRAs can each list a statement of the same month under one
-    title, and the second was dropped as the first without a word. A copy
-    of a control the page keeps hidden is not a second statement."""
+    title, and the second would be dropped as the first without a word.
+    A copy of a control the page keeps hidden is not a second statement."""
     link = statement_link("January 2022")
     page = show("<main><h1>Retirement</h1><h2>Traditional IRA</h2>%s"
                 "<h2>Roth IRA</h2>%s</main>" % (link, link), url=RETIREMENT)

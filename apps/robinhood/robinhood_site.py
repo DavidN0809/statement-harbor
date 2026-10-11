@@ -622,9 +622,9 @@ def account_for(source_url: str) -> str:
 # An account page that has to name its own account before it is read or
 # pressed on, with the words that name it. Robinhood may show an account
 # without a retirement account the individual list at the retirement
-# address, as the crypto address did (#62), and those statements were read
-# and saved again as retirement statements. The crypto page is told apart
-# from the individual one by its list instead, as it always was.
+# address, as the crypto address did (#62), and those statements would be
+# read and saved again as retirement statements. The crypto page is told
+# apart from the individual one by its list instead, as it always was.
 ACCOUNT_NAMES = {
     "Retirement": re.compile(r"(?i:\bretirement\b)|\bIRAs?\b"),
 }
@@ -980,8 +980,9 @@ _PICK_ATTR = "data-paperpull-pick"
 # Download PDF say, its own card says it. The card is the nearest box around
 # it that holds a document's title and no other document's control (cardOf).
 # The nearest box with any text at all used to do, and on a page of sibling
-# statement links that box was the whole list, which says every title, so
-# January's link was pressed for February and saved as February for good.
+# statement links that box is the whole list, which says every title, so
+# January's link would be pressed for February and saved as February for
+# good.
 _SAYS_TITLE_JS = r"""
   function saysTitle(el, own, want) {
     if (own.toLowerCase().includes(want)) return true;
