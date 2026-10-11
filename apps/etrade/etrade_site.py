@@ -1925,8 +1925,15 @@ def _json_answer_shape(value) -> dict:
             "base64": bool(_BASE64_RE.fullmatch(longest)), "begins": begins}
 
 
+# What _catch_pdf adds to the list of controls pressed for a document when
+# the page had its control turned off, so nothing was pressed
+# (pressing.TurnedOff). A page's own words never hold a NUL.
+_TURNED_OFF = "\x00turned off"
+
+
 def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
-               dl_dir=None, unsure: Optional[list] = None) -> bool:
+               dl_dir=None, pressed: Optional[list] = None,
+               unsure: Optional[list] = None) -> bool:
     """Click `el` and save whatever PDF the site produces, a file landing
     in `dl_dir`, a download event, a PDF response, a new tab, this tab
     moving to the document, or a second control the click revealed. A PDF
@@ -1935,8 +1942,12 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     from. A download event or a file landing in `dl_dir` is not tied to the
     click that way yet, so such an answer wins over them.
     `trace` collects what happened, the click's own outcome included.
-    `unsure` is given the label when the press may have been made and
-    nothing came, so nothing more is pressed for this document."""
+    `pressed`, when given, is one list for the whole document and gets the
+    words of each control pressed. A control the page has turned off leaves
+    the document only when nothing was pressed for it before, since what an
+    earlier press began may still bring its PDF, and then the run stops as
+    it did. `unsure` is given the label when the press may have been made
+    and nothing came, so nothing more is pressed for this document."""
     ctx = page.context
     got: dict = {}
     downloads: list = []
@@ -2078,12 +2089,18 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 guard=is_safe_control, dl_dir=dl_dir,
                 brought=lambda: bool(downloads or got or (_control_texts(page) - controls_before)))
         except pressing.TurnedOff:
+            # Something was pressed for this document already, and what it
+            # began may still bring a PDF, so the run stops there as it did.
+            if pressed and any(not p.startswith("\x00") for p in pressed):
+                raise
             # The page has turned the control off, so nothing was pressed and
             # nothing this document brings can come. No second step is looked
             # for, and the document is left for review and the next run while
             # the run goes on (pressing.TurnedOff).
             if trace is not None:
                 trace.append({"note": "the control is turned off on the page, so nothing was pressed"})
+            if pressed is not None:
+                pressed.append(_TURNED_OFF)
             return False
         if trace is not None:
             if outcome.error is None:
@@ -2098,6 +2115,8 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 trace.append({"note": "clicked through the DOM instead"})
             elif outcome.how == pressing.THROUGH_THE_PAGE:
                 trace.append({"note": "DOM click failed too", "error": type(outcome.page_error).__name__})
+        if pressed is not None and outcome.how != pressing.GONE:
+            pressed.append(label)
         if outcome.how == pressing.GONE:
             # Nothing was pressed, so nothing this document brings can come,
             # and whatever the page shows now is not this press's. No second
@@ -2940,7 +2959,8 @@ _IN_A_ROW_JS = r"""el => {
 }"""
 
 
-def _tick_and_download(page, box, dl_dir, out_path: Path, trace: Optional[list]) -> bool:
+def _tick_and_download(page, box, dl_dir, out_path: Path, trace: Optional[list],
+                       pressed: Optional[list] = None) -> bool:
     """Tick this row's own box and press the page's Download button, which
     hands over every ticked document.
 
@@ -3025,7 +3045,7 @@ def _tick_and_download(page, box, dl_dir, out_path: Path, trace: Optional[list])
             note({"note": "the ticked boxes could not be counted, so Download was not pressed",
                   "ticked": count})
             return False
-        return _catch_pdf(page, shown[0], "Download", out_path, trace, dl_dir)
+        return _catch_pdf(page, shown[0], "Download", out_path, trace, dl_dir, pressed)
     finally:
         if ticked_here and _box_state(box) == "ticked":
             try:
@@ -3035,7 +3055,8 @@ def _tick_and_download(page, box, dl_dir, out_path: Path, trace: Optional[list])
                 note({"note": "this document's box could not be cleared", "error": type(e).__name__})
 
 
-def _try_every_way(page, dl_dir, iso_date: str, out_path: Path, title: str, trace: Optional[list]) -> bool:
+def _try_every_way(page, dl_dir, iso_date: str, out_path: Path, title: str, trace: Optional[list],
+                   pressed: Optional[list] = None) -> bool:
     """The document's row, chosen by the title it names among every row that
     prints its date, and every way it could hand over its PDF tried in
     turn. Each attempt goes through the catch.
@@ -3065,7 +3086,10 @@ def _try_every_way(page, dl_dir, iso_date: str, out_path: Path, title: str, trac
     taken to print nothing and the notice was pressed (#36, review).
     Otherwise only this document's own name is pressed, and when that
     brings nothing the row is refused in counted, fixed words. The page's
-    Download button goes through _tick_and_download."""
+    Download button goes through _tick_and_download. `pressed` is the
+    document's list of controls pressed (_catch_pdf), and once a control
+    the page has turned off leaves the document, nothing more is tried."""
+    pressed = [] if pressed is None else pressed
     found = _row_by_date(page, iso_date, title)
     if not found:
         if trace is not None:
@@ -3168,11 +3192,13 @@ def _try_every_way(page, dl_dir, iso_date: str, out_path: Path, title: str, trac
             if trace is not None:
                 trace.append({"note": "trying", "kind": c["kind"]})
             tried += 1
-            if _catch_pdf(page, el, label, out_path, trace, dl_dir, unsure=unsure):
+            if _catch_pdf(page, el, label, out_path, trace, dl_dir, pressed, unsure=unsure):
                 return True
-            # A press that may have been made ends this document, so no
-            # other control of its row is pressed (review of 0.45.0).
-            if unsure:
+            # Turned off on the page, so nothing was pressed for the
+            # document, or a press that may have been made, which ends this
+            # document, so no other control of its row is pressed (review of
+            # 0.45.0).
+            if _TURNED_OFF in pressed or unsure:
                 return False
             if trace is not None and requests:
                 trace.append({"note": "requests after that click", "requests": requests[-12:]})
@@ -3183,7 +3209,7 @@ def _try_every_way(page, dl_dir, iso_date: str, out_path: Path, title: str, trac
         if boxes and els[boxes[0]] is not None:
             if trace is not None:
                 trace.append({"note": "trying", "kind": "checkbox then Download"})
-            if _tick_and_download(page, els[boxes[0]], dl_dir, out_path, trace):
+            if _tick_and_download(page, els[boxes[0]], dl_dir, out_path, trace, pressed):
                 return True
             if trace is not None and requests:
                 trace.append({"note": "requests after Download", "requests": requests[-12:]})
@@ -3220,6 +3246,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     after every click."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Every control pressed for this document, through every attempt below.
+    tried: list = []
     if not goto_documents(page):
         log.info("could not open the documents page for %s", iso_date)
         return False
@@ -3231,18 +3259,20 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     el, label = _row_link_for(page, iso_date, title, trace)
     if el is not None and is_safe_control(label):
         unsure: list = []
-        if _catch_pdf(page, el, label, out_path, trace, dl_dir, unsure=unsure):
+        if _catch_pdf(page, el, label, out_path, trace, dl_dir, tried, unsure=unsure):
             return True
-        # A press that may have been made ends this document, so its own
-        # control is not pressed again (review of 0.45.0).
-        if unsure:
+        # Turned off on the page, so nothing was pressed for the document,
+        # and nothing else is pressed for it either. A press that may have
+        # been made ends this document too, so its own control is not
+        # pressed again (review of 0.45.0).
+        if _TURNED_OFF in tried or unsure:
             return False
     expand_all(page)
 
     el, label = _control_for(page, iso_date, title, trace)
     if el is None:
         log.info("no document control by name for %s, looking for its row by date", iso_date)
-        return _try_every_way(page, dl_dir, iso_date, out_path, title, trace)
+        return _try_every_way(page, dl_dir, iso_date, out_path, title, trace, tried)
     if not is_safe_control(label):
         log.info("refusing unsafe control %r for %s", label, iso_date)
         return False
@@ -3265,7 +3295,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             if trace is not None:
                 trace.append({"note": "the control's own link did not answer with a PDF",
                               "url": mask_href(target)})
-    return _catch_pdf(page, el, label, out_path, trace, dl_dir)
+    return _catch_pdf(page, el, label, out_path, trace, dl_dir, tried)
 
 
 # ---------------------------------------------------------------------------

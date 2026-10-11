@@ -409,6 +409,21 @@ LOOK_JS = r"""(args) => {
   };
   if (reached) { remember(); return Object.assign({state: 'inside'}, where); }
 
+  // A control the page has turned off and drawn to take no pointer, the
+  // way Bootstrap and Material UI draw one (pointer-events none), is passed
+  // over at its own point, which then finds what holds it. Only for the read
+  // of a turned off control (args.off) is what holds it no cover, and
+  // nothing is pressed after that read. What an earlier look kept for the
+  // read after a press is let go, so that read takes no frame for one that
+  // was at this point before.
+  if (args.off && getComputedStyle(el).pointerEvents === 'none') {
+    for (let p = parentOrHost(el); p; p = parentOrHost(p))
+      if (p === hit) {
+        globalThis.__paperpullBefore = null;
+        return Object.assign({state: 'inside'}, where);
+      }
+  }
+
   // A form control under its own label is pressed through the label.
   if (args.labels && target.labels) {
     for (const label of target.labels) {
@@ -950,11 +965,13 @@ def _box(locator) -> Optional[dict]:
         return None
 
 
-def look(page, locator, css: str, labels: bool = False, frame=None) -> dict:
+def look(page, locator, css: str, labels: bool = False, off: bool = False, frame=None) -> dict:
     """What sits on top of the control once it is in the middle of the
     window, as a dict whose "state" is "inside", "label", "covered" or
     "unread". Raw words from the page are in it, so it goes through
-    described() before it is said or kept anywhere.
+    described() before it is said or kept anywhere. `off` is for a control
+    read as turned off, which nothing will press, and then what holds a
+    control that takes no pointer is not taken for something over it.
 
     The box is read again when the page did not show exactly one element of
     `css` in it, since a page can move between two reads. Nothing has been
@@ -971,7 +988,8 @@ def look(page, locator, css: str, labels: bool = False, frame=None) -> dict:
         box = _box(locator)
         if not box:
             return {"state": "unread", "why": "no box"}
-        seen = _in_own_world(page, LOOK_JS, {"css": css, "box": box, "labels": bool(labels)})
+        seen = _in_own_world(page, LOOK_JS, {"css": css, "box": box, "labels": bool(labels),
+                                             "off": bool(off)})
         if seen is None:
             return {"state": "unread", "why": "not read"}
         if seen.get("state") != "unread" or seen.get("why") not in ("none", "several"):
@@ -1095,23 +1113,6 @@ def _shown_and_off(el) -> Optional[bool]:
     return None
 
 
-def _off_the_whole_wait(page, el, ms: int) -> bool:
-    """Whether `el` shows and stays turned off from now until `ms` have
-    passed, read every quarter of a second. False at once when it is turned
-    on, does not show or cannot be read, and as soon as it turns on, so a
-    control the page turns on a moment later is pressed as it always was."""
-    import time
-    deadline = time.monotonic() + ms / 1000.0
-    while _shown_and_off(el) is True:
-        if time.monotonic() >= deadline:
-            return True
-        try:
-            page.wait_for_timeout(250)
-        except Exception:
-            return False
-    return False
-
-
 def _only_turned_off(error) -> bool:
     """Whether Playwright's account of a press that raised says only that
     it waited for the control and found it turned off, every line one of
@@ -1123,16 +1124,17 @@ def _only_turned_off(error) -> bool:
 
 
 def _leave_if_turned_off(page, el, css: str, what: str, words, step: str, facts: dict,
-                         after_a_press: bool) -> None:
+                         after_a_press: bool, frame=None) -> None:
     """Raise TurnedOff when `el` shows and is turned off with nothing over
     it in the middle of the window, read the way click reads it (look,
     judge). Something over it, or a control that cannot be read there,
     stops the run as it does for any press (Covered, Unread). Returns when
     it does not read as showing and turned off, a control no longer on the
-    page among them, for the caller to go on its own way."""
+    page among them, for the caller to go on its own way. `frame` is the
+    frame the control is in, as click takes it."""
     if _shown_and_off(el) is not True:
         return
-    seen = look(page, el, css) if css else {"state": "unread", "why": "not read"}
+    seen = look(page, el, css, off=True, frame=frame) if css else {"state": "unread", "why": "not read"}
     try:
         judge(seen, what, words, step)
     except Stop as stop:
@@ -1223,27 +1225,31 @@ def after(page, seen: dict, what: str, words, step: str = "press a control",
 
 
 def click(page, locator, *, css: str, what: str, words, step: str = "press a control",
-          timeout: int = PRESS_MS, frame=None) -> None:
+          timeout: Optional[int] = None, frame=None) -> None:
     """Press `locator` once, with nothing on top of it, or stop the run.
 
     `css` is a selector the control matches, which with the locator's box
     finds it in this module's own world. `what` names it in the run's own
     words, "the Download button for the statement of 2026-01-27". `words`
-    is the app's word list, words_for(provider, site). `frame` is the
+    is the app's word list, words_for(provider, site). `timeout` is
+    Playwright's time for the press, PRESS_MS when not given. `frame` is the
     Playwright frame the control is in, when it is not in the page's main
     frame, and then the control and every frame around it are read.
 
-    A control that shows and is turned off is waited for, the way
-    Playwright waits for one, for PRESS_MS at most, even when the press
-    itself is given longer. When it stays turned off with nothing over it,
-    nothing is pressed (TurnedOff)."""
-    if _off_the_whole_wait(page, locator, min(timeout, PRESS_MS)):
-        _leave_if_turned_off(page, locator, css, what, words, step, {}, after_a_press=False)
-    seen = look(page, locator, css, frame=frame)
+    Playwright waits for a control that is turned off for as long as it
+    always did. When the control stayed turned off that whole time, and
+    shows with nothing over it, nothing was pressed (TurnedOff). A control
+    that reads turned off as it is first read is read the way look reads
+    one (off), so what holds a control drawn to take no pointer is not
+    taken for something over it, and Playwright's own check at the press
+    still keeps the press from anything that is."""
+    timeout = timeout or PRESS_MS
+    seen = look(page, locator, css, off=_shown_and_off(locator) is True, frame=frame)
     judge(seen, what, words, step)
     _press(page, lambda: locator.click(timeout=timeout), what, step,
            off=lambda kind: _leave_if_turned_off(page, locator, css, what, words, step,
-                                                 {"error": kind}, after_a_press=True))
+                                                 {"error": kind}, after_a_press=True,
+                                                 frame=frame))
     after(page, seen, what, words, step, frame=frame)
 
 
@@ -1288,7 +1294,7 @@ def _visible_label(page, locator):
 
 
 def check(page, locator, *, css: str, what: str, words, step: str = "choose an option",
-          timeout: int = PRESS_MS) -> None:
+          timeout: Optional[int] = None) -> None:
     """Check a radio button or a checkbox once, or stop the run.
 
     Nothing is pressed when it is checked already, or when whether it is
@@ -1297,6 +1303,7 @@ def check(page, locator, *, css: str, what: str, words, step: str = "choose an o
     it, and through its own label when that label is what sits over it. A
     control that does not show at all is checked through a label of its own
     that does. Either way it has to read as checked afterwards."""
+    timeout = timeout or PRESS_MS
     state = _is_checked(locator)
     if state is None:
         judge({"state": "unread", "why": "unknown state"}, what, words, step)
@@ -1532,8 +1539,9 @@ def press_once(page, el, *, what: str, words, guard: Callable[[str], bool],
          it says is not enabled, and an account in other words or none at
          all each stop the run. A control it waited for and found turned
          off the whole time is not pressed through the page either, and when
-         nothing came, it heard no press and it still shows, turned off,
-         with nothing over it, nothing was pressed at all (TurnedOff).
+         nothing that could be a document came, it heard no press and it
+         still shows, turned off, with nothing over it, nothing was pressed
+         at all (TurnedOff).
       2. Nothing came that a press brings. No tab opened, no download
          began, the tab began loading nothing new and stands at the same
          address, no file came into `dl_dir`, and the app's own `brought`
@@ -1583,14 +1591,15 @@ def press_once(page, el, *, what: str, words, guard: Callable[[str], bool],
     came: list = []
 
     def on_arrival(_thing):
-        came.append(True)
+        came.append("arrived")
 
     def on_request(request):
+        # A load of the tab itself, or of a frame inside it.
         try:
             if request.is_navigation_request():
-                came.append(True)
+                came.append("frame" if request.frame != page.main_frame else "tab")
         except Exception:
-            came.append(True)
+            came.append("tab")
 
     handle = _handle(el)
     own_handle = handle is not None and handle is not el
@@ -1625,6 +1634,25 @@ def press_once(page, el, *, what: str, words, guard: Callable[[str], bool],
         except Exception:
             moved = True
         return moved or bool(came)
+
+    def a_document_could_have_come() -> bool:
+        """For a control Playwright waited on and never pressed, whether
+        anything that could be a document came meanwhile. That is a
+        download or a tab, a file in the download folder, the tab loading,
+        or its address changing other than after its #. A frame inside the
+        page loading, a fetch, or a part of the page drawn anew is none of
+        them."""
+        if any(c != "frame" for c in came):
+            return True
+        try:
+            if tabs_before is not None and [p for p in page.context.pages if p not in tabs_before]:
+                return True
+            if address_before is None or \
+                    (page.url or "").split("#")[0] != address_before.split("#")[0]:
+                return True
+            return _folder_moved(dl_dir, folder_before)
+        except Exception:
+            return True
 
     for event, fn in (("download", on_arrival), ("popup", on_arrival), ("request", on_request)):
         try:
@@ -1661,17 +1689,11 @@ def press_once(page, el, *, what: str, words, guard: Callable[[str], bool],
         if said == "off":
             # Turned off for the press's whole time. It is left as it is,
             # with nothing pressed, only when Playwright never began the
-            # press, nothing came, and the control heard no press and still
-            # shows, turned off, with nothing over it (TurnedOff). Anything
-            # else stops the run.
-            came_by_app = False
-            if brought is not None:
-                try:
-                    came_by_app = bool(brought())
-                except Exception:
-                    came_by_app = True
-            if _only_turned_off(first) and before is not None and not anything_came() \
-                    and not came_by_app:
+            # press, nothing that could be a document came, and the control
+            # heard no press and still shows, turned off, with nothing over
+            # it (TurnedOff). Anything else stops the run.
+            if _only_turned_off(first) and before is not None \
+                    and not a_document_could_have_come():
                 state = _ask(handle, _STATE_JS, _KEY)
                 if isinstance(state, dict) and state.get("heard") is False:
                     _leave_if_turned_off(page, handle, css, what, words, step,

@@ -86,7 +86,7 @@ def presses(monkeypatch):
     hits: list = []
     brings: set = set()
 
-    def fake(pg, el, label, out_path, trace=None, dl_dir=None, unsure=None):
+    def fake(pg, el, label, out_path, trace=None, dl_dir=None, pressed=None, unsure=None):
         before = len(pg.evaluate("window.hits"))
         try:
             el.click(timeout=3000)
@@ -455,7 +455,7 @@ def test_a_box_drawn_in_a_shadow_root_counts_once(page, monkeypatch):
     over."""
     pressed: list = []
 
-    def fake(pg, el, label, out_path, trace=None, dl_dir=None, unsure=None):
+    def fake(pg, el, label, out_path, trace=None, dl_dir=None, _pressed=None, unsure=None):
         if label != "Download":
             return False
         el.click()

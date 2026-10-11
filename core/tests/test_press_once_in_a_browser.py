@@ -328,11 +328,67 @@ def test_a_file_that_came_while_a_turned_off_control_was_waited_for_stops_the_ru
     assert not isinstance(stop.value, pressing.TurnedOff)
 
 
-def test_what_the_app_says_came_while_a_turned_off_control_was_waited_for_stops_the_run(show):
+def test_what_the_app_says_came_does_not_keep_a_turned_off_control_from_being_left(show):
+    """An app's own word that something came, a control drawn on the page
+    say, is about what a press brings, and nothing was pressed."""
     page = show(OFF % "")
-    with pytest.raises(pressing.NotPressed) as stop:
+    with pytest.raises(pressing.TurnedOff):
         press(page, brought=lambda: True, timeout=500)
+    assert presses(page) == 0
+
+
+def test_a_tab_that_opened_while_a_turned_off_control_was_waited_for_stops_the_run(show):
+    page = show(OFF % "" + "<script>setTimeout(() => window.open('about:blank'), 100);</script>")
+    with pytest.raises(pressing.NotPressed) as stop:
+        press(page, timeout=500)
     assert not isinstance(stop.value, pressing.TurnedOff)
+
+
+def test_a_download_that_began_while_a_turned_off_control_was_waited_for_stops_the_run(show):
+    """With no download folder given, the download itself is what says one
+    came."""
+    page = show(OFF % "" + "<script>setTimeout(() => { const a = document.createElement('a'); "
+                "a.href = URL.createObjectURL(new Blob(['%PDF-1.4'], {type: 'application/pdf'})); "
+                "a.download = 'statement.pdf'; document.body.appendChild(a); a.click(); }, 100);"
+                "</script>")
+    with pytest.raises(pressing.NotPressed) as stop:
+        press(page, timeout=600)
+    assert not isinstance(stop.value, pressing.TurnedOff)
+    assert presses(page) == 0
+
+
+def test_a_frame_that_loads_while_a_turned_off_control_is_waited_for_does_not_stop_it(show):
+    """A chat window or an advertisement loading in a frame of its own is
+    no document coming."""
+    page = show(OFF % "" + '<iframe id="fr" style="width: 50px; height: 50px"></iframe>'
+                '<script>let n = 0; setInterval(() => { document.getElementById("fr").src = '
+                '"/other?" + (n++); }, 100);</script>')
+    with pytest.raises(pressing.TurnedOff):
+        press(page, timeout=600)
+    assert presses(page) == 0
+
+
+def test_an_address_changed_after_its_hash_does_not_stop_a_turned_off_control(show):
+    page = show(OFF % "" + "<script>setTimeout(() => { location.hash = 'list'; }, 100);</script>")
+    with pytest.raises(pressing.TurnedOff):
+        press(page, timeout=500)
+    assert presses(page) == 0
+
+
+def test_a_turned_off_control_drawn_to_take_no_pointer_is_left(show):
+    """Bootstrap and Material UI draw a turned off control so it takes no
+    pointer, so what is at its point is what holds it, which is no cover."""
+    page = show(OFF % "" + "<style>#go { pointer-events: none; }</style>")
+    with pytest.raises(pressing.TurnedOff):
+        press(page, timeout=500)
+    assert presses(page) == 0
+
+
+def test_a_cover_over_a_turned_off_control_that_takes_no_pointer_still_stops_the_run(show):
+    page = show(OFF % "" + "<style>#go { pointer-events: none; }</style>" + COVER)
+    with pytest.raises(pressing.Covered):
+        press(page, timeout=500)
+    assert presses(page) == 0 and page.evaluate("window.coverPresses") == 0
 
 
 def test_a_turned_off_control_the_person_pressed_stops_the_run(show, monkeypatch):

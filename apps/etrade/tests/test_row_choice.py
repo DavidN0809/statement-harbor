@@ -197,7 +197,7 @@ def clicks(monkeypatch):
     got: list = []
     fail: set = set()
 
-    def fake(page, el, label, out_path, trace=None, dl_dir=None, unsure=None):
+    def fake(page, el, label, out_path, trace=None, dl_dir=None, pressed=None, unsure=None):
         got.append((_guid_of(el), label))
         return not any(word in label for word in fail)
     monkeypatch.setattr(site, "_catch_pdf", fake)
@@ -290,7 +290,7 @@ def test_download_is_not_pressed_while_another_box_is_ticked(page, monkeypatch, 
     monkeypatch.setattr(site, "_LISTED", {"2025-10-31": 1})
     pressed: list = []
 
-    def fake(pg, el, label, out_path, trace=None, dl_dir=None, unsure=None):
+    def fake(pg, el, label, out_path, trace=None, dl_dir=None, _pressed=None, unsure=None):
         if label != "Download":
             return False                            # the title brings nothing
         el.click()

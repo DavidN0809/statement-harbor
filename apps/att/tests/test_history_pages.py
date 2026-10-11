@@ -740,3 +740,56 @@ def test_a_second_step_whose_click_raised_is_followed_by_no_other_press(browser,
     assert not ok and not out.exists()
     assert not presses, "the billing center was opened after a click that may have been made"
     assert page.evaluate("window.presses")["view"] == 1
+
+
+# A bill whose Download PDF the page has turned off (pressing.TurnedOff).
+
+_DOWNLOAD_PDF_OFF = r"""
+  panel = function () {
+    return '<div class="panel"><button>Internet<br>$1.00</button>' +
+      '<button onclick="presses.view++">View/print PDF</button>' +
+      '<button disabled onclick="download()">Download PDF</button></div>';
+  };
+  draw();"""
+
+_VIEW_PRINT_OFF = _DOWNLOAD_GIVES_NOTHING + r"""
+  panel = function () {
+    return '<div class="panel"><button>Internet<br>$1.00</button>' +
+      '<button disabled onclick="presses.view++">View/print PDF</button>' +
+      '<button onclick="download()">Download PDF</button></div>';
+  };
+  draw();"""
+
+
+def test_a_turned_off_download_pdf_leaves_the_bill_with_nothing_more_pressed(
+        browser, tmp_path, monkeypatch):
+    """Nothing was pressed for the bill, so it is left for review and the
+    next run, and neither View/print PDF nor the billing center is tried
+    for it."""
+    from paperpull_core import pressing
+    monkeypatch.setattr(pressing, "PRESS_MS", 500)
+    bills = _bills(_newest_now(), 16)
+    left = _presses_on_leaving(browser[0], monkeypatch)
+    ok, out, trace, page = _download(
+        browser, tmp_path, _history(bills, extra=_DOWNLOAD_PDF_OFF), bills[1]["iso"])
+    assert not ok and not out.exists()
+    presses = page.evaluate("window.presses")
+    assert presses["download"] == 0 and presses["view"] == 0
+    assert left == {}, "the billing center was opened for a bill already left"
+    assert {"note": "the control is turned off on the page, so nothing was pressed"} in trace
+
+
+def test_a_control_turned_off_after_a_press_for_the_bill_stops_the_run(
+        browser, tmp_path, monkeypatch):
+    """Download PDF was pressed and brought nothing, and View/print PDF is
+    turned off. What the first press began may still bring a PDF, so the
+    run stops there, as it always did, rather than going on to the next
+    bill."""
+    from paperpull_core import pressing
+    monkeypatch.setattr(pressing, "PRESS_MS", 500)
+    bills = _bills(_newest_now(), 16)
+    _presses_on_leaving(browser[0], monkeypatch)
+    with pytest.raises(pressing.TurnedOff):
+        _download(browser, tmp_path, _history(bills, extra=_VIEW_PRINT_OFF), bills[1]["iso"])
+    presses = browser[0].evaluate("window.presses")
+    assert presses["download"] == 1 and presses["view"] == 0

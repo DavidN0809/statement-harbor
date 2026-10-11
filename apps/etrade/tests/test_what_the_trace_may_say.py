@@ -119,7 +119,7 @@ def test_the_download_trace_writes_request_names_only_from_the_list(browser, mon
     monkeypatch.setattr(site, "goto_documents", lambda pg: True)
     monkeypatch.setattr(site, "expand_all", lambda pg: None)
 
-    def fake(pg, el, label, out_path, trace=None, dl_dir=None, unsure=None):
+    def fake(pg, el, label, out_path, trace=None, dl_dir=None, pressed=None, unsure=None):
         el.click(timeout=3000)
         pg.wait_for_timeout(500)
         return False

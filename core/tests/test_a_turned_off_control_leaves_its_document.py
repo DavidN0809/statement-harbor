@@ -10,14 +10,18 @@ had Playwright wait eight seconds and then stopped the run there. Every
 later run stopped at that same document, and nothing after it was ever
 downloaded.
 
-Now such a control is not pressed, and nothing is. The press raises
-pressing.TurnedOff only once Playwright has said nothing but that it waited
-and the control was not enabled, nothing came, and a fresh read finds the
-control on the page, showing, turned off and with nothing over it. Where an
-app presses a document's own control it catches that and leaves the
-document, which its run marks for review and takes again on the next run.
-Anywhere else TurnedOff stops the run as NotPressed did, and a turned off
-control that something covers or that cannot be read stops it as before.
+Now such a control is not pressed, and nothing more is pressed for its
+document. The press raises pressing.TurnedOff only once Playwright has said
+nothing but that it waited and the control was not enabled, nothing that
+could be a document came, and a fresh read finds the control on the page,
+showing, turned off and with nothing over it, what holds a control drawn to
+take no pointer not counting as over it. Where an app presses a document's
+own control it catches that and leaves the document, which its run marks
+for review and takes again on the next run. Anywhere else TurnedOff stops
+the run as NotPressed did, and so does a turned off control that something
+covers or that cannot be read. AT&T and E*TRADE can press more than one
+control for a document, and a control turned off after one of them was
+pressed stops the run as before, since that press may still bring a PDF.
 
 The census finds the presses by what the code does. From every method of
 an app that marks a document downloaded it follows every function, method
@@ -47,37 +51,44 @@ HELPERS = {"press_once", "click", "check"}
 
 # Presses a document's download reaches that stop the run when their control
 # is turned off, as every press did before. None of them is a document's own
-# control, or something was pressed for the document already.
+# control, or something was pressed for the document already. Each is
+# named by its app, its function, the press and the step it names, with how
+# many presses there are of that, so another press added beside one is not
+# taken for it.
 STOPS = {
-    ("amex", "goto_documents", "open the statements page"):
+    ("adp", "open_tax_statement_check", "press_once", "open the identity check"): (1,
+        "the Tax Statements card's View statement opens ADP's identity check for every "
+        "tax form, and left as turned off the run would have the person answer a "
+        "prompt that never shows"),
+    ("amex", "goto_documents", "click", "open the statements page"): (2,
         "reaches the statements page every document is taken from, so a turned off "
-        "link there would leave every document",
-    ("amex", "expand_sections", "open a section"):
-        "opens a section of the statements page for every document in it",
-    ("amex", "close_file_type_dialog", "close the file type dialog"):
+        "link there would leave every document"),
+    ("amex", "expand_sections", "click", "open a section"): (1,
+        "opens a section of the statements page for every document in it"),
+    ("amex", "close_file_type_dialog", "click", "close the file type dialog"): (1,
         "closes the dialog the document before left open, and a dialog that will not "
-        "close covers every press after it",
-    ("amex", "_choose_pdf", "choose the pdf"):
+        "close covers every press after it"),
+    ("amex", "_choose_pdf", "check", "choose the pdf"): (1,
         "the PDF choice in the dialog the document's own Download opened, so a press "
-        "was made for the document already",
-    ("amex", "download_document", "press the dialog download"):
+        "was made for the document already"),
+    ("amex", "download_document", "click", "press the dialog download"): (1,
         "the dialog's own Download, once the row's Download opened the dialog, so a "
-        "press was made for the document already",
-    ("pge", "goto_page_number", ""):
+        "press was made for the document already"),
+    ("pge", "goto_page_number", "press_once", ""): (1,
         "the history's page picker, a step to the page a bill is on and every bill "
-        "after it",
-    ("vanguard", "dismiss_timeout", "continue the session"):
-        "keeps the session open for every document",
-    ("vanguard", "show_more", "show more of the list"):
+        "after it"),
+    ("vanguard", "dismiss_timeout", "click", "continue the session"): (1,
+        "keeps the session open for every document"),
+    ("vanguard", "show_more", "click", "show more of the list"): (1,
         "a control of the whole list, read as turned on before it is pressed, and a "
-        "list shown in full leaves only the statement not shown",
+        "list shown in full leaves only the statement not shown"),
 }
 
 # The presses that catch TurnedOff and leave their document, by app, before
 # this census. It finds them by what they do, this only keeps it from
 # passing on finding none.
 LEAVES = {
-    ("adp", "open_tax_statement_check"), ("amex", "download_document"),
+    ("amex", "download_document"),
     ("amfam", "_catch_pdf"), ("applecard", "_catch_pdf"), ("att", "_catch_pdf"),
     ("etrade", "_catch_pdf"), ("golden1", "_catch_pdf"), ("nelnet", "_catch_pdf"),
     ("newrez", "_catch_pdf"), ("pge", "_press_once"), ("sba", "_catch_pdf"),
@@ -246,18 +257,26 @@ def test_every_app_that_takes_documents_is_read():
     assert len(entry) >= 55 and not missing, missing
 
 
+def _stop_key(p) -> tuple:
+    return (p["app"], p["function"], p["helper"], p["step"])
+
+
 def test_every_press_a_document_reaches_leaves_it_or_says_why_it_stops():
     unnamed = ["%(app)s %(module)s.%(function)s line %(line)d, %(helper)s step %(step)r" % p
-               for p in PRESSES
-               if not p["leaves"] and (p["app"], p["function"], p["step"]) not in STOPS]
+               for p in PRESSES if not p["leaves"] and _stop_key(p) not in STOPS]
     assert not unnamed, (
         "these presses are reached from a document's download and neither catch "
         "pressing.TurnedOff nor are named in STOPS: %s" % unnamed)
 
 
-def test_the_presses_named_to_stop_are_still_there():
-    there = {(p["app"], p["function"], p["step"]) for p in PRESSES if not p["leaves"]}
-    assert set(STOPS) <= there, sorted(set(STOPS) - there)
+def test_the_presses_named_to_stop_are_there_as_many_times_as_named():
+    there: dict = {}
+    for p in PRESSES:
+        if not p["leaves"]:
+            there[_stop_key(p)] = there.get(_stop_key(p), 0) + 1
+    wrong = {key: (count, there.get(key, 0)) for key, (count, _why) in STOPS.items()
+             if there.get(key, 0) != count}
+    assert not wrong, "named, then found: %s" % wrong
 
 
 def test_every_document_control_known_to_be_pressed_leaves_its_document():
@@ -370,6 +389,7 @@ def drive(browser, tmp_path, monkeypatch):
     context = browser.new_context(viewport={"width": 1000, "height": 600}, accept_downloads=True)
     monkeypatch.setattr(pressing, "PRESS_MS", 500)
     real = pressing.press_once
+    real_click = pressing.click
 
     def run(app, module, call, *, row="June 30, 2026", control, extra="", before=None,
             press_ms=None):
@@ -390,7 +410,14 @@ def drive(browser, tmp_path, monkeypatch):
                 return real(*args, **kwargs)
             finally:
                 page.evaluate(LATER)
+
+        def click_with_later(*args, **kwargs):
+            try:
+                return real_click(*args, **kwargs)
+            finally:
+                page.evaluate(LATER)
         monkeypatch.setattr(pressing, "press_once", with_later)
+        monkeypatch.setattr(pressing, "click", click_with_later)
         out = tmp_path / app / "2026-06-30 Statement.pdf"
         out.parent.mkdir(parents=True, exist_ok=True)
         staging = tmp_path / app / "downloads"
@@ -403,6 +430,7 @@ def drive(browser, tmp_path, monkeypatch):
         ran.seconds = time.monotonic() - started
         ran.out = out
         monkeypatch.setattr(pressing, "press_once", real)
+        monkeypatch.setattr(pressing, "click", real_click)
         return ran
 
     yield run
@@ -421,13 +449,6 @@ def _button(off: bool, words: str = "Download statement", **attrs) -> str:
 def _catch_pdf(site, page, out, staging, trace):
     return site._catch_pdf(page, page.query_selector("#get"), "Download statement", out, trace,
                            staging)
-
-
-def _adp(monkeypatch):
-    def call(site, page, out, staging, trace):
-        monkeypatch.setattr(site, "goto_documents", lambda page: True)
-        return site.open_tax_statement_check(page)
-    return call
 
 
 def _amex(site, page, out, staging, trace):
@@ -475,9 +496,6 @@ def _how(app: str, function: str, monkeypatch):
     row it sits in, for each press that leaves its document."""
     if function == "_catch_pdf":
         return "%s_site" % app, _catch_pdf, _button, "June 30, 2026"
-    if (app, function) == ("adp", "open_tax_statement_check"):
-        return ("adp_site", _adp(monkeypatch),
-                lambda off: _button(off, "View statement"), "2030 W-2")
     if (app, function) == ("amex", "download_document"):
         return "amex_site", _amex, _amex_button, "June 30, 2026"
     if (app, function) == ("vanguard", "download_document"):
@@ -509,6 +527,22 @@ def test_a_turned_off_control_is_not_pressed_and_the_run_goes_on(drive, app, fun
     assert ran.seconds < 9, ran.seconds
 
 
+# Bootstrap and Material UI draw a turned off control so it takes no
+# pointer, so what is at its point is what holds it.
+TAKES_NO_POINTER = "<style>#get { pointer-events: none; }</style>"
+
+
+@pytest.mark.parametrize("app,function", DRIVEN, ids=lambda x: x)
+def test_a_turned_off_control_drawn_to_take_no_pointer_is_left_too(drive, app, function,
+                                                                  monkeypatch):
+    module, call, control, row = _how(app, function, monkeypatch)
+    ran = drive(app, module, call, row=row, control=control(True), extra=TAKES_NO_POINTER)
+    assert ran.stop is None, "the run stopped at a turned off control: %r" % (ran.stop,)
+    assert not ran.result
+    assert ran.count("presses") == 0 and ran.count("laterPresses") == 0
+    assert ran.server.asked == []
+
+
 @pytest.mark.parametrize("app,function", DRIVEN, ids=lambda x: x)
 def test_a_turned_off_control_under_a_cover_stops_the_run(drive, app, function, monkeypatch):
     module, call, control, row = _how(app, function, monkeypatch)
@@ -516,6 +550,71 @@ def test_a_turned_off_control_under_a_cover_stops_the_run(drive, app, function, 
     assert isinstance(ran.stop, pressing.Covered), ran.stop
     assert ran.count("presses") == 0
     assert ran.count("coverPresses") == 0
+
+
+def _keeps_presses(app: str) -> bool:
+    """Whether the app's capture keeps one list of what was pressed for a
+    document, as an app that presses more than one control for one does."""
+    import inspect
+    site = _loaded(app, "%s_site" % app)
+    return "pressed" in inspect.signature(site._catch_pdf).parameters
+
+
+KEEPS_PRESSES = sorted(a for a, f in DRIVEN if f == "_catch_pdf" and _keeps_presses(a))
+
+
+def test_the_apps_that_press_more_than_one_control_for_a_document_keep_the_list():
+    assert {"att", "etrade"} <= set(KEEPS_PRESSES), KEEPS_PRESSES
+
+
+@pytest.mark.parametrize("app", KEEPS_PRESSES)
+def test_a_control_turned_off_after_a_press_for_its_document_stops_the_run(drive, app):
+    """Something was pressed for the document already and brought nothing
+    yet. What it began may still bring a PDF, which would reach the next
+    document's capture, so the run stops there as it always did."""
+    def call(site, page, out, staging, trace):
+        return site._catch_pdf(page, page.query_selector("#get"), "Download statement", out,
+                               trace, staging, ["Download PDF"])
+    ran = drive(app, "%s_site" % app, call, control=_button(True))
+    assert isinstance(ran.stop, pressing.TurnedOff), ran.stop
+    assert ran.count("presses") == 0
+
+
+@pytest.mark.parametrize("app", KEEPS_PRESSES)
+def test_a_press_that_brought_nothing_is_counted_for_its_document(drive, app):
+    """The document's control is pressed and brings nothing, and the page
+    then turns it off, the way a site can while it works on the press. The
+    second try stops the run, since the first press may still bring a PDF.
+    Every wait of the capture is a moment here."""
+    pressed: list = []
+
+    def call(site, page, out, staging, trace):
+        own_wait = page.wait_for_timeout
+        page.wait_for_timeout = lambda ms: own_wait(min(ms, 20))
+        first = site._catch_pdf(page, page.query_selector("#get"), "Download statement", out,
+                                trace, staging, pressed)
+        page.evaluate("document.getElementById('get').disabled = true")
+        return first, site._catch_pdf(page, page.query_selector("#get"), "Download statement",
+                                      out, trace, staging, pressed)
+    ran = drive(app, "%s_site" % app, call, control=(
+        '<button id="get" type="button" class="ctl" onclick="window.presses++">'
+        'Download statement</button>'))
+    assert isinstance(ran.stop, pressing.TurnedOff), (ran.stop, ran.result, pressed)
+    assert ran.count("presses") == 1
+    assert pressed[0] == "Download statement", "the first press was not counted: %r" % pressed
+
+
+@pytest.mark.parametrize("app", KEEPS_PRESSES)
+def test_a_turned_off_first_control_is_marked_so_nothing_more_is_pressed(drive, app):
+    pressed: list = []
+
+    def call(site, page, out, staging, trace):
+        return site._catch_pdf(page, page.query_selector("#get"), "Download statement", out,
+                               trace, staging, pressed)
+    ran = drive(app, "%s_site" % app, call, control=_button(True))
+    assert ran.stop is None and ran.result is False
+    site = _loaded(app, "%s_site" % app)
+    assert pressed == [site._TURNED_OFF]
 
 
 @pytest.mark.parametrize("app", sorted({a for a, f in DRIVEN if f == "_catch_pdf"}))

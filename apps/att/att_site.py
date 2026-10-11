@@ -1826,6 +1826,9 @@ _LEFT_THE_PAGE = "\x00left the page"
 # What it adds when its press through the page raised, so the press may
 # have been made and nothing more is pressed for this bill.
 _PRESS_UNSURE = "\x00a press that may have been made"
+# And what it adds when the page had its control turned off, so nothing was
+# pressed (pressing.TurnedOff).
+_TURNED_OFF = "\x00turned off"
 
 
 def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
@@ -1835,7 +1838,11 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
     an embedded viewer, or a second control the click revealed. `trace`
     collects what happened, the click's own outcome included, so a failed
     attempt says which of those it was not. `pressed`, when given, gets the
-    words of every control pressed, so the caller can tell what was tried."""
+    words of every control pressed, so the caller can tell what was tried.
+    It is one list for the whole bill. A control the page has turned off
+    leaves the bill only when nothing was pressed for the bill before, since
+    what an earlier press began may still bring its PDF, and then the run
+    stops as it did."""
     ctx = page.context
     got: dict = {}
     downloads: list = []
@@ -1913,12 +1920,18 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                 guard=is_safe_control, dl_dir=dl_dir,
                 brought=lambda: bool(downloads or got or (_control_texts(page) - controls_before)))
         except pressing.TurnedOff:
+            # Something was pressed for this bill already, and what it began
+            # may still bring a PDF, so the run stops there as it did.
+            if pressed and any(not p.startswith("\x00") for p in pressed):
+                raise
             # The page has turned the control off, so nothing was pressed and
             # nothing this document brings can come. No second step is looked
             # for, and the document is left for review and the next run while
             # the run goes on (pressing.TurnedOff).
             if trace is not None:
                 trace.append({"note": "the control is turned off on the page, so nothing was pressed"})
+            if pressed is not None:
+                pressed.append(_TURNED_OFF)
             return False
         if outcome.error is not None:
             log.info("click on %r failed: %s", label, str(outcome.error)[:120])
@@ -2056,12 +2069,16 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
     center), the billing center's own "Download PDF" is used, provided the
     bill shown there carries this date. When the bill's button is found
     but cannot be pressed as it was read, nothing more is pressed and the
-    bill is left for review. Nothing else is ever clicked.
+    bill is left for review. Nothing else is ever clicked. A Download PDF
+    the page has turned off is not pressed, and nothing more is pressed for
+    the bill, which is left for review and the next run.
 
     `dl_dir` is where the attached browser saves a download, watched
     after every click."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Every control pressed for this bill, through every attempt below.
+    tried: list = []
 
     if goto_history(page):
         # An older bill is on a later page of the history, which shows
@@ -2102,9 +2119,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
                     break
                 page.wait_for_timeout(1000)
             if btn is not None:
-                tried: list = []
                 if _catch_pdf(page, btn, blabel, out_path, trace, dl_dir, tried):
                     return True
+                # Turned off on the page, so nothing was pressed for the bill,
+                # and nothing else is pressed for it either.
+                if _TURNED_OFF in tried:
+                    return False
                 # Download PDF left the page before anything pressed it, so the
                 # page was drawn anew, and a View/print PDF found on it now may
                 # be another bill's. Nothing more is pressed for this one.
@@ -2122,12 +2142,13 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
                 if not any(_VIEW_PRINT_RE.match(t or "") for t in tried):
                     alt, alabel = _view_print_button(page)
                     if alt is not None and alabel.lower() != blabel.lower():
-                        alt_tried: list = []
-                        if _catch_pdf(page, alt, alabel, out_path, trace, dl_dir, alt_tried):
+                        if _catch_pdf(page, alt, alabel, out_path, trace, dl_dir, tried):
                             return True
                         # Nor the billing center's Download PDF after a
-                        # View/print PDF that may have been pressed.
-                        if _PRESS_UNSURE in alt_tried:
+                        # View/print PDF that may have been pressed. An
+                        # earlier mark of that kind ended the bill above, so
+                        # one here is View/print PDF's own.
+                        if _PRESS_UNSURE in tried:
                             return False
             else:
                 log.info("no Download PDF after opening the bill for %s", iso_date)
@@ -2177,7 +2198,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, hint: str = "",
         if trace is not None:
             trace.append({"note": "billing center shows other dates", "dates": sorted(shown)[-3:]})
         return False
-    return _catch_pdf(page, btn, blabel, out_path, trace, dl_dir)
+    return _catch_pdf(page, btn, blabel, out_path, trace, dl_dir, tried)
 
 
 # ---------------------------------------------------------------------------

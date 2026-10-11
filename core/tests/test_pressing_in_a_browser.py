@@ -355,6 +355,9 @@ def test_a_covered_label_is_not_pressed_either(show):
 OFF_BUTTON = BUTTON.replace(' onclick=', ' disabled onclick=')
 OFF_COVER = ('<div class="cover" style="right: 0; bottom: 0; width: 300px; height: 120px;" '
              'onclick="said(\'cover\')">Chat</div>')
+# How Bootstrap and Material UI draw a turned off control, so it takes no
+# pointer and what is at its point is what holds it.
+NO_POINTER = '<style>#go { pointer-events: none; }</style>'
 
 
 def _click_off(page, timeout):
@@ -362,38 +365,10 @@ def _click_off(page, timeout):
                    timeout=timeout)
 
 
-def test_a_turned_off_control_is_waited_for_press_ms_and_not_the_presses_own_time(
-        show, monkeypatch):
-    """A press given a long time, as one that waits for a download is, still
-    gives a control that stays turned off no longer than PRESS_MS. Nothing
-    is pressed, and nothing was tried, so the stop is no stop after a press."""
-    import time
-    monkeypatch.setattr(pressing, "PRESS_MS", 600)
+def test_a_control_turned_off_the_whole_press_is_left_with_nothing_pressed(show):
+    """Playwright says it waited the whole time and never began its press,
+    and the control still shows, turned off, with nothing over it."""
     page = show(OFF_BUTTON)
-    started = time.monotonic()
-    with pytest.raises(pressing.TurnedOff) as stop:
-        _click_off(page, 30000)
-    assert time.monotonic() - started < 10
-    assert pressed(page) == []
-    assert not stop.value.after_a_press
-    assert stop.value.facts == {"verdict": "off"}
-
-
-def test_a_control_the_page_turns_on_while_it_is_waited_for_is_pressed(show, monkeypatch):
-    monkeypatch.setattr(pressing, "PRESS_MS", 4000)
-    page = show(OFF_BUTTON + "<script>setTimeout(() => { "
-                "document.getElementById('go').disabled = false; }, 400);</script>")
-    _click_off(page, 8000)
-    assert pressed(page) == ["go"]
-
-
-def test_a_control_turned_off_after_it_read_as_on_is_left_by_what_playwright_says(
-        show, monkeypatch):
-    """It read as turned on, and stayed turned off for all of Playwright's
-    own wait. Playwright says its press never began, so nothing was
-    pressed."""
-    page = show(OFF_BUTTON)
-    monkeypatch.setattr(pressing, "_off_the_whole_wait", lambda *a, **k: False)
     with pytest.raises(pressing.TurnedOff) as stop:
         _click_off(page, 700)
     assert pressed(page) == []
@@ -401,22 +376,87 @@ def test_a_control_turned_off_after_it_read_as_on_is_left_by_what_playwright_say
     assert stop.value.facts == {"verdict": "off", "error": "timeout"}
 
 
-def test_a_turned_off_control_under_a_cover_stops_the_run_as_covered(show, monkeypatch):
-    monkeypatch.setattr(pressing, "PRESS_MS", 600)
+def test_a_turned_off_control_is_waited_for_the_presses_own_time(show, monkeypatch):
+    """A press given longer than PRESS_MS, as one that waits for a download
+    is, waits that long for the control to turn on, as Playwright always
+    did, so a dialog's Download the page turns on late is still pressed."""
+    import time
+    monkeypatch.setattr(pressing, "PRESS_MS", 300)
+    page = show(OFF_BUTTON)
+    started = time.monotonic()
+    with pytest.raises(pressing.TurnedOff):
+        _click_off(page, 1500)
+    assert time.monotonic() - started >= 1.4
+    assert pressed(page) == []
+
+
+def test_a_control_the_page_turns_on_while_it_is_waited_for_is_pressed(show):
+    page = show(OFF_BUTTON + "<script>setTimeout(() => { "
+                "document.getElementById('go').disabled = false; }, 400);</script>")
+    _click_off(page, 8000)
+    assert pressed(page) == ["go"]
+
+
+def test_a_turned_off_control_under_a_cover_stops_the_run_as_covered(show):
     page = show(OFF_BUTTON + OFF_COVER)
     with pytest.raises(pressing.Covered):
-        _click_off(page, 8000)
+        _click_off(page, 700)
     assert pressed(page) == []
 
 
-def test_a_hidden_turned_off_control_is_not_waited_for(show, monkeypatch):
-    """One that does not show is no turned off control that shows, so it is
-    read at once, and that it cannot be read stops the run as before."""
-    import time
-    monkeypatch.setattr(pressing, "PRESS_MS", 3000)
+def test_a_turned_off_control_drawn_to_take_no_pointer_is_left(show):
+    """What is at its point is what holds it, which is no cover."""
+    page = show(OFF_BUTTON + NO_POINTER)
+    with pytest.raises(pressing.TurnedOff):
+        _click_off(page, 700)
+    assert pressed(page) == []
+
+
+def test_a_cover_over_a_turned_off_control_drawn_to_take_no_pointer_still_stops_the_run(show):
+    page = show(OFF_BUTTON + NO_POINTER + OFF_COVER)
+    with pytest.raises(pressing.Covered):
+        _click_off(page, 700)
+    assert pressed(page) == []
+
+
+def test_a_control_turned_on_that_takes_no_pointer_is_not_pressed(show):
+    """Only a control read as turned off is read that way. One turned on
+    that takes no pointer cannot take the press, and nothing is pressed."""
+    page = show(BUTTON + NO_POINTER)
+    with pytest.raises(pressing.Covered):
+        _click_off(page, 700)
+    assert pressed(page) == []
+
+
+def test_a_hidden_turned_off_control_stops_the_run_before_any_press(show):
+    """One that does not show is no turned off control that shows. It is
+    read before any press, and that it cannot be read stops the run."""
     page = show(OFF_BUTTON.replace('position: fixed;', 'position: fixed; display: none;'))
-    started = time.monotonic()
     with pytest.raises(pressing.Unread):
         _click_off(page, 8000)
-    assert time.monotonic() - started < 2.5
     assert pressed(page) == []
+
+
+def test_a_frame_raised_over_a_control_turned_on_late_stops_the_run(show):
+    """A frame sits under the window's middle, behind the page. A control
+    is pressed there first, and its look notes that frame. The next one is
+    drawn turned off and taking no pointer, the first press has the page
+    turn it on while Playwright waits, and its press raises the frame over it. The note the
+    first look left is not taken for this control's, so the frame that came
+    over it stops the run."""
+    page = show(
+        '<style>.spacer { height: 1200px; } .ctl { display: block; width: 200px; '
+        'height: 40px; margin-left: 100px; } #F { position: fixed; left: 0; top: 0; '
+        'width: 100vw; height: 100vh; z-index: -1; border: 0; } '
+        '#b:disabled { pointer-events: none; }</style>'
+        '<iframe id="F" srcdoc="<p>chat</p>"></iframe><div class="spacer"></div>'
+        '<button id="a" class="ctl" type="button" onclick="said(\'a\'); setTimeout(() => { '
+        'document.getElementById(\'b\').disabled = false; }, 1500)">Open</button>'
+        '<div class="spacer"></div><button id="b" class="ctl" type="button" disabled '
+        'onclick="said(\'b\'); document.getElementById(\'F\').style.zIndex = 1000">'
+        'Download</button><div class="spacer"></div>')
+    pressing.click(page, page.locator("#a"), css="button", what="the control a", words=WORDS)
+    with pytest.raises(pressing.Covered):
+        pressing.click(page, page.locator("#b"), css="button", what="the control b",
+                       words=WORDS, timeout=4000)
+    assert pressed(page) == ["a", "b"]

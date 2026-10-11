@@ -102,7 +102,7 @@ def run(monkeypatch, tmp_path):
     hits: list = []
     brings: set = set()
 
-    def fake(pg, el, label, out_path, trace=None, dl_dir=None, unsure=None):
+    def fake(pg, el, label, out_path, trace=None, dl_dir=None, pressed=None, unsure=None):
         before = len(pg.evaluate("window.hits"))
         try:
             el.click(timeout=3000)
@@ -463,3 +463,50 @@ def test_the_row_walk_presses_only_what_looks_like_a_document_action(page, run, 
     assert hits == [] and not got, (hits, saved)
     row = next(t for t in trace if t.get("note") == "the document's row")
     assert [c["left_out"] for c in row["candidates"]] == [True], row
+
+
+# --- a control the page has turned off --------------------------------------
+
+def _turned_off_at_the_first_press(monkeypatch):
+    """The catch as it ends when the page has the document's control turned
+    off. It presses nothing and marks the document's list of presses the
+    way the real one does (pressing.TurnedOff). The steps that called it
+    are kept, in order."""
+    import inspect
+    calls = []
+
+    def fake(pg, el, label, out_path, trace=None, dl_dir=None, pressed=None):
+        calls.append(inspect.stack()[1].function)
+        if pressed is not None and len(calls) == 1:
+            pressed.append(site._TURNED_OFF)
+        return False
+    monkeypatch.setattr(site, "_catch_pdf", fake)
+    return calls
+
+
+TURNED_OFF_SHAPES = {
+    "the row link first": (
+        "<table><tbody><tr><td>10/31/25</td><td>%s</td>"
+        "<td><a href='#' data-guid='g-title'>%s</a></td>"
+        "<td><button type='button' data-guid='g-view'>View</button></td></tr></tbody></table>"
+        % (ACCOUNT, BROKERAGE), "download_bill"),
+    "every way in turn": (
+        "<ul><li><span>10/31/25</span> <span data-guid='g-title'>%s</span> "
+        "<span data-guid='g-view' style='cursor:pointer'>View</span></li></ul>"
+        % BROKERAGE, "_try_every_way"),
+}
+
+
+@pytest.mark.parametrize("shape", list(TURNED_OFF_SHAPES), ids=list(TURNED_OFF_SHAPES))
+def test_a_document_whose_first_control_is_turned_off_has_nothing_more_pressed(
+        page, monkeypatch, tmp_path, shape):
+    """Nothing was pressed for the document, so it is left for review and
+    the next run, and none of its other controls is tried."""
+    _listed(monkeypatch, {ALONE: [BROKERAGE]})
+    html, first_step = TURNED_OFF_SHAPES[shape]
+    page.set_content(html + LISTENER)
+    calls = _turned_off_at_the_first_press(monkeypatch)
+    out = tmp_path / "Statements" / "document.pdf"
+    got = site.download_bill(page, tmp_path / "dl", ALONE, out, BROKERAGE, [])
+    assert got is False and not out.exists()
+    assert calls == [first_step], calls

@@ -766,7 +766,8 @@ def download_document(page, category: str, date: str, out_path) -> bool:
         pressing.click(page, btn, css=sel, what=button, words=words,
                        step="press a download button")
     except pressing.TurnedOff:
-        log.info("the row download button is turned off for %s %s", category, date)
+        log.info("%s is turned off on the page, so nothing was pressed and it is left for "
+                 "review", button)
         return False
 
     if not _wait_for_dialog(page, DIALOG_WAIT_MS):
