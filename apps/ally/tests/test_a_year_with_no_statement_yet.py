@@ -78,6 +78,8 @@ BROKEN_PAGE = """<!doctype html><html><head><title>Statements and Tax Forms</tit
 
 class FakeAlly:
     statements_draw = True
+    # A year whose list Ally answers with an error.
+    fails_year = None
 
 
 SITE = FakeAlly()
@@ -97,6 +99,10 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == TAX_PATH:
             page = TAX_PAGE
         elif path == "/acs/v1/bank-statements":
+            from urllib.parse import parse_qs
+            if SITE.fails_year and parse_qs(urlsplit(self.path).query).get("year") == [SITE.fails_year]:
+                self.send_error(500)
+                return
             data = json.dumps({"statements": []}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -156,6 +162,7 @@ def made_up_ally(server, monkeypatch):
     """Ally is the made-up site, its statements draw, and the app's waits
     are short."""
     SITE.statements_draw = True
+    SITE.fails_year = None
     base = "http://%s:%d" % (ALLY_HOST, server)
     monkeypatch.setattr(site, "BASE", base)
     for name, path in (("home", "/"), ("login", "/"), ("documents", STATEMENTS_PATH),
@@ -234,6 +241,24 @@ def test_discover_on_a_year_with_no_statement_yet_reads_the_list(server, attache
     ended, said, whole = run_discover(tmp_path, attached, server, capsys)
     assert ended == ("returned", 0) and whole is True, said[-1500:]
     assert "Could not open your Ally statements" not in said, said[-1500:]
+
+
+def test_a_year_whose_list_never_answered_leaves_the_list_unread(server, attached, tmp_path,
+                                                                  capsys):
+    """The picker offers two years and the older one's list failed every
+    time it was asked for. One answer used to settle the walk, so the list
+    was called whole with that year never read."""
+    SITE.fails_year = "2030"
+    ended, said, whole = run_discover(tmp_path, attached, server, capsys)
+    assert whole is False, said[-1500:]
+    assert ended != ("returned", 0), said[-1500:]
+
+
+def test_the_years_unheard_are_read_from_each_answer():
+    heard = ["https://secure.ally.test/acs/v1/bank-statements?docType=STATEMENTS&year=2031"]
+    assert site._years_unheard(["2031", "2030"], heard) == ["2030"]
+    assert site._years_unheard(["2031"], heard) == []
+    assert site._years_unheard(["All years"], heard) == []
 
 
 def test_discover_where_the_list_never_draws_still_stops(server, attached, tmp_path, capsys):

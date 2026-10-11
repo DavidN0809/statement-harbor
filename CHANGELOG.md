@@ -18,6 +18,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   beside each. They now follow the same rule as the EOBs. A card is dated
   by when it took effect, and a card or letter that comes with no date is
   left out of a run that has a year or dates, as an EOB with no date is.
+- **Ally no longer counts its statements list as read with a year missing.**
+  Ally lists one year at a time, and Discover picks each year in turn.
+  Once any one year had answered, the walk was taken as done, so a year
+  whose pick did not take, or whose list Ally failed to send, was left out
+  while the list was noted as read whole, and Resume never went back for
+  it. Every year the picker offers now has to answer, and otherwise the
+  run says the list was not read whole.
 
 ## [0.46.0] - 2026-10-11
 

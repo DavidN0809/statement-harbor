@@ -865,6 +865,20 @@ def _drawn_or_heard(page, heard: list) -> bool:
         page.wait_for_timeout(500)
 
 
+def _years_unheard(years, heard: list) -> list:
+    """The years of four digits the picker offered that no answer heard was
+    for, read from each answer's year= (GET /acs/v1/bank-statements?docType=
+    STATEMENTS&year=YYYY). A pick that did not take, a picker that snapped
+    back, or an answer that failed leaves its year unheard, and the list is
+    not whole without it."""
+    from urllib.parse import parse_qs, urlsplit
+    got = set()
+    for url in heard:
+        got.update(v.strip() for v in parse_qs(urlsplit(url or "").query).get("year", []))
+    return [y.strip() for y in years
+            if re.fullmatch(r"\d{4}", (y or "").strip()) and y.strip() not in got]
+
+
 def _settled_within(page, heard: list, asking: set, seconds: float) -> bool:
     """Whether a list was heard, given `seconds` for one to come and for
     every call still being answered to finish. The last pick's answer can
@@ -981,6 +995,15 @@ def ally_collect_via_api(page, labels: Optional[dict] = None) -> Optional[List[d
         if not _settled_within(page, heard, asking, ANSWER_WAIT_S):
             log.warning("no list of statements arrived within %d s", ANSWER_WAIT_S)
             return None
+        # Every year the picker offers has to have answered. Any one answer
+        # used to settle the walk, so a year whose pick did not take or
+        # whose answer failed was left out while the list was called whole.
+        if sel is not None and len(years) > 1:
+            missing = _years_unheard(years, heard)
+            if missing:
+                log.warning("no list of statements arrived for %s, so the list is not whole",
+                            ", ".join(missing))
+                return None
     finally:
         for event, handler in listeners:
             try:
