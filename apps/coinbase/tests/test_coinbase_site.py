@@ -266,6 +266,50 @@ class TaxList(unittest.TestCase):
         answers[:] = [{"data": [{"id": "a"}], "next_cursor": "c1"}, {"data": [{"id": "b"}], "next_cursor": ""}]
         self.assertEqual([i["id"] for i in site._tax_forms_for(Page(), 2025)], ["a", "b"])
 
+    @staticmethod
+    def _answering(*answers):
+        """A page whose list calls answer these, one per call, in order."""
+        left = list(answers)
+
+        class Resp:
+            ok, status, url, headers = True, 200, "", {}
+            def json(self): return left.pop(0)
+            def dispose(self): pass
+
+        class Req:
+            def get(self, url, **kw): return Resp()
+
+        class Ctx: request = Req()
+
+        class Page: context = Ctx()
+        return Page()
+
+    def test_a_form_that_names_another_year_stops_the_list(self):
+        for said in ({"tax_year": 2024}, {"year": "2024"}):
+            page = self._answering({"data": [dict({"id": "form0001"}, **said)], "next_cursor": ""})
+            with self.assertRaises(site.ListStopped):
+                site._tax_forms_for(page, 2025)
+        for said in ({"tax_year": 2025}, {"year": "2025"}, {}):
+            page = self._answering({"data": [dict({"id": "form0001"}, **said)], "next_cursor": ""})
+            self.assertEqual([i["id"] for i in site._tax_forms_for(page, 2025)], ["form0001"])
+
+    def test_a_forms_answer_that_is_not_a_list_of_forms_stops_the_list(self):
+        for answer in ([{"id": "form0001"}], {"data": ["form0001"]}, {"data": {"id": "form0001"}}):
+            with self.assertRaises(site.ListStopped):
+                site._tax_forms_for(self._answering(answer), 2025)
+
+    def test_a_reports_list_with_more_than_one_page_stops_the_list(self):
+        pdf = {"id": "rpt0001", "name": "PregeneratedGainLossPDF", "year": 2024, "file": {"file_type": "PDF"}}
+        csv = {"id": "rpt0002", "name": "PregeneratedGainLossCSV", "year": 2024, "file": {"file_type": "CSV"}}
+        for answer in ({"data": [pdf], "next_cursor": "c1"},
+                       {"data": [pdf], "pagination": {"next_uri": "/v2/tax/tax-reports?starting_after=x"}},
+                       {"data": [dict(pdf, id="rpt%04d" % i) for i in range(200)]}):
+            with self.assertRaises(site.ListStopped):
+                site._tax_reports(self._answering(answer))
+        got = site._tax_reports(self._answering({"data": [pdf, csv], "next_cursor": "",
+                                                 "pagination": {"next_uri": None}}))
+        self.assertEqual([r["id"] for r in got], ["rpt0001"])
+
     def test_documents_without_an_id_or_a_year_stop_the_list(self):
         with self.assertRaises(site.ListStopped):
             site.tax_rawdocs({2025: [{"id": "", "form_type": "1099-DA"}]}, [])

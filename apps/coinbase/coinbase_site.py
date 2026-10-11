@@ -58,6 +58,10 @@ opaque id and the API path only.
 KNOWN CEILINGS (ponytail: left as they are until a run shows otherwise)
   * The tax list's page cursor is sent as `cursor=`; next_cursor was empty on
     the account this was built on, so a non-empty one is untested.
+  * A form is filed under the year it was asked for (year=). A form whose
+    own year field names another year stops the listing.
+  * The tax reports list is read as one page of up to 200. An answer that
+    says there is another page, or fills the page, stops the listing.
   * The statements page's "Credit Card" tab is not read; the account this
     was built on has no Coinbase Card.
   * "Last 30 days" is skipped by design, it is not a statement. A list
@@ -710,16 +714,33 @@ def _first_tax_year(first: str) -> int:
     return int(first[:4]) if first else 2012
 
 
+def _year_said(item: dict) -> str:
+    """The year a listed form names for itself, or "" when it names none."""
+    for name in ("tax_year", "year"):
+        value = item.get(name)
+        if value not in (None, ""):
+            return str(value).strip()
+    return ""
+
+
 def _tax_forms_for(page, year: int) -> list:
-    """The forms the list call returns for `year`, every page of it."""
+    """The forms the list call returns for `year`, every page of it. A form
+    is filed under the year asked for, so one whose own year field names
+    another year, or an answer that is not a list of forms, stops the
+    listing."""
     types = "&".join("types=%s" % t for t in TAX_FORM_TYPES)
     url = f"{TAX_FORMS_API}?{types}&sort_direction=DESC&year={year}&is_hidden=false"
     items: list = []
     cursor = ""
     for _ in range(20):
         data = _get_json(page, url + ("&cursor=%s" % cursor if cursor else ""))
-        if data is None or not isinstance(data.get("data"), list):
+        if not isinstance(data, dict) or not isinstance(data.get("data"), list) \
+                or not all(isinstance(it, dict) for it in data["data"]):
             raise ListStopped("the tax forms list for %d could not be read" % year)
+        for it in data["data"]:
+            said = _year_said(it)
+            if said and said != str(year):
+                raise ListStopped("the tax forms list for %d holds a form of another year" % year)
         items.extend(data["data"])
         nxt = str(data.get("next_cursor") or "")
         if not nxt:
@@ -730,13 +751,32 @@ def _tax_forms_for(page, year: int) -> list:
     raise ListStopped("the tax forms list for %d runs past 20 pages" % year)
 
 
+# How many reports the list is asked for at once.
+_REPORTS_LIMIT = 200
+
+
+def _more_pages(data: dict) -> bool:
+    """Whether a list's answer says it has another page, by a cursor of its
+    own or one under pagination."""
+    if str(data.get("next_cursor") or ""):
+        return True
+    more = data.get("pagination")
+    return isinstance(more, dict) and any(
+        str(more.get(name) or "") for name in ("next_cursor", "next_uri", "next_starting_after"))
+
+
 def _tax_reports(page) -> list:
-    """The pregenerated reports, PDFs only."""
+    """The pregenerated reports, PDFs only. One page of up to
+    _REPORTS_LIMIT is read, so an answer that says there is another page,
+    or fills this one, stops the listing rather than miss the rest."""
     url = (f"{TAX_REPORTS_API}?from_date=2012-01-01T00:00:00Z"
-           f"&to_date={_date.today().year}-12-31T23:59:59Z&limit=200")
+           f"&to_date={_date.today().year}-12-31T23:59:59Z&limit={_REPORTS_LIMIT}")
     data = _get_json(page, url)
-    if data is None or not isinstance(data.get("data"), list):
+    if not isinstance(data, dict) or not isinstance(data.get("data"), list) \
+            or not all(isinstance(r, dict) for r in data["data"]):
         raise ListStopped("the tax reports list could not be read")
+    if _more_pages(data) or len(data["data"]) >= _REPORTS_LIMIT:
+        raise ListStopped("the tax reports list has more than the one page this reads")
     return [r for r in data["data"]
             if str((r.get("file") or {}).get("file_type") or "").lower() == "pdf"]
 
