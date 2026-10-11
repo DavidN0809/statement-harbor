@@ -724,21 +724,32 @@ def invoices_of_an_order(inst, filed: Path, words: str, confidence: str):
 
 
 @pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
-def test_a_new_name_follows_into_the_record_s_list_of_invoices(app, tmp_path, monkeypatch):
+@pytest.mark.parametrize("spelled", ["as its row spells it", "in another case"])
+def test_a_new_name_follows_into_the_record_s_list_of_invoices(app, spelled, tmp_path,
+                                                               monkeypatch):
     """Target keeps every invoice of an order split into several in its
     record's list of invoices, and only one of them in pdf_path. A new name
     for an invoice corrected its rows and pdf_path and left the list naming
     the old file, which Review Names, Rename and Target's own walk all read
     as the order's. Each entry naming a renamed invoice now names it as it
     is, the one pdf_path names and another alike, and an entry for a file
-    deleted since is left as it was. The list is read from the record
-    whatever the app, so every receipt app keeps it right."""
+    deleted since is left as it was, and an entry spelling its file in
+    another case than the row follows it too, as two spellings of one file
+    are on Windows and macOS. The list is read from the record whatever the
+    app, so every receipt app keeps it right."""
+    import os
     mod = load(app)
     inst = runnable(mod, tmp_path / "out")
     filed = inst.paths.folder_for(ONLINE)
     purchase, first, second, entries = invoices_of_an_order(inst, filed, "Unsure Purchase",
                                                             "Low")
     inst.index_csv.append_rows([index_row("ORDER-0001", second)])
+    if spelled == "in another case":
+        upper = [f.with_name(f.name.upper()) for f in (first, second)]
+        if not all(os.path.exists(u) for u in upper):
+            pytest.skip("this folder tells case apart, so the two spellings are two files")
+        entries[:2] = [dict(e, file=str(u)) for e, u in zip(entries, upper)]
+        inst.progress.update(purchase.key, {"invoices": entries})
 
     answers = iter(["Garden Hose", "Lamp"])
     monkeypatch.setattr(mod, "ask", lambda prompt: next(answers))

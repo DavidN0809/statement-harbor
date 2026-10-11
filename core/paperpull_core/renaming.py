@@ -1382,6 +1382,15 @@ def review_names(app, ask, words: ReviewWords = WORDS,
             # lost it.
             new_name = build_pdf_filename(date, new_summary, doc_type, part=_part_of(r),
                                           record=record)
+            # Each entry of the record's list of invoices naming this file,
+            # however it is spelled, told while the file is there to be
+            # compared, since afterwards two spellings that read alike may
+            # be two files where a folder tells case apart.
+            invoices = prog.get("invoices")
+            spelled = {str(e.get("file") or "").strip()
+                       for e in (invoices if isinstance(invoices, list) else ())
+                       if isinstance(e, dict)}
+            spelled = {raw for raw in spelled if raw and _one_file(raw, str(old_path))}
             try:
                 # The file does not stand in its own way. Asked for a free
                 # name as though it were another file's, the summary it
@@ -1450,10 +1459,8 @@ def review_names(app, ask, words: ReviewWords = WORDS,
             # An entry of the record's list of invoices naming this file
             # follows it, whether or not the record speaks for it otherwise,
             # since it names this very file (_follow_invoices).
-            gone = _same_file(str(old_path))
             invoices = _follow_invoices(
-                prog.get("invoices"),
-                lambda raw: str(new_path) if gone and _same_file(raw) == gone else None)
+                invoices, lambda raw: str(new_path) if raw in spelled else None)
             if ours:
                 named = {"summary": new_summary, "pdf_filename": new_path.name,
                          "pdf_path": str(new_path), "confidence": "High"}
