@@ -420,13 +420,18 @@ class App:
 
 
 
+        why: List[str] = []
+        filed_under = {r.get("account_id") for r in self.discovery.data.values()
+                       if isinstance(r, dict) and r.get("account_id")}
         raw = site.collect_documents(
-            page, keep=scope.period_filter(self.args, self.config))
+            page, keep=scope.period_filter(self.args, self.config),
+            filed_under=filed_under, why=why)
         if raw is None:
-            print("Could not read the months on your Interactive Brokers Statements page.")
-            print("The Activity Statement dialog did not open there, or the page showed no")
-            print("account number, so nothing was listed. Open Performance & Reports, then")
-            print("Statements, in the browser, and try again. If it keeps happening, run")
+            print("Could not read the months on your Interactive Brokers Statements page,")
+            print("since %s, so nothing was listed." % (why[0] if why else "it did not show them"))
+            print("Open Performance & Reports, then Statements, in the browser, and try")
+            print("again. If your account has no monthly statement yet, there is nothing to")
+            print("download until its first month closes. If it keeps happening, run")
             print("--diagnose and attach its file to an issue.")
             # Nothing was read, so the run stops rather than note an empty
             # list as read whole (review of #77, paperpull_core.listing).
@@ -879,8 +884,22 @@ class App:
             info["title"] = page.title()
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
-            stmts = site.collect_statement_periods(page)
+            why: List[str] = []
+            stmts = site.collect_statement_periods(page, why=why)
             info["months_read"] = stmts is not None
+            info["why_not_read"] = why
+            # Whether an account number reads, and when none does, the shape
+            # of the first thing on the page that looks like one, a letter
+            # as a and a digit as 9, which says what the pattern missed.
+            info["account_number_read"] = bool(site.read_account_id(page))
+            if not info["account_number_read"]:
+                try:
+                    text = page.evaluate("() => document.body.innerText || ''") or ""
+                except Exception:
+                    text = ""
+                m = re.search(r"\b[A-Za-z]{1,3}\d{5,10}\b", text)
+                info["account_like_shape"] = (re.sub(r"\d", "9", re.sub(r"[A-Za-z]", "a", m.group(0)))
+                                              if m else "")
             stmts = stmts or []
             kinds, by_account, samples = {}, {}, []
             for s in stmts:

@@ -28,9 +28,9 @@ change on the same page.
 ## Validation status
 
 Run against one real account (an individual brokerage account at Interactive
-Brokers LLC) on 2026-10-10: discovery listed 61 monthly statements, September
+Brokers LLC) on 2026-10-10. Discovery listed 61 monthly statements, September
 2021 to September 2026, a pilot saved 5 of 5, and a second pilot downloaded
-nothing. A full run saved 60 of 61; the one that did not save had a single
+nothing. A full run saved 60 of 61. The one that did not save had a single
 intermittent "no download", and a supervised retry saved it. Each PDF's own
 heading names the month in its file name. The `.com`, `.co.uk` and `.ie` hosts
 have been seen, so an account sent to another regional domain stops at the
@@ -55,8 +55,14 @@ Each statement is the dialog's own Download PDF button, pressed once with the
 month chosen. The browser saves into `.ibkr-downloads`, a staging folder in the
 output folder, given to the browser as a full path, and the file the download
 event names is moved into place under the app's name. The file's own name says
-which month it is for (`<account>_<YYYYMM>_<YYYYMM>.pdf`), and a file that says
-another month than the one asked for is not taken.
+which month and account it is for (`<account>_<YYYYMM>_<YYYYMM>.pdf`), and a
+file that says another month than the one asked for, or another account than
+the one the Statements page named, is not taken.
+
+Discover stops, rather than note an empty list as read, when the Activity
+Statement dialog does not open, or when the page names no account number
+while the statements already listed are filed under one. Filed under a bare
+"Account" then, every month would be listed and downloaded a second time.
 
 Nothing is requested from the statement address directly. A plain request made
 from outside the page's own client is refused for lack of a session value the

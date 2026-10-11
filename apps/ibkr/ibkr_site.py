@@ -7,8 +7,8 @@ SAFETY (this is a brokerage):
   reads the months that can be asked for, and downloads the PDF Interactive
   Brokers generates for each. It must NEVER activate any control that
   trades, transfers, deposits, withdraws, converts a currency, changes a
-  holding or changes any setting. FORBIDDEN_CONTROL_RE is the guard; every
-  click must ALSO look like a document action (SAFE_DOC_CONTROL_RE) before
+  holding or changes any setting. FORBIDDEN_CONTROL_RE is the guard, and
+  every click must ALSO look like a document action (SAFE_DOC_CONTROL_RE) before
   it may be clicked. There is no code here that submits a form or confirms
   a dialog.
 
@@ -50,7 +50,7 @@ Scope: the monthly Activity Statement, which is the statement of record.
 The page also offers tax documents, trade confirmations, flex queries and
 third-party reports. Those are not read here, so no folder is made for them.
 """
-# Site layer verified working against the live site: 2026-10 (listing and download; see the app's tests for what is pinned)
+# Site layer verified working against the live site: 2026-10 (listing and download, the app's tests say what is pinned)
 from __future__ import annotations
 
 import logging
@@ -547,7 +547,10 @@ def choose_monthly(page) -> bool:
 
 # ---------------------------------------------------------------- collection
 
-ACCOUNT_ID_RE = re.compile(r"\b((?:DU|U|F|I)\d{6,9})\b")
+# Interactive Brokers account numbers: U for an account, F for an advisor's
+# master, I for a broker's master, and each with D in front for paper trading
+# (DU, DF, DI).
+ACCOUNT_ID_RE = re.compile(r"\b(D?[UFI]\d{6,9})\b")
 
 
 def read_account_id(page) -> str:
@@ -565,29 +568,44 @@ def read_account_id(page) -> str:
     return m.group(1) if m else ""
 
 
-def collect_statement_periods(page, keep=None) -> Optional[List[dict]]:
+# Why collect_statement_periods read no month, for the caller to say.
+NO_DIALOG = "the Activity Statement dialog did not open"
+NO_ACCOUNT = "the page named no account, and the statements listed before were filed under one"
+NO_MONTHS = "the dialog showed no Date select of months"
+
+
+def collect_statement_periods(page, keep=None, filed_under=(), why=None) -> Optional[List[dict]]:
     """The months the Date select offers under Monthly, as
     {label, code, year, month, account_id}. `keep`, when given, says which
-    options a scoped run wants (paperpull_core.scope.period_filter); the
+    options a scoped run wants (paperpull_core.scope.period_filter), and the
     options it refuses are not returned. The dialog is closed again.
 
-    None when the months could not be read: the dialog would not open, it
-    showed no Date select of months, or the page named no account. An empty
-    list is only ever a list read whole that held nothing a run wants, so a
-    Discover never notes a list it did not read (review of #77)."""
+    None when the months could not be read, with the reason appended to
+    `why` when a list is given. The dialog would not open, it showed no Date
+    select of months, or the page named no account while `filed_under`, the
+    account numbers already in the archive's records, holds one. Filed under
+    a bare "Account" then, every month would be listed again and downloaded
+    a second time. A page that has never named an account files its months
+    under "Account", as it always did. An empty list is only ever a list
+    read whole that held nothing a run wants, so a Discover never notes a
+    list it did not read (review of #77)."""
+    why = why if why is not None else []
     if not open_activity_dialog(page):
-        log.info("the Activity Statement dialog did not open, so no month was read")
+        log.info("%s, so no month was read", NO_DIALOG)
+        why.append(NO_DIALOG)
         return None
     account_id = read_account_id(page)
-    if not account_id:
+    if not account_id and any(filed_under):
         log.info("no account number reads on the Statements page")
+        why.append(NO_ACCOUNT)
         close_dialog(page)
         return None
     out: List[dict] = []
     try:
         sel = month_select(page)
         if sel is None:
-            log.info("the dialog showed no Date select of months")
+            log.info(NO_MONTHS)
+            why.append(NO_MONTHS)
             return None
         labels = _select_options(sel)
         values = []
@@ -627,10 +645,10 @@ def classify_document(doc: dict) -> Tuple[str, str, str, str]:
             f"Activity Statement - {label}")
 
 
-def list_documents(page, keep=None) -> Optional[List[dict]]:
+def list_documents(page, keep=None, filed_under=(), why=None) -> Optional[List[dict]]:
     """Every month the account offers, shaped for the engine, or None when
     the months could not be read (collect_statement_periods)."""
-    periods = collect_statement_periods(page, keep=keep)
+    periods = collect_statement_periods(page, keep=keep, filed_under=filed_under, why=why)
     if periods is None:
         return None
     out: List[dict] = []
@@ -653,8 +671,8 @@ def list_documents(page, keep=None) -> Optional[List[dict]]:
     return out
 
 
-def collect_documents(page, keep=None) -> Optional[List[dict]]:
-    return list_documents(page, keep=keep)
+def collect_documents(page, keep=None, filed_under=(), why=None) -> Optional[List[dict]]:
+    return list_documents(page, keep=keep, filed_under=filed_under, why=why)
 
 
 # ---------------------------------------------------------------- download
@@ -773,7 +791,7 @@ def download_document(page, account_id: str, doc_type: str, title: str,
     elif dl is not None and not named_month_matches(dl.suggested_filename or "", code):
         # Another month's file under this month's press. Not taken.
         log.warning("the file named %r is not the statement for %s, not taken",
-                    (dl.suggested_filename or "")[:60], code)
+                    redact_label(dl.suggested_filename or "")[:60], code)
     elif dl is not None and not named_account_matches(dl.suggested_filename or "", account_id):
         # Another account's statement, as when the page shows an account
         # other than the one this month was listed for. Not taken.
@@ -783,7 +801,7 @@ def download_document(page, account_id: str, doc_type: str, title: str,
         for _ in range(20):
             took = _take_download(dl, staging, before, out_path)
             if took == "event":
-                how = "the download event (%s)" % (dl.suggested_filename or "")[:60]
+                how = "the download event (%s)" % redact_label(dl.suggested_filename or "")[:60]
             elif took:
                 how = "the browser's own file"
             if how or not staging:

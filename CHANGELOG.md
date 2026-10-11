@@ -20,11 +20,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   taken. Sign-in lands on the person's regional domain, and .com, .co.uk
   and .ie are known. Contributed by tylerverry, whose full run saved 60 of
   61 months back to 2021, the last on a supervised retry. Before merging,
-  a dialog that would not open, or a page that named no account, was made
-  to stop Discover where it used to note an empty list as read, the
-  account number was read from the whole page so a notice above the
-  heading no longer filed every month again under a bare "Account", and a
-  lookalike address is never suggested for the list of domains.
+  a dialog that would not open was made to stop Discover where it used to
+  note an empty list as read, the account number is read from the whole
+  page, paper and advisor numbers included, so a notice above the heading
+  no longer files every month again under a bare "Account", a page that
+  names no account stops Discover once the months are filed under one, and
+  a lookalike address is never suggested for the list of domains.
 
 ### Fixed
 - **USAA's Discover could miss most of the list from 0.26.0 on.** USAA's

@@ -11,9 +11,10 @@ clean with nothing done. It stops now, as every other app does since
 The account number was read from the first 1,200 characters of the page,
 so a notice above the heading left it unread, and the same months came
 back as new records filed under "Account", each to be downloaded again
-under a second name. The whole page is read now, a page with no account
-number on it stops Discover, and a file whose own name says it belongs to
-another account is not taken.
+under a second name. The whole page is read now, paper and advisor
+numbers (DF, DI) read as well, a page with no account number stops
+Discover only when the months listed before are filed under one, and a
+file whose own name says it belongs to another account is not taken.
 
 In a real browser attached over CDP, as at home. Interactive Brokers is a
 made-up host name the browser is told to find on this machine, and every
@@ -208,7 +209,7 @@ def tab(attached, server):
 
 # -- Discover, driven through main ----------------------------------------
 
-def run_discover(tmp_path, attached, server, capsys):
+def run_discover(tmp_path, attached, server, capsys, *flags):
     """The person's tab on the portal, the only tab open, then a Discover.
     How it ended, what it said, whether the list was noted whole, and the
     records it holds."""
@@ -222,7 +223,7 @@ def run_discover(tmp_path, attached, server, capsys):
         "delay_min_seconds": 0, "delay_max_seconds": 0}), encoding="utf-8")
     capsys.readouterr()
     try:
-        ended = ("returned", app_mod.main(["--config", str(cfg), "--discover"]))
+        ended = ("returned", app_mod.main(["--config", str(cfg), "--discover", *flags]))
     except SystemExit as e:
         ended = ("exit", e.code)
     said = " ".join(capsys.readouterr().out.split())
@@ -246,14 +247,46 @@ def test_discover_stops_when_the_statement_dialog_never_opens(tmp_path, attached
     SITE.rows = False
     ended, said, whole, records = run_discover(tmp_path, attached, server, capsys)
     assert ended == ("exit", 0) and whole is False, said[-1500:]
+    assert "Could not read the months" in said and "dialog did not open" in said, said[-1500:]
     assert "Discovery complete" not in said, said[-1500:]
     assert records == {}
 
 
-def test_discover_stops_when_no_account_number_reads(tmp_path, attached, server, capsys):
+def test_a_page_that_never_names_an_account_files_under_account(tmp_path, attached, server,
+                                                                capsys):
+    """An account whose page shows no number at all, an alias say, is listed
+    as it always was, under "Account"."""
+    SITE.account = ""
+    ended, said, whole, records = run_discover(tmp_path, attached, server, capsys)
+    assert ended == ("returned", 0) and whole is True, said[-1500:]
+    assert len(records) == len(MONTHS)
+    assert {r["account_id"] for r in records.values()} == {""}
+
+
+def test_discover_stops_when_a_named_account_goes_unread(tmp_path, attached, server, capsys):
+    """The months are filed under the account number already, so a page that
+    shows none this time would list every month again under "Account"."""
+    run_discover(tmp_path, attached, server, capsys)
     SITE.account = ""
     ended, said, whole, records = run_discover(tmp_path, attached, server, capsys)
     assert ended == ("exit", 0) and whole is False, said[-1500:]
+    assert "Could not read the months" in said and "filed under one" in said, said[-1500:]
+    assert len(records) == len(MONTHS)
+
+
+def test_a_paper_advisor_account_number_reads(tmp_path, attached, server, capsys):
+    SITE.account = SITE.file_account = "DF1234567"
+    ended, said, whole, records = run_discover(tmp_path, attached, server, capsys)
+    assert ended == ("returned", 0) and whole is True, said[-1500:]
+    assert {r["account_id"] for r in records.values()} == {"DF1234567"}
+
+
+def test_a_year_that_keeps_no_month_is_a_list_read_whole(tmp_path, attached, server, capsys):
+    """A scoped run whose years hold no month read the list and kept none of
+    it, which is not a list it did not read."""
+    ended, said, whole, records = run_discover(tmp_path, attached, server, capsys,
+                                               "--year", "2020")
+    assert ended == ("returned", 0) and whole is True, said[-1500:]
     assert records == {}
 
 
@@ -287,6 +320,10 @@ def test_a_statement_named_for_another_account_is_not_taken(tab, tmp_path):
     assert got is False
     assert not out.exists()
     assert not [p for p in out.parent.glob("*") if p.is_file()]
+    # Left where the browser put it, as the core leaves every file it
+    # cannot prove a copy of a saved one.
+    assert [p.name for p in (tmp_path / "staging").glob("*.pdf")] == [
+        "U7654321_203109_203109.pdf"]
 
 
 # -- the regional host message ----------------------------------------------
