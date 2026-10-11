@@ -1,7 +1,9 @@
 """Coinbase statement and tax-document downloader (local, supervised).
 
-Coinbase is a crypto exchange at www.coinbase.com. This is the orchestrator,
-cloned from the Coinbase app; everything that is Coinbase's own lives in
+Coinbase is a crypto exchange at www.coinbase.com. This downloads the
+monthly account statements from its Statements page and the tax documents
+from its Taxes page. The orchestrator below is the same one every other
+statement app runs on. Everything about the site itself is in
 coinbase_site.py.
 
 Usage:
@@ -18,10 +20,10 @@ Usage:
 Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
          --max-docs N  --type Statement|"Tax Document"
 
-READ-ONLY: this tool only reads the statements and tax-documents areas and
-saves the PDFs Coinbase already generated. It never buys, sells, converts,
+READ-ONLY. This tool only reads the statements and tax documents pages and
+saves the PDFs Coinbase makes for them. It never buys, sells, converts,
 sends, stakes, or changes any account setting. Everything stays on this
-machine; nothing is sent to any external service.
+machine, and nothing is sent to any external service.
 """
 from __future__ import annotations
 
@@ -94,10 +96,9 @@ def ask(prompt: str) -> str:
 
 
 def notice_summary(title: str) -> str:
-    """What a notice is called in its file name. The shared rules have no
-    word for a letter, and Coinbase's notices carry their own subject, which
-    can run to a whole sentence, so it is cut at a word near sixty
-    characters."""
+    """What a document the rules file as Other is called in its file name.
+    The shared rules have no word for it, so its own title is used, cut at
+    a word near sixty characters."""
     text = re.sub(r"\s+", " ", title or "").strip().rstrip(".!?")
     if len(text) <= 60:
         return text or "Notice"
@@ -245,7 +246,8 @@ class App:
                     f"Could not connect to your signed-in browser at {cdp_url}.\n"
                     f"Run login.bat first and keep that browser window OPEN.\n({e})")
             if not self._browser.contexts:
-                raise SystemExit("Connected browser has no context; open a tab and retry.")
+                raise SystemExit("The connected browser has no window open. Open a tab in it "
+                                 "and try again.")
             self._context = self._browser.contexts[0]
             self._cdp_mode = True
         else:
@@ -368,13 +370,13 @@ class App:
             print("Connected, but Coinbase shows a signed-out page.")
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         elif ok:
-            print("Success: connected and the Documents page is visible.")
-            print("Keep that browser window OPEN, then run run_pilot.bat.")
+            print("Connected and signed in, and the statements list is showing.")
+            print("Keep that browser window OPEN, then run the pilot.")
         else:
-            print("Connected, but the Documents list did not load, so this cannot say")
+            print("Connected, but the statements list did not load, so this cannot say")
             print("whether you are signed in. Look at the browser window and answer")
             print("anything Coinbase asks there yourself. If it shows your account, open your")
-            print("Documents/Statements page in it, then run --diagnose.")
+            print("Statements page in it, then run --diagnose.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:
@@ -469,8 +471,8 @@ class App:
         listing.started(self)
         page = self.page()
         n_new = 0
-        # Open the statements area and read the date from every control that
-        # fetches a statement or a tax document.
+        # Open the statements page, then read every month's row and every tax
+        # document the Taxes page's list calls name.
         if not site.goto_documents(page):
             self.check_session(page)
             site.goto_documents(page)
@@ -483,10 +485,10 @@ class App:
             for r in stop.docs:
                 self._record_rawdoc(r, site.BILLING_URL)
             self.discovery.save()
-            print(f"\n!! The Inbox & Statements list stopped partway, since {stop}.")
+            print(f"\n!! The list of statements and tax documents stopped partway, since {stop}.")
             print(f"   The {len(stop.docs)} document(s) listed before it stopped are kept,")
             print("   and this run stops rather than call the list read. Run it again.")
-            self.write_failure("read the inbox list", "the list stopped partway")
+            self.write_failure("read the list", "the list stopped partway")
             raise SystemExit(1)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
@@ -591,7 +593,7 @@ class App:
                 page = self._on_its_site()
                 self.download_one(page, doc, filename)
             except KeyboardInterrupt:
-                print("\nInterrupted. Progress saved; run --resume to continue.")
+                print("\nInterrupted. Progress is saved, and --resume carries on from here.")
                 raise
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
@@ -600,9 +602,9 @@ class App:
             self._delay()
 
     def download_one(self, page, doc: Document, filename: str):
-        """Save one document. The site layer fetches the row's PDF link from
-        inside the page when there is one, and otherwise clicks the row's
-        own control and catches what arrives."""
+        """Save one document. The site layer fetches a tax document from the
+        link its list gives, and takes a monthly statement by pressing its
+        row's own PDF button and catching the download."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
         # The last of the document id, used only if the name is taken.
@@ -660,7 +662,7 @@ class App:
             self._write_row(doc, "Validation failed", "Needs Manual Review")
             self.write_failure('validate the saved pdf', 'the saved pdf did not validate')
             self.stats["manual_review"] += 1
-            print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
+            print(f"  !! Validation failed ({result.reason}). Moved to Manual Review.")
             return
 
         # A monthly statement has to name its own month more plainly than
@@ -818,9 +820,9 @@ class App:
         if mode_name == "all" and not self.args.yes:
             scope = ", ".join(self.config.get("document_types", []))
             print(f"This downloads ALL available Coinbase documents ({scope}).")
-            print("Type YES to continue:")
+            print("Type YES and press Enter to go on.")
             if ask("> ").strip().upper() != "YES":
-                print("Aborted. (Run the pilot first if you haven't: --pilot)")
+                print("Stopped, and nothing was downloaded. Run the pilot first if you have not.")
                 return
         self.cmd_discover()
         docs = self._select()
@@ -865,7 +867,7 @@ class App:
             else:
                 row["Verified At"] = now_iso()
         self.index_csv.rewrite(rows)
-        print(f"\nVerified {len(rows)} index rows; {bad} problem(s).")
+        print(f"\nVerified {len(rows)} index rows, {bad} problem(s).")
 
     @property
     def requests(self):
@@ -1118,7 +1120,7 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     for d in (args.start_date, args.end_date):
         if d and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
-            print(f"Bad date '{d}': use YYYY-MM-DD")
+            print(f"Bad date '{d}', write it as YYYY-MM-DD")
             return 2
     app = App(args)
     try:

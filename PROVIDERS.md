@@ -29,6 +29,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`bestbuy`](apps/bestbuy) | Best Buy | Receipts for online orders, orders placed in a store and store purchases, and returns, each purchase's details page saved as the receipt, back to 2015. Built on the maintainer's own account, 35 purchases found and all 35 saved. Best Buy's bot protection stops answering if asked too quickly, so it is paced, and a blocked run says to wait an hour | Retail |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Card |
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements, the roughly two years the site lists online; statements API, nothing clicked | Card |
+| [`coinbase`](apps/coinbase) | Coinbase | Monthly account statements back to the account's first month, and tax documents, the 1099-DA and other tax forms and the pregenerated gain and loss PDF reports. Contributed by @JasperDale420. A statement row's own PDF button is pressed and the download taken only from Coinbase's statements bucket, and tax PDFs come from the list calls the Taxes page makes, nothing pressed. A full run on a retail account saved 66 statements and 2 tax documents | Crypto exchange |
 | [`costco`](apps/costco) | Costco Wholesale | Receipts, in-warehouse, gas, pharmacy and costco.com orders. Written from a member's recording and run against their account. One membership so far, a second Pilot is welcome, see issue #47 | Retail |
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | Card, **moving to Capital One** ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Utility |
@@ -77,7 +78,6 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`walmart`](apps/walmart) | Walmart | Receipts | Retail |
 | [`wellsfargo`](apps/wellsfargo) | Wells Fargo | Account statements, tax documents. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #27 | Bank / card / mortgage |
 | [`wealthfront`](apps/wealthfront) | Wealthfront | Statements, tax docs | Brokerage |
-| [`coinbase`](apps/coinbase) | Coinbase | Monthly account statements back to the account's first month, and tax documents (1099-DA, pregenerated gain/loss PDF reports). A statement row's own PDF button is pressed and the download taken only from Coinbase's statements bucket; tax PDFs are fetched from the list call the Taxes page makes, nothing pressed. Built and run on a contributor's own retail account, 66 statements and 2 tax documents | Crypto exchange |
 
 ## Requested / in progress
 

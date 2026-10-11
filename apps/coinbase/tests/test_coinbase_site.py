@@ -947,6 +947,30 @@ class Persisted(unittest.TestCase):
         for raw in ['href=r.href,', '"href": r.href}', 'source_url=source_url)', '{"source_url": source_url}', '"Source URL": doc.href,']:
             self.assertNotIn(raw, src, raw)
 
+    def test_the_launchers_are_the_current_ones(self):
+        """login.bat runs the app on gui/.venv when it has no venv of its
+        own, as every app's does, and the Mac launchers are what the
+        generator makes from the .bat files."""
+        bat = (HERE / "login.bat").read_text(encoding="utf-8")
+        self.assertIn(r'set "PY=..\..\gui\.venv\Scripts\python.exe"', bat)
+        tool = HERE.parents[1] / "tools" / "make_unix_launchers.py"
+        if not tool.exists():
+            self.skipTest("a folder outside a checkout has no generator")
+        import importlib.util
+        import shutil
+        spec = importlib.util.spec_from_file_location("make_unix_launchers", tool)
+        gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gen)
+        with tempfile.TemporaryDirectory() as td:
+            app = Path(td) / "coinbase"
+            app.mkdir()
+            for name in ("login.bat", "setup.bat"):
+                shutil.copy2(HERE / name, app)
+            made = {f.name: f.read_text(encoding="utf-8") for f in gen.build(app)}
+        self.assertEqual(sorted(made), ["login.command", "setup.command"])
+        for name, text in made.items():
+            self.assertEqual(text, (HERE / name).read_text(encoding="utf-8"), name)
+
     def test_its_port_is_its_own_and_named_the_same_everywhere(self):
         """The example config, the sign-in fallback and login.bat name one
         port, and no other app's example config names it."""

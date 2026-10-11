@@ -8,15 +8,35 @@ echo  Coinbase Documents - sign in
 echo ============================================================
 if not "%~1"=="" echo Account: %~1
 echo.
-echo Your own Edge or Chrome will open, with a separate profile. Then:
+echo Your own Edge or Chrome will open, with a separate profile.
 echo   1. Sign in to Coinbase (do all the 2FA / device approval yourself).
-echo   2. Open Settings, then Statements, and Coinbase Taxes, then Documents.
+echo   2. Stay signed in. The app opens the Statements and Taxes pages itself.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
-echo   4. Then run:  paperpull coinbase diagnose   (a survey for the maintainer)
+echo   4. Then run  paperpull coinbase diagnose  for a survey to send the maintainer.
 echo.
-echo READ-ONLY: this tool only downloads your statement and tax-form PDFs. It NEVER
+echo READ-ONLY. This tool only downloads your statement and tax-form PDFs. It NEVER
 echo buys, sells, converts, sends, stakes, or changes any setting.
 echo.
-.venv\Scripts\python.exe coinbase_docs.py --open-browser %CFG%
+rem This app's own Python when setup.bat made one. Otherwise, in a
+rem checkout, the one setup-all.bat made for every app in gui\.venv, once
+rem it holds what an app needs.
+set "PY=.venv\Scripts\python.exe"
+if exist "%PY%" goto run
+set "PY=..\..\gui\.venv\Scripts\python.exe"
+if not exist "%PY%" goto notsetup
+"%PY%" -c "import importlib.util as u, sys; sys.exit(not all(map(u.find_spec, ['paperpull_core', 'playwright', 'pypdf'])))" >nul 2>&1
+if not errorlevel 1 goto run
+:notsetup
+if exist "..\..\setup-all.bat" (
+  echo This app is not set up yet. Run setup-all.bat in the PaperPull folder first.
+) else (
+  echo This app is not set up yet - run setup.bat first.
+)
+echo.
+pause
+exit /b 1
+
+:run
+"%PY%" coinbase_docs.py --open-browser %CFG%
 echo.
 pause

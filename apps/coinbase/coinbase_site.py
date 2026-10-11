@@ -185,7 +185,7 @@ FALLBACK = {
 }
 
 # ---------------------------------------------------------------------------
-# Date parsing (verbatim from the Nelnet app)
+# Date parsing
 # ---------------------------------------------------------------------------
 DATE_PATTERNS = [
     (re.compile(r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"

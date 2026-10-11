@@ -31,8 +31,8 @@ rem always is. If none is found, login.bat offers the download then, when
 rem somebody is present to agree to it.
 
 echo.
-echo Setup complete. Next: login.bat  (sign in, keep the browser open),
-echo then diagnose.bat, then run_pilot.bat.
+echo Setup complete. Next, run login.bat to sign in, and keep the browser open.
+echo Then run paperpull coinbase diagnose, then paperpull coinbase pilot.
 pause
 exit /b 0
 

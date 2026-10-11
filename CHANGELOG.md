@@ -26,7 +26,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
   no longer files every month again under a bare "Account", a page that
   names no account stops Discover once the months are filed under one, and
   a lookalike address is never suggested for the list of domains.
-- **Coinbase, monthly statements and tax documents.** Statements from accounts.coinbase.com/statements, one per complete month, each taken by pressing its row's PDF button once and accepting the download only from Coinbase's own statements bucket; tax forms (1099-DA) and pregenerated gain/loss reports from the Taxes page's own list call, fetched by their short-lived link with nothing pressed, so the page's mark-read and mark-downloaded calls never happen. Exact hosts and a path contract; a list it cannot read whole stops the run. Full run on a retail account saved 66 statements and 2 tax documents, every one a valid PDF.
+- **Coinbase, monthly statements and tax documents (#72).** Each complete
+  month's statement on the Statements page is saved by pressing its row's
+  own PDF button once, after its label passes the guard, on a page loaded
+  afresh for it, and the download is taken only from Coinbase's statements
+  bucket. The 1099-DA and the other tax forms, and the pregenerated gain
+  and loss reports, come from the list calls the Taxes page makes and are
+  fetched by their short-lived links with nothing pressed, so the page's
+  own mark-read and mark-downloaded calls never happen. Contributed by
+  JasperDale420, whose full run on a retail account saved 66 statements and
+  2 tax documents, every one a valid PDF. Before merging, a statement is
+  filed only when its own text names its month more plainly than the month
+  before or after, and a download that could be another press's is never
+  taken. The statements list is called whole only when it reaches the
+  month of the account's first transaction. A second tax form of one year
+  no longer changes the first form's key, the 1042-S is known, and a tax
+  list that names another year or has a page left unread stops the
+  listing. Diagnose presses nothing, and the app signs in on port 9286.
 
 ### Changed
 - **A checkout is set up as one environment, not one in every app folder
