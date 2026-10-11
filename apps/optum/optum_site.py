@@ -394,7 +394,7 @@ _DOC_ENTRIES_JS = r"""() => {
               path: new URL(a.href, location.href).pathname, host: new URL(a.href, location.href).hostname, how: 'link'});
   for (const s of document.querySelectorAll('select[name="document_id"]'))
     for (const o of s.options)
-      out.push({text: (o.text || '').replace(/\s+/g, ' ').trim(), path: o.value, host: location.hostname, how: 'option', disabled: !!o.disabled});
+      out.push({text: (o.text || '').replace(/\s+/g, ' ').trim(), path: o.value, host: location.hostname, how: 'option'});
   return out;
 }"""
 
@@ -486,6 +486,11 @@ def says_no_statements(page) -> bool:
     return bool(NO_STATEMENTS_RE.search(text))
 
 
+def _names_a_date(text: str) -> bool:
+    """Whether an option's text names a date or a year at all."""
+    return bool(_TAX_YEAR_RE.search(text or "") or parse_date(text or ""))
+
+
 def document_id_of(path: str) -> str:
     """The id a document's own path ends in, or an empty string."""
     m = DOCUMENT_PATH_RE.match(path or "")
@@ -514,12 +519,18 @@ def documents_of(entries: list, pid: str) -> List[RawDoc]:
         m = DOCUMENT_PATH_RE.match(e.get("path") or "")
         if not m:
             if e.get("how") == "option":
-                # An option is a statement or an explicit placeholder; anything
-                # else, an absolute address, a query, a changed value, is a list
-                # this cannot read.
-                if not (e.get("path") or "") and (e.get("disabled") or not (e.get("text") or "")):
-                    continue   # an explicit placeholder: no value, and disabled or blank
-                raise ListStopped("a statement option reads %r" % (e.get("text") or e.get("path") or "")[:30])
+                value = e.get("path") or ""
+                if not value and not _names_a_date(e.get("text") or ""):
+                    # A placeholder such as "Select a statement", enabled or
+                    # not, with no value and no date.
+                    continue
+                # A dated option with no value is a statement with no path,
+                # and a value that is not a document path, an absolute
+                # address, a query or a changed value, cannot be read. Either
+                # is a list this cannot read. The page's own words stay out
+                # of what is said, since it is printed and logged.
+                raise ListStopped("a statement option carries a value this cannot read" if value
+                                  else "a dated statement option carries no value")
             continue
         if (e.get("host") or "") != "account.optumbank.com":
             raise ListStopped("a document link points off the member host")
@@ -528,7 +539,7 @@ def documents_of(entries: list, pid: str) -> List[RawDoc]:
         text = (e.get("text") or "").strip()
         if m.group(2) == "statements":
             if not valid_iso(text):
-                raise ListStopped("a statement reads %r, not a calendar date" % text[:30])
+                raise ListStopped("a statement's date is not a calendar date")
             if text in seen_dates:
                 if seen_dates[text] != e["path"]:
                     raise ListStopped("two statements read %s" % text)

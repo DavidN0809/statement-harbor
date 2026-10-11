@@ -95,23 +95,36 @@ class Listing(unittest.TestCase):
             site.documents_of(NAV + [S("2026-02-30")], PID)
         with self.assertRaises(site.ListStopped):
             site.documents_of(NAV + [{**S("2026-02-30", "3"), "how": "option"}], PID)
-        live = {"text": "2026-02-30", "path": "", "host": "account.optumbank.com", "how": "option", "disabled": False}
-        with self.assertRaises(site.ListStopped, msg="an enabled option with text and no value is not a placeholder"):
+        live = {"text": "2026-02-30", "path": "", "host": "account.optumbank.com", "how": "option"}
+        with self.assertRaises(site.ListStopped, msg="a dated option with no value is a statement with no path"):
             site.documents_of(NAV + [live], PID)
-        blank = {"text": "", "path": "", "host": "account.optumbank.com", "how": "option", "disabled": False}
+        blank = {"text": "", "path": "", "host": "account.optumbank.com", "how": "option"}
         self.assertEqual(site.documents_of(NAV + [blank], PID), [], "a blank option is a placeholder")
 
     def test_select_options_are_documents_or_placeholders(self):
-        ph = {"text": "Select a statement", "path": "", "host": "account.optumbank.com", "how": "option", "disabled": True}
-        ok = site.documents_of(NAV + [ph, {**S("2026-02-28", "3"), "how": "option"}], PID)
-        self.assertEqual([d.date_text for d in ok], ["2026-02-28"])
+        # A placeholder has no value and no date, whether the page turns it off or not.
+        for ph in ({"text": "Select a statement", "path": "", "host": "account.optumbank.com", "how": "option"},
+                   {"text": "Choose", "path": "", "host": "account.optumbank.com", "how": "option"}):
+            ok = site.documents_of(NAV + [ph, {**S("2026-02-28", "3"), "how": "option"}], PID)
+            self.assertEqual([d.date_text for d in ok], ["2026-02-28"], ph)
         for bad in ({**S("2026-02-28"), "how": "option", "path": f"https://account.optumbank.com/account/products/{PID}/statements/3.pdf"},
                     {**S("2026-02-28"), "how": "option", "path": f"/account/products/{PID}/statements/3.pdf?token=1"},
-                    {"text": "2026-02-28", "path": "", "host": "account.optumbank.com", "how": "option", "disabled": False},
-                    {"text": "Select a statement", "path": "", "host": "account.optumbank.com", "how": "option", "disabled": False},
+                    {"text": "2026-02-28", "path": "", "host": "account.optumbank.com", "how": "option"},
+                    {"text": "February 2026", "path": "", "host": "account.optumbank.com", "how": "option"},
+                    {"text": "Select a statement", "path": "3", "host": "account.optumbank.com", "how": "option"},
                     {**S("2026-02-28"), "how": "option", "path": f"/account/products/{PID}/statements/3"}):
             with self.assertRaises(site.ListStopped, msg=str(bad)):
                 site.documents_of(NAV + [bad], PID)
+
+    def test_a_stop_says_nothing_the_page_wrote(self):
+        words = "Dana Example 4417"
+        for bad in ({"text": words, "path": "https://evil.example/x.pdf", "host": "account.optumbank.com", "how": "option"},
+                    {"text": words + " 2026", "path": "", "host": "account.optumbank.com", "how": "option"},
+                    S(words)):
+            with self.assertRaises(site.ListStopped) as stop:
+                site.documents_of(NAV + [bad], PID)
+            for word in ("Dana", "Example", "4417", "evil"):
+                self.assertNotIn(word, str(stop.exception))
 
     def test_every_document_carries_its_product_and_no_title_says_how_many(self):
         d = site.documents_of([S("2026-08-31"), T], PID)
