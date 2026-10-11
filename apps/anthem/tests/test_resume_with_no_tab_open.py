@@ -375,7 +375,8 @@ def test_a_member_document_is_never_fetched_from_a_tab_off_anthem(tmp_path, monk
     theirs = _Tab("https://www.elsewhere.test/inbox", context)
     context.pages.append(theirs)
     app = object.__new__(app_mod.App)
-    app.args = SimpleNamespace(redownload=False, dry_run=False)
+    app.args = SimpleNamespace(redownload=False, dry_run=False, year=None,
+                               start_date=None, end_date=None)
     app.progress = SimpleNamespace(get=lambda key: None, update=lambda *a, **k: None,
                                    save=lambda **k: None)
     app.stats = defaultdict(int, new_files=[], dates=[])

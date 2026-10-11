@@ -369,14 +369,21 @@ class App:
             return False
         if a.type and doc.category.lower() != a.type.lower():
             return False
-        if a.year and not (doc.date or "").startswith(str(a.year)):
+        return self._in_dates(doc.date)
+
+    def _in_dates(self, day: str) -> bool:
+        """Whether a document of this date falls in the run's year and dates.
+        The EOBs and the member documents, ID cards and letters are held to
+        this one rule."""
+        a = self.args
+        if a.year and not (day or "").startswith(str(a.year)):
             return False
         # Hard floor: never process documents before the configured start date
         # (You already has Anthem documents from 2023 and earlier).
         floor = a.start_date or self.config.get("default_start_date")
-        if floor and (not doc.date or doc.date < floor):
+        if floor and (not day or day < floor):
             return False
-        if a.end_date and (not doc.date or doc.date > a.end_date):
+        if a.end_date and (not day or day > a.end_date):
             return False
         return True
 
@@ -790,6 +797,12 @@ class App:
             return
         for r in rows:
             label, key = r["label"], r["key"]
+            # The run's year and dates, as the EOBs are held to them. Without
+            # this a Download again of one year, which skips the check below,
+            # took every year's documents again beside the copies saved.
+            if not self._in_dates(r.get("date") or ""):
+                self.stats["skipped_out_of_scope"] += 1
+                continue
             if not getattr(self.args, "redownload", False):
                 rec = self.progress.get(key)
                 if rec and (rec.get("downloaded_ok")
