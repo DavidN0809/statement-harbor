@@ -601,7 +601,7 @@ class StatementDownload(unittest.TestCase):
             trace = []
             ok = site._catch_statement(page, Path(td) / "dl", "September 2026", Path(td) / "out.pdf", trace)
         self.assertFalse(ok); self.assertEqual(page.clicked, 0)
-        self.assertEqual(trace[-1]["note"], "the PDF button's row no longer reads this month")
+        self.assertEqual(trace[-1]["note"], "the PDF button's row reads another month now")
 
     def test_press_once_s_check_says_when_the_row_changed(self):
         page, dl = self.make_page(self.S3)

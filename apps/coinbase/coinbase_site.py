@@ -1031,7 +1031,7 @@ def _catch_statement(page, dl_dir, label: str, out_path: Path, trace: Optional[l
         el = None
     if el is None:
         if trace is not None:
-            trace.append({"note": "the PDF button could not be held"})
+            trace.append({"note": "the PDF button could not be read"})
         return False
 
     def row_changed() -> str:
@@ -1055,7 +1055,7 @@ def _catch_statement(page, dl_dir, label: str, out_path: Path, trace: Optional[l
         # found.
         if row_changed():
             if trace is not None:
-                trace.append({"note": "the PDF button's row no longer reads this month"})
+                trace.append({"note": "the PDF button's row reads another month now"})
             return False
         # A download that came before the press is not this press's, and
         # with one on its way nothing is pressed.
