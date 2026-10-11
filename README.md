@@ -107,6 +107,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`navyfederal`](apps/navyfederal) | Navy Federal CU | Account statements | Per-account accordions; blob-tab PDFs |
 | [`nelnet`](apps/nelnet) | Nelnet | Student loan statements, 1098-E, notices | **Contributed by [@tylerverry](https://github.com/tylerverry), 47 documents in one full run.** The inbox list, paged and read from the page, each statement taken from its own Download button. The 1098-E is the Tax Info page printed after its own year's button is pressed |
 | [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098 | **Confirmed by [@watling777](https://github.com/watling777)**, whose run saved every document, three years of statements through the statements page's year picker and the 1098s ([#38](https://github.com/rheeloaded/paperpull/issues/38)) |
+| [`optum`](apps/optum) | Optum Bank (HSA) | HSA statements, 5498-SA and 1099-SA tax forms | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 21 statements and the 5498-SA saved on a full run.** Every document a plain link on the member site, fetched by its own address, nothing clicked. One HSA so far, so more than one product is untested |
 | [`paypal`](apps/paypal) | PayPal | Monthly statements | **Built on the maintainer's own account, 25 statements.** The site's own statements list and download from inside the page, nothing clicked; three years are online |
 | [`paylocity`](apps/paylocity) | Paylocity | **Pay statements** | Escher JSON API, enqueue-poll-fetch PDF; nothing clicked |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history. Contributed by [@appchamp](https://github.com/appchamp). Repaired in 0.37.1 and confirmed on a real account by [@watling777](https://github.com/watling777) ([#33](https://github.com/rheeloaded/paperpull/issues/33)) |
@@ -671,6 +672,8 @@ found a bug and diagnosed it to the line.
   and run against five accounts back to 2020, the Nelnet app, run against
   a student loan account back to 2019, and the Interactive Brokers app,
   run against five years of monthly statements.
+- [@JasperDale420](https://github.com/JasperDale420), the Optum Bank app,
+  built and run against an HSA.
 - [@marecabo](https://github.com/marecabo), Amazon's legal invoice PDFs on
   the German store.
 - [@watling777](https://github.com/watling777), the tester behind AT&T,
