@@ -13,9 +13,10 @@
 PaperPull retrieves the statement and receipt history your banks, cards,
 stores and utilities already hold, organizes it as PDFs on your own
 computer or a server at home, and turns your purchases and transactions
-into spreadsheets. It is a family of small, **read-only** tools that sign
-in *alongside you*: you type the password and answer the two-factor prompt
-in a real browser window, and PaperPull reads what you can see. Free and
+into spreadsheets. You sign in yourself, typing your password and
+answering the two-factor prompt in a real browser window. From there
+PaperPull **only downloads**. It never pays a bill, moves money or changes
+a setting (see [how that is enforced](#read-only-by-construction)). Free and
 open source, no account, no cloud. Made for archiving (into
 [paperless-ngx](https://docs.paperless-ngx.com/) or a folder of your own)
 instead of clicking through each site by hand.
