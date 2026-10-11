@@ -487,6 +487,22 @@ the files you already have to match, a preview first and then the
 rename, and nothing is downloaded again. The pattern language is in
 [docs/file-naming.md](docs/file-naming.md).
 
+## Moving to another computer
+
+The record of what each provider already downloaded is what keeps
+PaperPull from downloading a document twice, and it can move with you. On
+the old computer, press **Export history** on the panel's Status tab. On
+the new one, or on [PaperPull Server](SERVER.md#coming-from-the-desktop-app),
+choose that file under **Moving from another computer?** on the welcome
+page, or under **Import a history file** on the Status tab. Every provider
+and person in it is set up with their settings, and nothing they already
+downloaded is downloaded again. No sign-in or PDF travels in the file, so
+you sign in to each provider once on the new machine. It does list
+document titles, order numbers, totals and the account holders' names, so
+keep it as private as your documents. From a terminal,
+`python tools/migrate.py --export` and `--import` do the same for providers
+already set up.
+
 ## Windows and macOS
 
 **Both have a package.** Every release on the

@@ -237,7 +237,7 @@ def test_a_dry_run_writes_nothing(tmp_path):
 
 def test_minimal_leaves_the_revealing_fields_out(tmp_path):
     """--minimal exists so the file can be moved around without carrying an
-    itemised account of what somebody bought."""
+    itemized account of what somebody bought."""
     old = tmp_path / "old"
     rec = _rec()
     rec.update({"title": "Dr Smith visit", "account": "CHECKING *1234",
@@ -422,3 +422,227 @@ def test_the_core_beside_the_tool_comes_before_an_older_one_installed(tmp_path):
     env = dict(__import__("os").environ, PYTHONPATH=str(tmp_path / "old-core"))
     r = subprocess.run([sys.executable, str(tool), "--help"], capture_output=True, text=True, env=env)
     assert r.returncode == 0, r.stderr
+
+
+# -- people and settings (#67) -------------------------------------------------
+#
+# Someone moving from the desktop app to PaperPull Server asked for their
+# providers to come along as well as the history. A second person's folder
+# sits beside the install with records and no app, and the first version of
+# this tool exported it as a provider of its own, which no import could
+# place. Settings did not come at all.
+
+EXAMPLE = {"owner": "", "owner_in_filename": False, "output_dir": ".",
+           "profile_dir": "./browser-profile", "browser": "auto",
+           "cdp_url": "http://127.0.0.1:9236", "document_types": ["Statement"],
+           "default_start_date": "", "min_pdf_bytes": 2000,
+           "//refuse": "a comment, never a setting"}
+
+
+def _app(root: Path, folder="Bank Statements", provider="Bank", records=None,
+         config=None, people=None, kind="DOCUMENT"):
+    """An install shaped like one the panel makes, its app script, spec,
+    example and config, and a config.<label>.json with its own folder beside
+    it for each person in people ({label: (config, records)})."""
+    d = root / folder
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "bank_docs.py").write_text("# the app\n", encoding="utf-8")
+    (d / "storage.py").write_text(
+        'SPEC = AppSpec(\n    provider="%s",\n    kind=%s,\n)\n' % (provider, kind),
+        encoding="utf-8")
+    (d / "config.example.json").write_text(json.dumps(EXAMPLE), encoding="utf-8")
+    (d / "config.json").write_text(json.dumps(dict(EXAMPLE, **(config or {}))), encoding="utf-8")
+    if records is not None:
+        (d / "progress.json").write_text(json.dumps(records), encoding="utf-8")
+    for label, (cfg, recs) in (people or {}).items():
+        out = "../%s - %s" % (folder, label)
+        (d / ("config.%s.json" % label)).write_text(
+            json.dumps(dict(EXAMPLE, output_dir=out, **cfg)), encoding="utf-8")
+        (root / ("%s - %s" % (folder, label))).mkdir(exist_ok=True)
+        if recs is not None:
+            (root / ("%s - %s" % (folder, label)) / "progress.json").write_text(
+                json.dumps(recs), encoding="utf-8")
+    return d
+
+
+def _manifest(archive: Path) -> dict:
+    with zipfile.ZipFile(archive) as z:
+        return json.loads(z.read("manifest.json").decode("utf-8"))
+
+
+def test_a_second_person_comes_across_as_that_person(tmp_path):
+    old = tmp_path / "old"
+    _app(old, records={"id:1": _rec()},
+         people={"spouse": ({"owner": "Jamie Example"}, {"id:7": _rec(), "id:8": _rec()})})
+    archive = tmp_path / "h.ppz"
+    assert migrate.export(old, archive) == 0
+    apps = _manifest(archive)["apps"]
+    assert [(a["provider"], a["account"], a["records"]) for a in apps] == [
+        ("Bank", "primary", 1), ("Bank", "spouse", 2)], "found once, through its config"
+
+    new = tmp_path / "new"
+    _app(new, records={}, people={"spouse": ({}, None)})
+    assert migrate.do_import(archive, new, assume_yes=True) == 0
+    first = json.loads((new / "Bank Statements" / "progress.json").read_text(encoding="utf-8"))
+    second = json.loads((new / "Bank Statements - spouse" / "progress.json").read_text(encoding="utf-8"))
+    assert set(first) == {"id:1"} and set(second) == {"id:7", "id:8"}, "nothing mixed"
+
+
+def test_the_command_line_never_invents_a_person(tmp_path, capsys):
+    old = tmp_path / "old"
+    _app(old, records={"id:1": _rec()}, people={"spouse": ({}, {"id:7": _rec()})})
+    archive = tmp_path / "h.ppz"
+    migrate.export(old, archive)
+
+    new = tmp_path / "new"
+    _app(new, records={})
+    migrate.do_import(archive, new, assume_yes=True)
+    assert not (new / "Bank Statements - spouse").exists()
+    assert not (new / "Bank Statements" / "config.spouse.json").exists()
+    out = capsys.readouterr().out
+    assert "Bank (spouse)" in out and "NOT SET UP HERE" in out
+
+
+def test_an_install_never_run_still_comes_across_with_its_settings(tmp_path):
+    old = tmp_path / "old"
+    _app(old, config={"owner": "Pat Example"})
+    archive = tmp_path / "h.ppz"
+    assert migrate.export(old, archive) == 0
+    (entry,) = _manifest(archive)["apps"]
+    assert entry["records"] == 0 and entry["settings"]["owner"] == "Pat Example"
+
+
+def test_the_settings_a_person_chose_travel_and_this_computers_never_do(tmp_path):
+    old = tmp_path / "old"
+    _app(old, records={}, config={
+        "owner": "Pat Example", "default_start_date": "2021-01-01",
+        "document_types": ["Statement", "Tax Document"],
+        "filename_pattern_statements": "{date} {provider}",
+        "output_dir": r"D:\Archive\Bank", "profile_dir": r"D:\Profiles\Bank",
+        "cdp_url": "http://127.0.0.1:9999", "browser": "installed",
+        "a_key_no_example_lists": "kept home"})
+    archive = tmp_path / "h.ppz"
+    migrate.export(old, archive)
+    settings = _manifest(archive)["apps"][0]["settings"]
+    assert settings["owner"] == "Pat Example"
+    assert settings["default_start_date"] == "2021-01-01"
+    assert settings["document_types"] == ["Statement", "Tax Document"]
+    assert settings["filename_pattern_statements"] == "{date} {provider}"
+    for key in ("output_dir", "profile_dir", "cdp_url", "browser", "//refuse",
+                "a_key_no_example_lists"):
+        assert key not in settings, key
+
+
+def test_minimal_carries_no_settings(tmp_path):
+    old = tmp_path / "old"
+    _app(old, records={"id:1": _rec()}, config={"owner": "Pat Example"})
+    archive = tmp_path / "h.ppz"
+    migrate.export(old, archive, minimal=True)
+    with zipfile.ZipFile(archive) as z:
+        assert "Pat Example" not in z.read("manifest.json").decode("utf-8")
+
+
+def test_only_what_the_install_knows_is_written_and_only_its_own_kind(tmp_path):
+    """What an import writes into a config it made. A file is somebody's,
+    and may have been edited, so nothing in it decides this computer's
+    folders, profile, browser or port, and nothing changes a setting's kind."""
+    inst = _app(tmp_path)
+    got = migrate.settings_to_apply(inst, dict(EXAMPLE), {
+        "output_dir": "/elsewhere", "profile_dir": "/elsewhere/p", "browser": "bundled",
+        "cdp_url": "http://evil.example:1", "//refuse": "x", "not_a_setting": 1,
+        "min_pdf_bytes": "lots", "owner_in_filename": 1, "document_types": "Statement",
+        "default_start_date": "2020-01-01", "owner": "  " + "P" * 200,
+        "max_path_length": 200, "filename_pattern": "{date}" * 2000})
+    assert got == {"default_start_date": "2020-01-01", "owner": "P" * 80,
+                   "max_path_length": 200}, got
+
+
+def test_a_file_name_pattern_is_taken_only_once_it_is_checked(tmp_path):
+    inst = _app(tmp_path)
+    pattern = {"filename_pattern_statements": "{date} {provider}"}
+    assert migrate.settings_to_apply(inst, dict(EXAMPLE), pattern) == {}, \
+        "with nothing to check it, none is taken"
+    assert migrate.settings_to_apply(inst, dict(EXAMPLE), pattern,
+                                     check_pattern=lambda p: "a problem") == {}
+    assert migrate.settings_to_apply(inst, dict(EXAMPLE), pattern,
+                                     check_pattern=lambda p: None) == pattern
+
+
+def test_a_first_persons_folder_is_never_taken_for_the_start_of_a_seconds():
+    """The first version compared the start of a path with the folder and no
+    separator, so a path in "Bank Statements - spouse" was taken for one in
+    "Bank Statements" and moved to a folder named " - spouse" inside it."""
+    new = Path("/data/Bank Statements")
+    old = r"C:\Users\someone\PaperPull\Bank Statements - spouse\Statements\a.pdf"
+    assert migrate._rewrite_path(old, [r"C:\Users\someone\PaperPull\Bank Statements"], new) == ""
+    moved = migrate._rewrite_path(
+        old, [r"C:\Users\someone\PaperPull\Bank Statements - spouse"], new)
+    assert Path(moved) == new / "Statements" / "a.pdf"
+
+
+def test_a_path_that_leads_out_of_its_folder_is_cleared(tmp_path):
+    new = tmp_path / "new" / "Bank Statements"
+    base = "/Users/someone/PaperPull/Bank Statements"
+    assert migrate._rewrite_path(base + "/../../../etc/passwd", [base], new) == ""
+    assert Path(migrate._rewrite_path(base + "/Statements/../a.pdf", [base], new)) == new / "a.pdf"
+    assert migrate._rewrite_path(r"..\..\elsewhere\a.pdf", [base], new) == ""
+    assert migrate._rewrite_path("Statements/a.pdf", [base], new) == "Statements/a.pdf"
+
+
+def test_an_orders_invoices_follow_it_to_the_new_computer(tmp_path):
+    """Target keeps a file for each invoice of an order. A saved invoice
+    counts as saved whether its file is there or not, so one from another
+    folder of that machine keeps its path, and one that would lead out of
+    the order's folder is cleared."""
+    old = tmp_path / "old"
+    folder = old / "Target Receipts"
+    rec = _rec(path=str(folder / "Invoices" / "a.pdf"))
+    rec["invoices"] = [{"file": str(folder / "Invoices" / "a.pdf"), "kept": True},
+                       {"file": r"Z:\Elsewhere\b.pdf", "kept": True},
+                       {"file": str(folder) + "/../../c.pdf", "kept": False},
+                       {"part": "no file"}]
+    _install(old, "Target Receipts", "Target", {"T:1": rec}, kind="RECEIPT")
+    archive = tmp_path / "h.ppz"
+    migrate.export(old, archive)
+
+    new = tmp_path / "new"
+    _install(new, "Target Receipts", "Target", {}, kind="RECEIPT")
+    migrate.do_import(archive, new, assume_yes=True)
+    got = json.loads((new / "Target Receipts" / "progress.json").read_text(encoding="utf-8"))
+    files = [i.get("file") for i in got["T:1"]["invoices"]]
+    assert Path(files[0]) == new / "Target Receipts" / "Invoices" / "a.pdf"
+    assert files[1:] == [r"Z:\Elsewhere\b.pdf", "", None]
+
+
+def test_a_file_from_before_people_were_told_apart_still_imports(tmp_path):
+    """Schema 1, one entry per folder, as 0.46.0 and older wrote it."""
+    archive = tmp_path / "old.ppz"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("manifest.json", json.dumps({
+            "schema": 1, "source_root": r"C:\Users\someone\PaperPull",
+            "apps": [{"folder": "Bank Statements", "provider": "Bank", "kind": "DOCUMENT",
+                      "records": 1, "already_downloaded": 1}]}))
+        z.writestr("apps/Bank Statements/progress.json", json.dumps({"id:1": _rec(
+            path=r"C:\Users\someone\PaperPull\Bank Statements\Statements\a.pdf")}))
+    new = tmp_path / "new"
+    _app(new, records={})
+    assert migrate.do_import(archive, new, assume_yes=True) == 0
+    got = json.loads((new / "Bank Statements" / "progress.json").read_text(encoding="utf-8"))
+    assert got["id:1"]["downloaded_ok"] is True
+    assert Path(got["id:1"]["pdf_path"]) == new / "Bank Statements" / "Statements" / "a.pdf"
+
+
+def test_a_file_far_larger_than_any_history_is_not_read(tmp_path, monkeypatch):
+    """A zip says how big each file in it is, and need not tell the truth.
+    What is read stops at the limit, whatever it says."""
+    old = tmp_path / "old"
+    _install(old, "Bank Statements", "Bank", {"id:%d" % i: _rec() for i in range(50)})
+    archive = tmp_path / "h.ppz"
+    migrate.export(old, archive)
+    monkeypatch.setattr(migrate, "MAX_RECORDS_BYTES", 200)
+    with pytest.raises(migrate.NotAnExport):
+        migrate.read(archive)
+    monkeypatch.setattr(migrate, "MAX_RECORDS_BYTES", 10 ** 8)
+    monkeypatch.setattr(migrate, "MAX_TOTAL_BYTES", 200)
+    with pytest.raises(migrate.NotAnExport):
+        migrate.read(archive.read_bytes())

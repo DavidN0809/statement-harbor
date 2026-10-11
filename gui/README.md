@@ -152,6 +152,26 @@ printed balances. The first build of a big archive takes a few minutes and
 streams its progress. Each PDF is read once and remembered, so the next
 build takes seconds. Only archives with PDFs on disk are offered.
 
+## Moving to another computer
+
+On the Status tab, **Export history** hands the browser a file listing each
+provider and person here, their settings, and every document each one has
+already downloaded. **Import a history file** on the other computer, or on
+PaperPull Server, reads it and shows what it will do before anything is
+written. Then it sets up each provider and person not set up there, with
+their settings, and marks what they already downloaded, so none of it is
+downloaded again. The welcome page offers the same import before any
+provider is set up.
+
+- Folders, browser profiles, the browser and debugging ports always belong
+  to the computer the file is imported on, whatever the file says.
+- A provider or person already set up keeps its own settings and only
+  gains the history. Nothing is ever taken out of a history, and each
+  `progress.json` is backed up in its Backups folder before it is written.
+- No sign-in, password or PDF is in the file. It does hold document titles,
+  order numbers, totals and the account holders' names.
+- Nothing is imported while a provider is running.
+
 ## Notes & limits
 
 - **Login is human-driven.** The panel opens the browser; you handle sign-in and

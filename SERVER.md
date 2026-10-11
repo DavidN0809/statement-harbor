@@ -86,11 +86,39 @@ Google.
    by any other name, a VPN's or a reverse proxy's, list that name in
    `PAPERPULL_HOSTS` in `compose.yaml`, more than one separated by commas.
 5. **Add your providers** from the panel. Each one gets a folder in the data
-   folder.
+   folder. Coming from the desktop app, bring them instead, see
+   [Coming from the desktop app](#coming-from-the-desktop-app).
 6. **Sign in.** Pick a provider and press Login. Its sign-in window opens on
    the Browser Screen, which the **Browser Screen** button at the top of the
    panel opens. Sign in there as you would on a new computer, then come back
    to the panel and run Pilot, then Run All.
+
+### Coming from the desktop app
+
+Bring your providers and the record of what they already downloaded, so
+the server does not download those documents again, or hand them to
+Paperless a second time.
+
+1. On the desktop, open the panel's **Status** tab and press **Export
+   history**. Your browser saves a file named like
+   `PaperPull history 2026-10-11.ppz`.
+2. On the server's welcome page, choose **Moving from another computer?
+   Bring its providers and history**, then that file. The panel shows what
+   it will do, and **Set up and import** does it. Once providers are set
+   up, the same is under **Import a history file** on the Status tab.
+
+Each provider and person in the file is set up with their settings, the
+account holder's name, file name patterns, the start date and the like,
+and every document they already downloaded is marked as downloaded.
+Folders, browser profiles and debugging ports are the server's own. A
+provider or person already set up keeps its settings and gains only the
+history. No sign-in comes with the file, so sign in to each provider on the
+Browser Screen, as in step 6.
+
+The file holds no password, sign-in or PDF. It does list document titles,
+order numbers, totals and the account holders' names, so keep it as
+private as your documents. The PDFs can stay where they are, since the
+record is all the server needs to skip them.
 
 ### On a UGREEN NAS
 

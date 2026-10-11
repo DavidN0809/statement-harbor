@@ -35,6 +35,7 @@ import build  # noqa: E402
     "tools/export_purchases.py",                # the purchases spreadsheet
     "tools/export_transactions.py",             # the transactions workbook
     "tools/make_sample.py",                     # the sample archive
+    "tools/migrate.py",                         # Export history and Import a history file (#67)
 ])
 def test_what_the_image_needs_is_chosen(path):
     assert build.selected([path]) == [path]

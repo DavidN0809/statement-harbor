@@ -9,6 +9,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Your providers and download history move to another computer, or to
+  PaperPull Server (#67).** Export history on the Status tab saves a file
+  listing each provider and person, their settings and every document
+  already downloaded. Import a history file on the other machine, or
+  Moving from another computer on its welcome page, shows what it will do,
+  then sets up each provider and person not set up there, with the account
+  holder's name, file name patterns and start date, and marks what they
+  already downloaded, so nothing is downloaded again and nothing reaches
+  Paperless a second time. Folders, browser profiles and debugging ports
+  are always the new machine's own, a provider already set up keeps its
+  settings, and no sign-in, password or PDF is in the file.
+  `tools/migrate.py` now carries second people and settings too, and
+  still imports a file from an older version. A path in a second person's
+  folder is no longer taken for one in the first person's when its folder
+  name begins the same way.
+
 ### Fixed
 - **Rename and Review Names finish past a damaged record in progress.json.**
   A record whose file path or file name was a number, a list or a mapping,

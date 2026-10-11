@@ -30,6 +30,7 @@ import re
 import shutil
 import subprocess
 import sysconfig
+import threading
 import time
 from typing import Optional
 import sys
@@ -1638,27 +1639,305 @@ async def api_account(request: Request):
                                  "starting with a letter or digit")
     if label in ("primary", "example") or label in apps[name]["accounts"]:
         raise HTTPException(409, "there is already an account called %r in %s" % (label, name))
+    app_dir = Path(apps[name]["dir"])
+    dest = _make_account(app_dir, label, owner)
+    cfg = json.loads(dest.read_text(encoding="utf-8"))
+    global _STATUS_MOD
+    _STATUS_MOD = None
+    return {"app": name, "account": label, "config": dest.name,
+            "output_dir": cfg.get("output_dir", ""), "cdp_url": cfg.get("cdp_url", ""),
+            "owner": cfg.get("owner", "")}
+
+
+def _make_account(app_dir: Path, label: str, owner: str) -> Path:
+    """config.<label>.json for a second person on an install, with its
+    profile on the profiles volume on PaperPull Server. The label is
+    checked by the caller. Returns the new config's path."""
     mod = _account_module()
     if mod is None:
         raise HTTPException(500, "add_account.py was not found next to this control panel")
-    app_dir = Path(apps[name]["dir"])
     if not (app_dir / "config.json").is_file():
         raise HTTPException(409, "%s has no config.json yet. Run Login once for the first account, "
-                                 "then add the second." % name)
+                                 "then add the second." % app_dir.name)
     try:
         dest = mod.make_config(app_dir, label, owner=owner)
     except Exception as e:
         raise HTTPException(500, "could not make the account: %s" % str(e).splitlines()[0][:160])
+    if dest is None:
+        raise HTTPException(409, "%s has no config.json yet." % app_dir.name)
     if server_mode.enabled():
         # make_config puts the profile in the account's own folder, which on
         # the server is the shared folder, so it moves to the profiles volume.
         _set_profile(Path(dest), server_mode.profile_for(app_dir.name, label))
-    cfg = json.loads(Path(dest).read_text(encoding="utf-8"))
+    return Path(dest)
+
+
+# -- moving to another computer (#67) -----------------------------------------
+#
+# Somebody who moves from the desktop app to PaperPull Server, or to a new
+# computer, has a history that says what is already downloaded, and without
+# it the new machine downloads every document again, which on the server
+# hands every one of them to Paperless a second time. Export history writes
+# that history, with each provider's and person's settings, into a file
+# tools/migrate.py reads, and Import a history file sets up each provider
+# and person the file names that is not set up here and folds the history
+# in. No sign-in, browser profile or PDF is ever in the file.
+
+_MIGRATE_MOD = None
+_IMPORTING = threading.Lock()
+# The file as the page sends it, base64 and all. A real archive of thirty
+# providers exported to 330 KB.
+HISTORY_MAX_BYTES = 48 * 1024 * 1024
+
+
+def _migrate_module():
+    """tools/migrate.py beside this panel, in a checkout, in the desktop
+    package and in the server image alike. Never one from the apps root,
+    which on the server is a folder the whole network may write to."""
+    global _MIGRATE_MOD
+    if _MIGRATE_MOD is not None:
+        return _MIGRATE_MOD or None
+    import importlib.util
+    cand = HERE.parent / "tools" / "migrate.py"
+    try:
+        spec = importlib.util.spec_from_file_location("paperpull_migrate", cand)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _MIGRATE_MOD = mod
+    except Exception:
+        _MIGRATE_MOD = False
+    return _MIGRATE_MOD or None
+
+
+def _migrate_or_fail():
+    mod = _migrate_module()
+    if mod is None:
+        raise HTTPException(500, "migrate.py was not found next to this control panel")
+    return mod
+
+
+@app.get("/api/history/export", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+def api_history_export():
+    """The history file, handed to the browser. Written in memory, so no
+    copy of it is left on this computer or in the server's shared folder."""
+    mod = _migrate_or_fail()
+    data, _ = mod.build(apps_root())
+    if data is None:
+        raise HTTPException(404, "there is no download history here to export yet")
+    name = "PaperPull history %s.ppz" % date.today().isoformat()
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="%s"' % name,
+                             "Cache-Control": "no-store"})
+
+
+async def _history_upload(request: Request):
+    """(the export's manifest with its records, the root it goes into, and
+    whether that root was chosen on the welcome page) from what the page
+    sent, a JSON body holding the file in base64 and, on the welcome page,
+    the folder chosen there."""
+    import base64
+    if int(request.headers.get("content-length") or 0) > HISTORY_MAX_BYTES:
+        raise HTTPException(413, "that file is far larger than any download history")
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > HISTORY_MAX_BYTES:
+            raise HTTPException(413, "that file is far larger than any download history")
+    try:
+        data = json.loads(bytes(body).decode("utf-8"))
+        raw = base64.b64decode(str(data.get("file") or ""), validate=True)
+    except Exception:
+        raise HTTPException(400, "expected the history file")
+    mod = _migrate_or_fail()
+    try:
+        manifest = mod.read(raw)
+    except mod.NotAnExport as e:
+        raise HTTPException(400, str(e))
+    root, chosen = _history_root(str(data.get("root") or "").strip().strip('"'))
+    return mod, manifest, root, chosen
+
+
+def _history_root(raw: str):
+    """Where an import goes. The shared folder on PaperPull Server, the
+    folder chosen on the welcome page when it sent one, otherwise the apps
+    root the panel is on. (root, whether it was chosen here)."""
+    if server_mode.enabled():
+        return server_mode.data_root(), False
+    if not raw:
+        return apps_root(), False
+    root = Path(raw).expanduser()
+    if not root.is_absolute():
+        raise HTTPException(400, "give the full path, starting from the drive or from /")
+    if os.path.normcase(str(root)) == os.path.normcase(str(apps_root())):
+        return apps_root(), False
+    if os.environ.get("APPS_ROOT"):
+        raise HTTPException(409, "APPS_ROOT is set in the environment, which "
+                                 "overrides any saved choice. Unset it first.")
+    return root, True
+
+
+def _apply_settings(mod, cfg_path: Path, install: Path, settings: dict) -> None:
+    """A file's settings, written into a config the import just made. Only
+    what tools/migrate.py allows for this install, a file name pattern only
+    when it passes the same check the File names tab makes, and never the
+    folders, profile, browser or port, which belong to this computer."""
+    cfg = _read_json(cfg_path)
+    if not isinstance(cfg, dict):
+        return
+    naming = _naming()
+    take = mod.settings_to_apply(install, cfg, settings,
+                                 check_pattern=naming.check if naming else None)
+    if not take:
+        return
+    cfg.update(take)
+    tmp = cfg_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, cfg_path)
+
+
+def _template_for(entry: dict, providers: list):
+    want = entry["provider"].lower()
+    for p in providers:
+        if p["provider"].lower() == want and entry.get("kind") in (None, p["kind"]):
+            return p
+    return None
+
+
+def _history_place(mod, entry, places, providers, root: Path, apply: bool):
+    """Where a provider or person the file names will keep its history when
+    nothing here does yet, set up when apply is true. (place, why not)."""
+    tmpl = _template_for(entry, providers)
+    if tmpl is None:
+        return None, "this version of PaperPull has no %s" % entry["provider"]
+    account = entry["account"]
+    if account != "primary" and (not _LABEL_RE.match(account) or account == "example"):
+        return None, "its person's label cannot be used here"
+    want = tmpl["provider"].lower()
+    first = next((p for p in places if p["provider"].lower() == want
+                  and p["account"] == "primary"), None)
+    if first is None:
+        install = root / tmpl["folder"]
+        if install.exists():
+            return None, "a folder named %s is already there" % tmpl["folder"]
+        where = install
+        if apply:
+            root.mkdir(parents=True, exist_ok=True)
+            owner = entry["settings"].get("owner") if account == "primary" else ""
+            if create_install(root, tmpl["slug"], owner=str(owner or "")[:80]) != "created":
+                return None, "a folder named %s is already there" % tmpl["folder"]
+            if account == "primary":
+                _apply_settings(mod, install / "config.json", install, entry["settings"])
+            cfg = _read_json(install / "config.json") or {}
+            where = mod.output_dir_of(install, cfg, tmpl["provider"])
+        first = {"folder": where.name, "install": install.name, "account": "primary",
+                 "provider": tmpl["provider"], "kind": tmpl["kind"], "path": where,
+                 "records": {}, "settings": {}, "config": install / "config.json",
+                 "made": True}
+        places.append(first)
+        if account == "primary":
+            return first, ""
+    if first.get("config") is None:
+        return None, "its first person's folder has no app to add a person to"
+    install = root / first["install"]
+    if (install / ("config.%s.json" % account)).exists():
+        # There, and its history could not be read, so it was not listed.
+        # Never written over, since it is somebody's account.
+        return None, "%s already has a person called %s" % (install.name, account)
+    owner = str(entry["settings"].get("owner") or "")[:80]
+    if apply:
+        dest = _make_account(install, account, owner)
+        _apply_settings(mod, dest, install, entry["settings"])
+        where = mod.output_dir_of(install, _read_json(dest) or {}, tmpl["provider"])
+    else:
+        where = root / ("%s - %s" % (install.name, account))
+    place = {"folder": where.name, "install": install.name, "account": account,
+             "provider": tmpl["provider"], "kind": tmpl["kind"], "path": where,
+             "records": {}, "settings": {}, "config": install / ("config.%s.json" % account),
+             "made": True}
+    places.append(place)
+    return place, ""
+
+
+def _history_walk(mod, manifest: dict, root: Path, apply: bool) -> list:
+    """What importing the file does here, one row for each provider and
+    person it names, done when apply is true. The plan and the import are
+    this same walk, so they cannot disagree."""
+    providers = list_providers()
+    places = mod.scan(root) if root.is_dir() else []
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    rows = []
+    for entry in manifest["apps"]:
+        incoming = entry["incoming"]
+        row = {"provider": entry["provider"], "account": entry["account"],
+               "records": len(incoming or {}),
+               "downloaded": sum(1 for r in (incoming or {}).values() if mod._done(r))}
+        rows.append(row)
+        if incoming is None:
+            row.update(action="skipped", why="its history is missing from the file")
+            continue
+        place = mod.match(entry, places)
+        how = "fill in"
+        if place is None:
+            try:
+                place, why = _history_place(mod, entry, places, providers, root, apply)
+            except (OSError, HTTPException) as e:
+                place, why = None, "it could not be set up, %s" % (
+                    e.detail if isinstance(e, HTTPException) else e)
+            if place is None:
+                row.update(action="skipped", why=why)
+                continue
+            how = "set up" if entry["account"] == "primary" else "add person"
+        row["action"] = how
+        if place["account"] != "primary":
+            row["account"] = place["account"]
+        records, added, updated = mod.merged(place, entry, manifest)
+        row.update(new=added, marked=updated, known=len(place["records"]))
+        if apply and (added or updated):
+            try:
+                mod.write_history(place["path"], records, stamp)
+            except OSError as e:
+                row.update(failed="its history could not be written, %s" % e)
+                continue
+            place["records"] = records
+    return rows
+
+
+@app.post("/api/history/plan", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+async def api_history_plan(request: Request):
+    """What Import would do with a history file. Writes nothing."""
+    mod, manifest, root, _ = await _history_upload(request)
+    rows = await to_thread.run_sync(_history_walk, mod, manifest, root, False)
+    return {"root": str(root), "rows": rows, "made": manifest.get("created") or "",
+            "version": manifest.get("version") or ""}
+
+
+@app.post("/api/history/import", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+async def api_history_import(request: Request):
+    """Set up each provider and person a history file names that is not
+    set up here, with their settings, and fold in what each had already
+    downloaded, so nothing it had is downloaded here again. A progress.json
+    already here is backed up before it is written, and nothing is ever
+    taken out of one."""
+    mod, manifest, root, chosen = await _history_upload(request)
+    if _RUNNING:
+        raise HTTPException(409, "a provider is running right now. Import once it has finished.")
+    if not _IMPORTING.acquire(blocking=False):
+        raise HTTPException(409, "an import is already under way")
+    try:
+        rows = await to_thread.run_sync(_history_walk, mod, manifest, root, True)
+    finally:
+        _IMPORTING.release()
+    if chosen and any(r.get("action") in ("set up", "add person") for r in rows):
+        data = _read_settings()
+        data["apps_root"] = str(root.resolve())
+        try:
+            _write_settings(data)
+        except OSError as e:
+            raise HTTPException(500, "the import is done, and the folder could not be "
+                                     "remembered: %s" % e)
     global _STATUS_MOD
     _STATUS_MOD = None
-    return {"app": name, "account": label, "config": Path(dest).name,
-            "output_dir": cfg.get("output_dir", ""), "cdp_url": cfg.get("cdp_url", ""),
-            "owner": cfg.get("owner", "")}
+    return {"root": str(root), "rows": rows}
 
 
 # -- stopping a recording -----------------------------------------------------
@@ -2434,6 +2713,10 @@ HTML = r"""<!doctype html>
       <span class="hint" style="margin:0" id="newmsg"></span>
     </div>
   </div>
+  <p class="hint" style="margin-top:26px" id="movelink">
+    <a href="#" onclick="toggleMove(); return false;" style="color:var(--accent)">Moving from another computer? Bring its providers and history</a>
+  </p>
+  <div id="setupmove" style="display:none"></div>
   <p class="hint" style="margin-top:26px">
     <a href="#" onclick="openSample(); return false;" style="color:var(--accent)">Not ready to sign in to anything? See a sample archive</a><br>
     Invented statements and receipts, so you can try the Status tab and both
@@ -2526,6 +2809,18 @@ HTML = r"""<!doctype html>
     <p><button onclick="loadStatus()">Refresh</button>
        <span class="hint" id="stnote"></span></p>
     <div id="stbody">not loaded yet</div>
+    <div id="stmove">
+      <div id="movebox">
+        <h3 id="hxhead" style="margin:26px 0 6px; font-size:15px">Move to another computer</h3>
+        <p class="hint" style="margin-top:0" id="hxlead"></p>
+        <p id="hxexportrow"><button id="hxexport" onclick="exportHistory()">Export history</button></p>
+        <label for="hxfile">Import a history file</label>
+        <input id="hxfile" type="file" accept=".ppz" onchange="planHistory()">
+        <div id="hxplan" style="margin-top:10px"></div>
+        <p><button class="primary" id="hximport" style="display:none" onclick="importHistory()">Import</button>
+           <span class="hint" id="hxmsg"></span></p>
+      </div>
+    </div>
   </div>
   <div id="panexl" class="stwrap" style="display:none;">
     <p class="hint" style="margin-top:0">Every purchase from a receipt archive, one row
@@ -2786,6 +3081,166 @@ async function removeProvider() {
     (kept.length ? '\n\nStill inside it: ' + kept.join(', ') + '.' : '') +
     '\n\nNothing was deleted. Delete that folder yourself when you are sure you no longer ' +
     'need what is in it. Until then, moving it back restores the provider.';
+}
+
+// -- moving to another computer (#67) -----------------------------------------
+// One box. On the welcome page of a new computer it brings a history file in,
+// setting up what the file names. On the Status tab it writes one too.
+const HX_LEAD_WELCOME =
+  'Choose the history file you saved with Export history on the Status tab of your ' +
+  'other computer. Each provider and person in it is set up here with their settings, ' +
+  'and every document they already downloaded is marked as downloaded, so none of them ' +
+  'is downloaded here again. No sign-in comes with the file, so you sign in to each ' +
+  'provider here yourself.';
+const HX_LEAD_STATUS =
+  'Export history saves a file that lists each provider and person here, their settings, ' +
+  'and every document each one has already downloaded. Import it on another computer, or ' +
+  'on PaperPull Server, and nothing you already have is downloaded there again. It holds ' +
+  'no password, no sign-in and no PDF. It does hold document titles, order numbers, totals ' +
+  'and the account holders\' names, so keep it as private as your documents.';
+const HX_PLAN = {'set up': 'set up here', 'add person': 'added here', 'fill in': 'already here'};
+const HX_DONE = {'set up': 'set up', 'add person': 'added', 'fill in': 'filled in'};
+let HX_FILE = '';
+
+function placeMove(welcome) {
+  (welcome ? $('setupmove') : $('stmove')).append($('movebox'));
+  $('hxhead').style.display = welcome ? 'none' : '';
+  $('hxexportrow').style.display = welcome ? 'none' : '';
+  $('hxlead').textContent = welcome ? HX_LEAD_WELCOME : HX_LEAD_STATUS;
+}
+function toggleMove() {
+  const b = $('setupmove');
+  b.style.display = b.style.display === 'none' ? 'block' : 'none';
+}
+function hxWelcome() { return $('setup').style.display === 'block'; }
+function hxReset() {
+  HX_FILE = ''; $('hxfile').value = '';
+  $('hximport').style.display = 'none';
+}
+
+async function exportHistory() {
+  $('hxmsg').textContent = 'writing the file...';
+  let r;
+  try { r = await fetch('/api/history/export'); }
+  catch (e) { $('hxmsg').textContent = 'could not reach the control panel'; return; }
+  if (!r.ok) {
+    let d = {}; try { d = await r.json(); } catch (e) {}
+    $('hxmsg').textContent = d.detail || 'that did not work'; return;
+  }
+  const blob = await r.blob();
+  const named = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = named ? named[1] : 'PaperPull history.ppz';
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  $('hxmsg').textContent = 'Saved ' + a.download + ' with your downloads. Keep it as private as your documents.';
+}
+
+async function hxPost(url) {
+  const body = {file: HX_FILE, root: hxWelcome() ? $('newroot').value.trim() : ''};
+  let r;
+  try {
+    r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                          body: JSON.stringify(body)});
+  } catch (e) { $('hxmsg').textContent = 'could not reach the control panel'; return null; }
+  let d = {}; try { d = await r.json(); } catch (e) {}
+  if (!r.ok) { $('hxmsg').textContent = d.detail || 'that did not work'; return null; }
+  return d;
+}
+
+function hxTable(d, done) {
+  const why = r => r.failed ? r.failed : r.action === 'skipped' ? 'skipped, ' + r.why
+                 : (done ? HX_DONE : HX_PLAN)[r.action];
+  const rows = d.rows.map(r =>
+    '<tr><td>' + esc(r.provider) + '</td><td>' + esc(r.account === 'primary' ? '' : r.account) +
+    '</td><td>' + esc(why(r)) + '</td><td class="num">' + r.records + '</td>' +
+    '<td class="num">' + r.downloaded + '</td></tr>').join('');
+  return '<table class="st"><thead><tr><th>Provider</th><th>Person</th><th>Here</th>' +
+    '<th class="num">Documents</th><th class="num">Downloaded</th></tr></thead><tbody>' +
+    rows + '</tbody></table>';
+}
+
+function hxCounts(d) {
+  const ok = d.rows.filter(r => r.action !== 'skipped' && !r.failed);
+  const n = a => ok.filter(r => r.action === a).length;
+  return {setUp: n('set up'), people: n('add person'), filled: n('fill in'),
+          skipped: d.rows.length - ok.length,
+          docs: ok.reduce((s, r) => s + r.downloaded, 0),
+          changes: n('set up') + n('add person') +
+                   ok.reduce((s, r) => s + (r.new || 0) + (r.marked || 0), 0)};
+}
+
+function hxSaying(c, done) {
+  const parts = [];
+  const many = (k, one, more) => k + ' ' + (k === 1 ? one : more);
+  if (c.setUp) parts.push((done ? 'set up ' : 'sets up ') + many(c.setUp, 'provider', 'providers'));
+  if (c.people) parts.push((done ? 'added ' : 'adds ') + many(c.people, 'person', 'people'));
+  if (c.filled) parts.push((done ? 'added to ' : 'adds to ') + 'the history of ' +
+                           c.filled + ' already here');
+  const said = parts.length > 1
+    ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts.join('');
+  let s = (done ? 'Imported. It ' : 'Importing ') + said + '. ' +
+    many(c.docs, 'document', 'documents') + ' downloaded on the other computer ' +
+    (done ? 'will' : 'would') + ' never be downloaded here again.';
+  if (c.skipped) s += ' ' + many(c.skipped, 'line was', 'lines were') + ' skipped, as the table says.';
+  return s;
+}
+
+async function planHistory() {
+  const f = $('hxfile').files[0];
+  HX_FILE = ''; $('hxplan').innerHTML = ''; $('hximport').style.display = 'none';
+  $('hxmsg').textContent = '';
+  if (!f) return;
+  if (f.size > 32 * 1024 * 1024) { $('hxmsg').textContent = 'that file is far larger than any download history'; return; }
+  $('hxmsg').textContent = 'reading the file...';
+  try {
+    const url = await new Promise((ok, no) => {
+      const rd = new FileReader();
+      rd.onload = () => ok(String(rd.result)); rd.onerror = () => no(rd.error);
+      rd.readAsDataURL(f);
+    });
+    HX_FILE = url.slice(url.indexOf(',') + 1);
+  } catch (e) { $('hxmsg').textContent = 'that file could not be read'; return; }
+  const d = await hxPost('/api/history/plan');
+  if (!d) return;
+  const c = hxCounts(d);
+  $('hxplan').innerHTML = hxTable(d, false);
+  if (!c.setUp && !c.people && !c.filled) {
+    $('hxmsg').textContent = 'Nothing in that file can be imported here, as the table says.';
+    return;
+  }
+  if (!c.changes) {
+    $('hxmsg').textContent = 'Everything in that file is already here, so importing it ' +
+      'would change nothing.';
+    return;
+  }
+  $('hxmsg').textContent = hxSaying(c, false) + ' Nothing is downloaded now.';
+  $('hximport').textContent = c.setUp || c.people ? 'Set up and import' : 'Import';
+  $('hximport').style.display = '';
+}
+
+async function importHistory() {
+  if (!HX_FILE) return;
+  $('hximport').disabled = true;
+  $('hxmsg').textContent = 'importing...';
+  const d = await hxPost('/api/history/import');
+  $('hximport').disabled = false;
+  if (!d) return;
+  hxReset();
+  const c = hxCounts(d);
+  $('hxplan').innerHTML = hxTable(d, true);
+  $('hxmsg').textContent = hxSaying(c, true);
+  const welcome = hxWelcome();
+  STATUS_LOADED = false; XL_LOADED = false;
+  await load();
+  if (welcome) {
+    showTab('out');
+    $('console').textContent = hxSaying(c, true) + '\n\nNothing was downloaded, and no ' +
+      'sign-in came with the file. Next, pick a provider above, press Login, and sign in ' +
+      (SERVER ? 'on the Browser Screen' : 'when the browser opens') +
+      '. Run All then downloads only what is new.';
+  }
 }
 
 let STATUS_LOADED = false;
@@ -3150,6 +3605,10 @@ async function load() {
   const appSel = $('app');
   appSel.innerHTML = '';
   const keys = Object.keys(META.apps);
+  // Nothing in the sample is moved anywhere, and nothing is moved into it.
+  $('movebox').style.display = inSample ? 'none' : '';
+  placeMove(!keys.length);
+  $('movelink').style.display = keys.length ? 'none' : '';
   if (!keys.length) {
     showSetup(true);
     $('newuser').style.display = 'block';

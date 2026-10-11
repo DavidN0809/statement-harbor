@@ -51,6 +51,12 @@ you gave the container.
 If you mount Paperless's consume folder, each run's new documents are also
 copied there, and nowhere else.
 
+**Export history** on the Status tab hands your browser a file listing
+each provider and person, their settings and every document already
+downloaded, and the server keeps no copy. A file you bring with **Import a
+history file** is read, what it records is written into the data folder,
+and the file itself is not kept.
+
 ## Who can reach it
 
 Unlike the desktop app, the server listens on your home network, by

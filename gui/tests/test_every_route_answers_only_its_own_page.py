@@ -210,6 +210,22 @@ def _no_password(box) -> None:
     box.code = server_mode.setup_code()
 
 
+def _history(box) -> dict:
+    """A history file naming a provider the sandbox has not set up, as the
+    page sends it, so an import sets one up."""
+    import base64
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("manifest.json", json.dumps({
+            "schema": 2, "source_root": "/elsewhere",
+            "apps": [{"provider": "GitHub", "kind": "RECEIPT", "account": "primary",
+                      "folder": "GitHub Receipts", "file": "apps/0/progress.json"}]}))
+        z.writestr("apps/0/progress.json", json.dumps({"G1": {
+            "state": "Completed", "downloaded_ok": True, "pdf_path": ""}}))
+    return {"file": base64.b64encode(buf.getvalue()).decode("ascii"), "root": ""}
+
+
 ROUTES = {
     ("GET", "/api/apps"): dict(desktop="changes", server="changes"),
     ("POST", "/api/export"): dict(body={"csv": True}, desktop="changes", server="changes"),
@@ -230,6 +246,9 @@ ROUTES = {
                                   desktop="changes", server="changes"),
     ("POST", "/api/account"): dict(body={"app": SHOP, "label": "second", "owner": ""},
                                    desktop="changes", server="changes"),
+    ("GET", "/api/history/export"): dict(desktop="reads", server="reads"),
+    ("POST", "/api/history/plan"): dict(body=_history, desktop="reads", server="reads"),
+    ("POST", "/api/history/import"): dict(body=_history, desktop="changes", server="changes"),
     ("GET", "/api/failure/latest"): dict(ask="/api/failure/latest?app=Shop%20Receipts",
                                          desktop="reads", server="reads"),
     ("POST", "/api/failure/reveal"): dict(body={"app": SHOP}, desktop="changes", server="reads"),

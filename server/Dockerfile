@@ -89,6 +89,8 @@ COPY gui /opt/paperpull/gui
 COPY tools/status.py tools/export_purchases.py tools/export_transactions.py \
      tools/make_sample.py /opt/paperpull/tools/
 COPY tools/add_account.py /opt/paperpull/tools/add_account.py
+# Export history and Import history, so a desktop's history comes across (#67).
+COPY tools/migrate.py /opt/paperpull/tools/migrate.py
 COPY packaging/paperpull.ico /opt/paperpull/packaging/paperpull.ico
 COPY server/entrypoint.sh server/chrome.sh server/start.sh server/selftest.py \
      server/reset_password.py /opt/paperpull/server/
