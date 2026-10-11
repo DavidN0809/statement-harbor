@@ -344,6 +344,18 @@ def on_documents_page(page) -> bool:
     return "/documents/" in (page.url or "").lower()
 
 
+# The documents page's own marks, as the live page drew them in August
+# (Diagnostics/diagnose-documents.json). The documents table's header row
+# reads Date | Document | Policy | Name of Insured | View in Browser |
+# Download a Copy in cells of its own, and the page's sections are postback
+# controls, MY DOCUMENTS the one it opens on.
+_HEADER_ROW_JS = r"""() => [...document.querySelectorAll('table tr')].some(tr => {
+  const cells = [...tr.children].map(c => (c.innerText || '').trim().toLowerCase());
+  return ['date', 'document', 'policy'].every(name => cells.includes(name));
+})"""
+_MY_DOCUMENTS_RE = re.compile(r"^\s*my\s+documents\s*$", re.I)
+
+
 def showing_documents_list(page) -> bool:
     """On /Documents/ AND showing its document list, the rule goto_documents
     holds every page in front of it to.
@@ -355,11 +367,32 @@ def showing_documents_list(page) -> bool:
     next document's row was looked for inside the viewer and not found. A
     page that cannot be read is not showing the list either, and a page of
     another host is not read at all, whatever its address says, since no
-    app reads a tab of another site (tabs.py)."""
+    app reads a tab of another site (tabs.py).
+
+    The list is known by the documents table's header row, never by how
+    many rows it holds. It took more than one row of a broad row selector,
+    which the membership letters and the header row met on the live page,
+    so an account with one document or none passed only while those
+    letters showed, and Discover stops on a page that will not open. The
+    page is drawn by the server whole, so once the header row shows, the
+    table is there as it stands, empty or not."""
+    return _list_drawn(page, fresh=False)
+
+
+def _list_drawn(page, fresh: bool) -> bool:
+    """showing_documents_list, and with fresh=True for a page this app has
+    just loaded by its address, the MY DOCUMENTS section control as well,
+    for a list that may draw no header row while it holds no document.
+    Insurance Documents and Digital Vault are postback views at the same
+    address, with the same section controls, so the control says which
+    section shows only right after a load of the address, which opens on
+    MY DOCUMENTS. A page kept as it was found needs the header row."""
     if not is_safe_url(page.url or "") or not on_documents_page(page):
         return False
     try:
-        return page.locator(FALLBACK["doc_row"]).count() > 1
+        if page.evaluate(_HEADER_ROW_JS):
+            return True
+        return fresh and page.get_by_role("link", name=_MY_DOCUMENTS_RE).count() > 0
     except Exception:
         return False
 
@@ -374,7 +407,7 @@ def goto_documents(page) -> bool:
     documents table.
     """
     started_at = page.url
-    if on_documents_page(page) and page.locator(FALLBACK["doc_row"]).count() > 1:
+    if showing_documents_list(page):
         log.info("using the page already open: %s", started_at)
         return True
 
@@ -403,7 +436,7 @@ def goto_documents(page) -> bool:
             page.wait_for_selector(FALLBACK["page_ready"], timeout=12000)
         except Exception:
             pass
-        if on_documents_page(page) and page.locator(FALLBACK["doc_row"]).count() > 1:
+        if _list_drawn(page, fresh=True):
             return True
 
     # the site's own nav link
@@ -415,7 +448,7 @@ def goto_documents(page) -> bool:
             if not FORBIDDEN_CONTROL_RE.search(label):
                 link.first.click()
                 page.wait_for_timeout(3000)
-                if on_documents_page(page) and                         page.locator(FALLBACK["doc_row"]).count() > 1:
+                if showing_documents_list(page):
                     return True
     except Exception:
         pass
@@ -428,7 +461,7 @@ def goto_documents(page) -> bool:
             page.wait_for_timeout(2500)
     except Exception:
         pass
-    found = on_documents_page(page) and page.locator(FALLBACK["doc_row"]).count() > 1
+    found = showing_documents_list(page)
     if not found:
         log.warning(
             "No document list found. Open %s in the signed-in browser, leave "

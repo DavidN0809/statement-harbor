@@ -7,6 +7,59 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **USAA's Discover could miss most of the list from 0.26.0 on.** USAA's
+  documents page asks USAA for its whole list as it loads, and the app
+  reads the list from those answers. Since 0.26.0 the app opened the page
+  and waited on it first, and only then listened, so it heard only the
+  answers that came later, often none, and still called the list read.
+  Pilot and Run All then worked only through what was heard and what an
+  earlier version had listed. The app now loads the page while it listens,
+  and a page whose list never arrives stops the run rather than pass for
+  an empty one. Proven against a made-up page built from the July probe of
+  USAA's own, not yet run against USAA.
+- **USAA and Armed Forces Mutual know their documents page by what it is,
+  not by how many rows it shows.** Each counted the page as open only once
+  more than one row showed, and Discover stops on a page that will not
+  open, so an account with one document, or none yet, could stop every
+  Pilot and Run All. USAA's page is now known by its address and its My
+  Documents heading or its table's header row, and Armed Forces Mutual's
+  by its documents table's header row, or right after the app loads its
+  address by its MY DOCUMENTS section, since its other sections show at
+  the same address. A page that never drew still stops the run. On Armed
+  Forces Mutual the header row and the membership letters already counted
+  as rows, so only an account with no document yet and no letters stopped
+  there.
+- **USAA's download by row loads the list afresh before it presses.** It
+  is used for a record with no document id. Since 0.26.0 it kept a page
+  already showing, which at a document's own address still shows that
+  document's PDF, so the capture could save it under the next document's
+  name.
+- **A receipt saved since its page last showed nothing starts its days
+  again.** The days a receipt page showed nothing stayed on the purchase's
+  record after a run saved something for it. That mattered where the save
+  did not finish the purchase, a copy put aside in Manual Review, or a
+  Target order with one invoice saved and another still missing. One more
+  day of an empty page then set the purchase aside for review, as though
+  its page had shown nothing three days running, and Target's missing
+  invoice was never asked for again. Any save for a purchase now lets those
+  days go, in all fourteen receipt apps.
+- **Anthem names its member documents, ID cards and letters as Rename
+  does.** Anthem takes these from lists of their own, apart from its EOBs,
+  and named each file from the row its list gave rather than from the
+  record written down for the file, which is where a name pattern and
+  Rename find the document's id. So under a File names pattern with
+  {number} in it, these files were saved without their id, and Rename
+  offered to add it to every one. When two of them wanted one name, as two
+  letters of one subject on one day can, the second was saved with " (2)"
+  and Rename offered it the end of its id. Each file is now named from the
+  record written down for it, and the second of two files of one name is
+  told apart by the last six characters of its id, as an EOB already was.
+  A file saved before keeps its name until Rename is run, which offers the
+  new name in a preview first.
+
 ## [0.45.0] - 2026-10-07
 
 A receipt whose page did not show it is fetched on the next run, in
