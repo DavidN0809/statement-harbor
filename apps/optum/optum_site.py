@@ -71,7 +71,6 @@ from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
 # re-exported: the docs module calls it as site.set_download_dir
 from paperpull_core.capture import set_download_dir  # noqa: F401
-from paperpull_core.controls import escape_for_locator
 from paperpull_core.words import words_for as _words_for
 
 log = logging.getLogger("optum_docs.site")

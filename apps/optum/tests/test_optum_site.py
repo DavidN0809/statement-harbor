@@ -131,7 +131,6 @@ class Binding(unittest.TestCase):
     """download_bill fetches only the one entry that carries the recorded path, title and date."""
 
     def make_page(self, entries, settled=None, start="https://account.optumbank.com/account"):
-        site_ref = site
         class Resp:
             ok, status, headers = True, 200, {"content-type": "application/pdf"}
             def body(s): return b"%PDF-1.4 x"
@@ -167,7 +166,7 @@ class Binding(unittest.TestCase):
             for kw in [dict(iso_date="2026-08-31", title="HSA Statement 2026-08-31", href=""),
                        dict(iso_date="2026-08-30", title="HSA Statement 2026-08-31", href=f"/account/products/{PID}/statements/1.pdf"),
                        dict(iso_date="2026-08-31", title="HSA Statement 2026-08-31", href=f"/account/products/{PID}/statements/9.pdf"),
-                       dict(iso_date="2026-08-31", title="HSA Statement 2026-08-31", href=f"/account/products/99999999/statements/1.pdf"),
+                       dict(iso_date="2026-08-31", title="HSA Statement 2026-08-31", href="/account/products/99999999/statements/1.pdf"),
                        dict(iso_date="2024-12-31", title="Rendered EOY 5498-SA Notices-2025", href=f"/account/products/{PID}/tax_documents/777.pdf")]:
                 self.assertFalse(site.download_bill(page, None, kw["iso_date"], Path(td) / "o.pdf", title=kw["title"], trace=[], href=kw["href"]), kw)
             self.assertEqual(page.context.request.asked, [])
