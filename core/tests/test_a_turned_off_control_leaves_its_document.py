@@ -75,8 +75,8 @@ STOPS = {
         "the dialog's own Download, once the row's Download opened the dialog, so a "
         "press was made for the document already"),
     ("coinbase", "_press_load_more", "click", "load more of the list"): (1,
-        "a control of the whole list, read as showing before it is pressed, and a list "
-        "shown in full leaves only the statement not shown"),
+        "a control of the whole list, read as showing and turned on before it is pressed, "
+        "and a list shown in full leaves only the statement not shown"),
     ("pge", "goto_page_number", "press_once", ""): (1,
         "the history's page picker, a step to the page a bill is on and every bill "
         "after it"),

@@ -60,7 +60,13 @@ KNOWN CEILINGS (ponytail: left as they are until a run shows otherwise)
     the account this was built on, so a non-empty one is untested.
   * The statements page's "Credit Card" tab is not read; the account this
     was built on has no Coinbase Card.
-  * "Last 30 days" is skipped by design, it is not a statement.
+  * "Last 30 days" is skipped by design, it is not a statement. A list
+    showing it twice is a list this cannot read.
+  * The statements list is called whole only when its oldest month is the
+    month of the account's first transaction (owner-info's
+    first_transaction_date) or an earlier one. A list that stops short of
+    it, or an account whose owner-info names no first transaction, stops
+    the listing.
 """
 from __future__ import annotations
 
@@ -396,6 +402,14 @@ _PDF_BTN = "button[data-testid='statements-pdf-v2']"
 SECOND_DOWNLOAD_WAIT_MS = 3000
 _LOAD_MORE = "button[data-testid='load-more']"
 _MAX_LOAD_MORE = 60
+# How long the list is given before a Load more that is not there, or is
+# turned off, is taken for the end of the list. It is looked for once, and
+# once more after this, since a list still drawing a page can hide it for a
+# moment.
+LOAD_MORE_LOOK_AGAIN_MS = 1500
+# How long the statements page is given to draw its month rows, once its
+# first PDF button shows, when the account has months to show.
+MONTH_ROWS_WAIT_MS = 10000
 _MONTH_ROW_RE = re.compile(r"^(January|February|March|April|May|June|July|August|September|"
                            r"October|November|December) ((?:19|20)\d{2})$")
 _STATEMENT_TITLE_RE = re.compile(r"^Monthly Statement ((?:January|February|March|April|May|June|"
@@ -404,10 +418,15 @@ _TAX_TITLE_RE = re.compile(r"^(.+?) Tax Year ((?:19|20)\d{2})(?: \(#([A-Za-z0-9]
 
 # The label of the row one PDF button sits in, "September 2026" or "Last 30
 # days", read from the page without pressing anything. The row is the
-# nearest ancestor whose text starts with such a label.
+# nearest ancestor whose text starts with such a label. An ancestor holding
+# a second PDF button is the list around the rows, not a row, and the label
+# is "" there. A row whose own text did not start with its month used to
+# climb to the list, which starts with "Last 30 days", and was skipped as
+# that row.
 _LABEL_OF_JS = r"""(b) => {
   let el = b;
   for (let k = 0; k < 8 && el; k++, el = el.parentElement) {
+    if (el.querySelectorAll("button[data-testid='statements-pdf-v2']").length > 1) return '';
     const t = (el.innerText || '').trim();
     const m = t.match(/^(Last 30 days|[A-Z][a-z]+ (?:19|20)\d{2})(?!\S)/);
     if (m) return m[1];
@@ -518,17 +537,37 @@ def scroll_full_page(page, rounds: int = 8, delay_ms: int = 600) -> None:
         pass
 
 
+def _load_more_button(page):
+    """The list's Load more when it shows and is turned on, or None once it
+    has been looked for twice, LOAD_MORE_LOOK_AGAIN_MS apart, so a button
+    the page hides or turns off for a moment while it draws is not taken for
+    the end of the list. A button that could not be read raises
+    ListStopped. Whether the list then reaches back far enough is
+    _reaches_first_month's to say."""
+    for look in (1, 2):
+        try:
+            btn = page.locator(_LOAD_MORE).first
+            if btn.count() and btn.is_visible() and btn.is_enabled(timeout=1000):
+                return btn
+        except Exception as e:
+            raise ListStopped("its Load more could not be read (%s)" % type(e).__name__)
+        if look == 1:
+            page.wait_for_timeout(LOAD_MORE_LOOK_AGAIN_MS)
+    return None
+
+
 def _press_load_more(page) -> bool:
-    """Press the list's Load more once. False when there is none left. Its
-    own label goes through the guard first, and the press goes through the
-    core, which presses nothing that something covers and stops the run
-    instead (pressing.click). Pressed with the rows still the same after
-    about ten seconds, or refused, raises ListStopped, since both used to
-    read as the end of the list."""
+    """Press the list's Load more once. False when there is none left,
+    looked for twice (_load_more_button). Its own label goes through the
+    guard first, and the press goes through the core, which presses
+    nothing that something covers and stops the run instead
+    (pressing.click). Pressed with the rows still the same after about ten
+    seconds, or refused, raises ListStopped, since both used to read as the
+    end of the list."""
+    btn = _load_more_button(page)
+    if btn is None:
+        return False
     try:
-        btn = page.locator(_LOAD_MORE).first
-        if btn.count() == 0 or not btn.is_visible():
-            return False
         label = (btn.inner_text(timeout=1000) or btn.get_attribute("aria-label") or "")
     except Exception as e:
         raise ListStopped("its Load more could not be read (%s)" % type(e).__name__)
@@ -552,12 +591,61 @@ def expand_all(page) -> None:
     raise ListStopped("it runs past %d presses of Load more" % _MAX_LOAD_MORE)
 
 
-def _collect_statements(page) -> List[RawDoc]:
+def _month_of(iso: str) -> Tuple[int, int]:
+    return int(iso[:4]), int(iso[5:7])
+
+
+def _has_months(first: str, today: _date) -> bool:
+    """Whether an account whose first transaction was on `first` has a
+    complete month by `today`, and so a statement to list."""
+    return bool(first) and _month_of(first) < (today.year, today.month)
+
+
+def _wait_for_months(page, timeout_ms: int = MONTH_ROWS_WAIT_MS) -> None:
+    """Wait as long as `timeout_ms` for a row labeled with a month, since
+    the list can show its "Last 30 days" row first. Whether the months
+    then read reach back far enough is _reaches_first_month's to say."""
+    waited = 0
+    while waited < timeout_ms:
+        if any(month_to_iso(r.get("label") or "") for r in _read_rows(page)):
+            return
+        page.wait_for_timeout(500)
+        waited += 500
+
+
+def _reaches_first_month(docs: List[RawDoc], first: str, today: _date) -> None:
+    """Raise ListStopped unless the oldest month listed is the month of the
+    account's first transaction, `first` (YYYY-MM-DD), or an earlier one.
+    Every complete month since then has its statement, so a list that stops
+    short of that month lost the months after where it stopped, and a list
+    that read every row as changed would read as none at all."""
+    if not first:
+        raise ListStopped("Coinbase did not say when the account's first transaction was, so "
+                          "the statements list cannot be checked whole")
+    if not _has_months(first, today):
+        return
+    if not docs:
+        raise ListStopped("it lists no month, though the account's first transaction was "
+                          "before this month")
+    oldest = min(d.date_text for d in docs)
+    if _month_of(oldest) > _month_of(first):
+        raise ListStopped("its oldest month is %s, after the month of the account's first "
+                          "transaction" % oldest[:7])
+
+
+def _collect_statements(page, first: str, today: Optional[_date] = None) -> List[RawDoc]:
     """One RawDoc per complete month on the statements page, newest first.
-    "Last 30 days" is a moving window and is skipped."""
+    "Last 30 days" is a moving window and is skipped, once. The list has to
+    reach back to the month of the account's first transaction, `first`
+    (YYYY-MM-DD, from owner-info), or it is a list cut short
+    (_reaches_first_month)."""
+    today = today or _date.today()
     docs: List[RawDoc] = []
     seen = set()
+    windows = 0
     try:
+        if _has_months(first, today):
+            _wait_for_months(page)
         expand_all(page)
         rows = _read_rows(page)
         if not rows:
@@ -569,6 +657,9 @@ def _collect_statements(page) -> List[RawDoc]:
             iso = month_to_iso(label)
             if not iso:
                 if label == "Last 30 days":
+                    windows += 1
+                    if windows > 1:
+                        raise ListStopped("two statement rows read Last 30 days")
                     continue
                 raise ListStopped("a statement row reads %r, not a month" % label[:30])
             if iso in seen:
@@ -577,6 +668,7 @@ def _collect_statements(page) -> List[RawDoc]:
             docs.append(RawDoc(title=f"Monthly Statement {label}", date_text=iso,
                                text=f"Coinbase Monthly Statement {label}",
                                row_index=len(docs), kind="statement"))
+        _reaches_first_month(docs, first, today)
     except ListStopped as stop:
         stop.docs = docs
         raise
@@ -600,13 +692,19 @@ def _get_json(page, url: str):
         return None
 
 
-def _first_tax_year(page) -> int:
-    """The year of the account's first transaction, from owner-info, or
-    2012, Coinbase's own first year."""
-    data = _get_json(page, TAX_OWNER_API) or {}
-    first = str(data.get("first_transaction_date") or "")
-    m = re.match(r"((?:19|20)\d{2})-", first)
-    return int(m.group(1)) if m else 2012
+def _first_transaction(page) -> str:
+    """The day of the account's first transaction, from owner-info, as
+    YYYY-MM-DD, or "" when it names none."""
+    data = _get_json(page, TAX_OWNER_API)
+    first = str((data.get("first_transaction_date") if isinstance(data, dict) else "") or "")
+    m = re.match(r"(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-\d{2}", first)
+    return m.group(0) if m else ""
+
+
+def _first_tax_year(first: str) -> int:
+    """The year of the account's first transaction, `first`, or 2012,
+    Coinbase's own first year."""
+    return int(first[:4]) if first else 2012
 
 
 def _tax_forms_for(page, year: int) -> list:
@@ -710,13 +808,13 @@ def tax_rawdocs(forms_by_year: dict, reports: list) -> List[RawDoc]:
     return out
 
 
-def _collect_tax(page) -> List[RawDoc]:
+def _collect_tax(page, first: str) -> List[RawDoc]:
     """Every tax form and pregenerated PDF report, from the list calls, for
-    every year since the first transaction. A year that cannot be read
-    raises ListStopped, never an empty year."""
+    every year since the first transaction, `first`. A year that cannot be
+    read raises ListStopped, never an empty year."""
     this_year = _date.today().year
     forms = {}
-    for year in range(_first_tax_year(page), this_year + 1):
+    for year in range(_first_tax_year(first), this_year + 1):
         forms[year] = _tax_forms_for(page, year)
     return tax_rawdocs(forms, _tax_reports(page))
 
@@ -729,13 +827,14 @@ def collect_download_docs(page) -> List[RawDoc]:
     stopped = None
     if not goto_documents(page):
         raise ListStopped("the statements page did not open")
+    first = _first_transaction(page)
     try:
-        docs.extend(_collect_statements(page))
+        docs.extend(_collect_statements(page, first))
     except ListStopped as stop:
         docs.extend(stop.docs)
         stopped = stop
     try:
-        docs.extend(_collect_tax(page))
+        docs.extend(_collect_tax(page, first))
     except ListStopped as stop:
         stop.docs = docs
         raise

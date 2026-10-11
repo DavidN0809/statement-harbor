@@ -7,6 +7,7 @@ import re
 import sys
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest import mock
 
@@ -85,6 +86,134 @@ class Rows(unittest.TestCase):
         self.assertEqual(site.month_to_iso(m.group(1)), d.date_text)
 
 
+def row(label, i):
+    return {"label": label, "button": "PDF", "i": i}
+
+
+class ListPage:
+    """A statements page showing these rows, with no Load more unless a test
+    gives it one. Every wait is a moment, and is counted."""
+    url = site.STATEMENTS_URL
+
+    def __init__(self, rows, load_more=None):
+        self.rows, self.load_more, self.waits = list(rows), load_more, []
+
+    def locator(self, sel):
+        if sel == site._LOAD_MORE and self.load_more is not None:
+            return self.load_more
+        page = self
+
+        class L:
+            def count(s): return 0 if sel == site._LOAD_MORE else len(page.rows)
+            def is_visible(s): return False
+            def is_enabled(s, **kw): return False
+            @property
+            def first(s): return s
+        return L()
+
+    def evaluate(self, js): return list(self.rows)
+
+    def wait_for_timeout(self, ms): self.waits.append(ms)
+
+
+class LoadMore:
+    """A Load more that shows, or not, at each look, as `shows` says, and is
+    turned on as `on` says."""
+
+    def __init__(self, shows, on=True):
+        self.shows, self.on, self.looks = list(shows), on, 0
+
+    @property
+    def first(self): return self
+
+    def count(self):
+        self.looks += 1
+        return 1 if (self.shows.pop(0) if self.shows else False) else 0
+
+    def is_visible(self): return True
+    def is_enabled(self, **kw): return self.on
+    def inner_text(self, **kw): return "Load more"
+    def get_attribute(self, name): return None
+
+
+class StatementList(unittest.TestCase):
+    """The statements list is called whole only when it is."""
+
+    TODAY = date(2026, 10, 11)
+    MONTHS = [row("Last 30 days", 0), row("September 2026", 1), row("August 2026", 2)]
+
+    def test_two_last_30_days_rows_stop_the_list(self):
+        rows = self.MONTHS + [row("Last 30 days", 3)]
+        with self.assertRaises(site.ListStopped):
+            site._collect_statements(ListPage(rows), "2026-08-03", self.TODAY)
+
+    def test_a_list_reaching_the_first_month_is_whole(self):
+        got = site._collect_statements(ListPage(self.MONTHS), "2026-08-03", self.TODAY)
+        self.assertEqual([d.date_text for d in got], ["2026-09-30", "2026-08-31"])
+        got = site._collect_statements(ListPage(self.MONTHS), "2026-09-20", self.TODAY)
+        self.assertEqual(len(got), 2, "months before the first transaction are kept too")
+
+    def test_a_list_short_of_the_first_month_stops_holding_what_it_read(self):
+        with self.assertRaises(site.ListStopped) as stopped:
+            site._collect_statements(ListPage(self.MONTHS), "2021-04-03", self.TODAY)
+        self.assertEqual([d.date_text for d in stopped.exception.docs], ["2026-09-30", "2026-08-31"])
+        with self.assertRaises(site.ListStopped):
+            site._collect_statements(ListPage(self.MONTHS), "2026-07-31", self.TODAY)
+
+    def test_a_list_of_no_month_is_not_read_as_an_empty_one(self):
+        """Every month row read as something else used to leave nothing to
+        list, and the listing was called whole."""
+        page = ListPage([row("Last 30 days", 0)])
+        with self.assertRaises(site.ListStopped):
+            site._collect_statements(page, "2024-01-05", self.TODAY)
+        self.assertEqual(sum(page.waits[:-1]), site.MONTH_ROWS_WAIT_MS, "the month rows were waited for")
+
+    def test_an_account_with_no_complete_month_lists_none(self):
+        page = ListPage([row("Last 30 days", 0)])
+        self.assertEqual(site._collect_statements(page, "2026-10-02", self.TODAY), [])
+
+    def test_an_account_whose_first_transaction_is_not_said_stops_the_list(self):
+        with self.assertRaises(site.ListStopped):
+            site._collect_statements(ListPage(self.MONTHS), "", self.TODAY)
+
+    def test_the_first_transaction_is_read_from_owner_info(self):
+        for answer, first in (({"first_transaction_date": "2021-04-03T10:00:00Z"}, "2021-04-03"),
+                              ({"first_transaction_date": ""}, ""), ({}, ""), (None, ""),
+                              ([{"first_transaction_date": "2021-04-03"}], ""),
+                              ({"first_transaction_date": "2021-13-03"}, "")):
+            with mock.patch.object(site, "_get_json", lambda page, url, a=answer: a):
+                self.assertEqual(site._first_transaction(object()), first, answer)
+        self.assertEqual(site._first_tax_year("2021-04-03"), 2021)
+        self.assertEqual(site._first_tax_year(""), 2012)
+
+    def test_load_more_is_looked_for_once_more_before_the_end(self):
+        page = ListPage(self.MONTHS, load_more=LoadMore([False, True]))
+        pressed = []
+
+        def click(pg, loc, **kw):
+            pressed.append(kw["step"])
+            pg.rows.append(row("July 2026", 3))
+        with mock.patch.object(site.pressing, "click", click):
+            self.assertTrue(site._press_load_more(page))
+        self.assertEqual(pressed, ["load more of the list"])
+        self.assertIn(site.LOAD_MORE_LOOK_AGAIN_MS, page.waits)
+
+    def test_no_load_more_at_either_look_is_the_end(self):
+        lm = LoadMore([False, False])
+        page = ListPage(self.MONTHS, load_more=lm)
+        with mock.patch.object(site.pressing, "click") as click:
+            self.assertFalse(site._press_load_more(page))
+        self.assertEqual(click.call_count, 0)
+        self.assertEqual(lm.looks, 2)
+        self.assertEqual(page.waits, [site.LOAD_MORE_LOOK_AGAIN_MS])
+
+    def test_a_turned_off_load_more_is_not_pressed(self):
+        page = ListPage(self.MONTHS, load_more=LoadMore([True, True], on=False))
+        with mock.patch.object(site.pressing, "click") as click:
+            self.assertFalse(site._press_load_more(page))
+        self.assertEqual(click.call_count, 0)
+
+
 class TaxList(unittest.TestCase):
     def test_duplicate_forms_keep_both(self):
         forms = {2025: [{"id": "930a0ab0-3626-5828-8859-8ebd4d45f690", "form_type": "1099-DA"},
@@ -108,24 +237,15 @@ class TaxList(unittest.TestCase):
             self.assertRegex(d.date_text, r"^\d{4}-12-31$")
 
     def test_unreadable_rows_stop_the_statement_list(self):
-        class Page:
-            url = site.STATEMENTS_URL
-            def __init__(self, rows): self.rows = rows
-            def locator(self, sel):
-                class L:
-                    def count(s): return 0
-                    def is_visible(s): return False
-                    @property
-                    def first(s): return s
-                return L()
-            def evaluate(self, js): return self.rows
+        first, today = "2026-09-12", date(2026, 10, 11)
         ok = [{"label": "Last 30 days", "button": "PDF", "i": 0}, {"label": "September 2026", "button": "PDF", "i": 1}]
-        self.assertEqual([d.date_text for d in site._collect_statements(Page(ok))], ["2026-09-30"])
+        self.assertEqual([d.date_text for d in site._collect_statements(ListPage(ok), first, today)],
+                         ["2026-09-30"])
         for bad in ([{"label": "", "button": "PDF", "i": 0}],
                     [{"label": "September 2026", "button": "PDF", "i": 0}, {"label": "September 2026", "button": "PDF", "i": 1}],
                     [{"label": "Credit Card", "button": "PDF", "i": 0}], []):
             with self.assertRaises(site.ListStopped):
-                site._collect_statements(Page(bad))
+                site._collect_statements(ListPage(bad), first, today)
 
     def test_tax_pages_that_cannot_be_exhausted_stop_the_list(self):
         answers = []
