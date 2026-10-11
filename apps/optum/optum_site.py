@@ -50,11 +50,11 @@ KNOWN CEILINGS (ponytail: left as they are until a run shows otherwise)
     statements page says outright that it has none (NO_STATEMENTS_RE, a
     guess at the wording) is read as empty. A page that shows nothing and
     says nothing still stops the list.
-  * A tax document whose title names no year is dated from Optum's title
-    alone and gets no date when none is there; the orchestrator may then
-    date it from the title's other words, and the download's binding check
-    (same path, title AND date) would never match, so such a document would
-    be listed and never saved. None exists on the account this was built on.
+  * A tax document is dated December 31 of the last year its title names.
+    One whose title names no year stops the list, since its date could
+    only be guessed and the download's check (same path, title AND date)
+    would never find it again. None exists on the account this was built
+    on.
 """
 from __future__ import annotations
 
@@ -555,7 +555,11 @@ def documents_of(entries: list, pid: str) -> List[RawDoc]:
             if not text:
                 raise ListStopped("a tax document link has no title")
             years = _TAX_YEAR_RE.findall(text)
-            date = f"{years[-1]}-12-31" if years else ""
+            if not years:
+                # Undated, it would be listed and never saved, or passed over
+                # unsaid under a start date.
+                raise ListStopped("a tax document's title names no year")
+            date = f"{years[-1]}-12-31"
             title = text
             first = tax_titles.setdefault(title, e["path"])
             docs.append(RawDoc(title=title, account=pid, date_text=date, href=e["path"],

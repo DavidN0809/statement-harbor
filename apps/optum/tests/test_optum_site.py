@@ -82,7 +82,8 @@ class Listing(unittest.TestCase):
                          ([S("2026-08-31", "1"), S("2026-08-31", "2")], "two statements one date"),
                          ([{**S("2026-08-31"), "host": "evil.example"}], "off host"),
                          ([{**S("2026-08-31"), "path": "/account/products/99999999/statements/1.pdf"}], "other product"),
-                         ([{**T, "text": ""}], "untitled tax doc")]:
+                         ([{**T, "text": ""}], "untitled tax doc"),
+                         ([{**T, "text": "Rendered EOY 5498-SA Notices"}], "a tax form whose title names no year")]:
             with self.assertRaises(site.ListStopped, msg=why):
                 site.documents_of(NAV + bad, PID)
         self.assertEqual(site.documents_of(NAV, PID), [])
