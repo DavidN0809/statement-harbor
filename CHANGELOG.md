@@ -7,6 +7,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Anthem's member documents, ID cards and letters stay inside the year
+  or dates a run asks for.** Run All took them after the EOBs in a loop of
+  their own that read neither the year nor the dates, nor the configured
+  start date. So a run for one year took every year's, and a Download
+  again of one year took every one of them again and saved a second copy
+  beside each. They now follow the same rule as the EOBs. A card is dated
+  by when it took effect, and a card or letter that comes with no date is
+  left out of a run that has a year or dates, as an EOB with no date is.
+
 ## [0.46.0] - 2026-10-11
 
 Three new apps. Interactive Brokers is the 63rd, with monthly Activity

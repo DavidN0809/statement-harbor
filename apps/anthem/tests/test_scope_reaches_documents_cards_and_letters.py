@@ -16,6 +16,7 @@ hands over, and only those answers and each document's PDF are stood in.
 """
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -170,6 +171,38 @@ def test_an_unscoped_run_still_takes_every_document(build):
     take(app)
     assert set(fetched) == set(DATED)
     assert app.stats["skipped_out_of_scope"] == 0
+
+
+UNDATED = {
+    "ID card": {"status": 200, "body": {"result": {"data": {"patient": [
+        {"name": {"given": ["JANE"], "family": "DOE"},
+         "healthIdentificationCard": [{"cardType": "normal"}]}]}}}},
+    "message": {"status": 200, "messages": [
+        {"msgUid": "u-none", "subject": "Your claim was processed",
+         "body": "<p>u-none</p>", "isRead": True}]},
+}
+
+
+@pytest.mark.parametrize("flags,floor,taken", [
+    ((), "", True),
+    (("--year", time.strftime("%Y")), "", False),
+    (("--start-date", "2025-01-01", "--end-date", "2099-12-31"), "", False),
+    ((), "2025-01-01", False),
+], ids=["no scope", "this year", "dates reaching today", "config start date"])
+def test_an_undated_card_or_letter_is_left_out_of_a_scoped_run(build, monkeypatch,
+                                                               flags, floor, taken):
+    """A card or letter Anthem hands over with no date is filed under the day
+    it is saved. A run with a year or dates leaves it out, as it leaves out
+    an EOB with no date, even when that day falls inside them, so a Download
+    again never takes one again."""
+    for what, answer in UNDATED.items():
+        monkeypatch.setitem(LISTS, what, answer)
+    monkeypatch.setitem(LISTS, "member documents", {"status": 200, "rows": []})
+    app, fetched = build("--all", "--yes", *flags, floor=floor)
+    take(app)
+    wanted = {"IdCard|Jane Doe|normal|0", "Letter|u-none"}
+    assert set(fetched) == (wanted if taken else set())
+    assert app.stats["skipped_out_of_scope"] == (0 if taken else len(wanted))
 
 
 def test_run_all_takes_the_lists_inside_its_year(build, monkeypatch):
