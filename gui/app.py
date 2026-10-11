@@ -254,7 +254,12 @@ ACTIONS = {
 # main panel stays the four a normal day needs. Verify re-checks saved PDFs,
 # Diagnose surveys the page. Both are harmless and both are rarely wanted.
 MORE_ACTIONS = ("verify", "diagnose", "record", "rename", "rename_apply")
-ENTRY_RE = re.compile(r".*_(receipts|docs)\.py$")
+# An app's own script, never a hidden file. A Mac writing to a network
+# drive or a disk it does not format itself leaves "._ally_docs.py" beside
+# ally_docs.py, a few bytes of its own about the file, and that sorts first,
+# so Login on a server whose apps sit on such a drive ran it and Python
+# refused its null bytes (#76).
+ENTRY_RE = re.compile(r"[^.].*_(receipts|docs)\.py$")
 
 # Every app takes the same three scope flags. The panel passes them through
 # on any run except Login, which has nothing to scope. A scoped run skips the

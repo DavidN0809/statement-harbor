@@ -58,6 +58,18 @@ def test_only_folders_with_an_entry_script_count(root):
         ["chase", "PG&E Statements", "target"]
 
 
+def test_a_hidden_copy_beside_the_script_is_never_the_script(root):
+    """A Mac leaves "._chase_docs.py" beside chase_docs.py on a network drive
+    or a disk it did not format, and it sorts first (#76)."""
+    (root / "chase" / "._chase_docs.py").write_bytes(b"\x00\x05\x16\x07\x00\x02\x00\x00Mac OS X")
+    assert paperpull.entry_script(root / "chase").name == "chase_docs.py"
+    hidden_only = root / "hidden"
+    hidden_only.mkdir()
+    (hidden_only / "._hidden_docs.py").write_bytes(b"\x00\x05\x16\x07")
+    assert paperpull.entry_script(hidden_only) is None
+    assert "hidden" not in [d.name for d in paperpull.list_apps(root)]
+
+
 def test_an_app_is_found_by_folder_slug_or_provider_in_any_case(root):
     for wanted in ("PG&E Statements", "pg&e statements", "pge", "PGE", "PG&E"):
         assert paperpull.find_app(root, wanted).name == "PG&E Statements", wanted

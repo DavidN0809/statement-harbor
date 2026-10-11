@@ -56,7 +56,12 @@ COMMANDS = {
     "dry-run":  ["--dry-run"],
 }
 
-ENTRY_RE = re.compile(r".*_(receipts|docs)\.py$")
+# An app's own script, never a hidden file. A Mac writing to a network
+# drive or a disk it does not format itself leaves "._ally_docs.py" beside
+# ally_docs.py, a few bytes of its own about the file, and that sorts first,
+# so Login on a server whose apps sit on such a drive ran it and Python
+# refused its null bytes (#76).
+ENTRY_RE = re.compile(r"[^.].*_(receipts|docs)\.py$")
 
 
 # -- where the apps are --------------------------------------------------------

@@ -379,6 +379,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   named a file that was gone. Rename now takes such a file, in a folder
   the app files documents in and never a link, as one of its own, and
   gives it the name the app would give it today.
+- **Login on the server no longer runs a Mac's hidden copy of an app
+  (#76).** A Mac writing to a network drive leaves a hidden "._" file
+  beside every file it writes, "._ally_docs.py" beside ally_docs.py, and
+  the panel took whichever sorted first as the app. On a server whose apps
+  sit on such a drive, Login ran the hidden copy and stopped with "source
+  code cannot contain null bytes". A hidden file is never taken as an app
+  now, in the panel, the server and `paperpull`.
 
 ### Security
 - **M&T presses a year heading only when nothing covers it, and once.**

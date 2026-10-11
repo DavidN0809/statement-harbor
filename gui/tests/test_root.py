@@ -223,6 +223,19 @@ def test_only_folders_with_an_entry_script_count(tmp_path):
     assert app_module._looks_like_installs(root) == 2
 
 
+def test_a_hidden_copy_beside_the_script_is_never_the_script(tmp_path):
+    """A Mac leaves "._ally_docs.py" beside ally_docs.py on a network drive
+    or a disk it did not format, and it sorts first, so the server's Login
+    ran it and Python refused its null bytes (#76)."""
+    app = tmp_path / "Ally Statements"
+    app.mkdir()
+    (app / "ally_docs.py").write_text("", encoding="utf-8")
+    (app / "._ally_docs.py").write_bytes(b"\x00\x05\x16\x07\x00\x02\x00\x00Mac OS X")
+    assert app_module._entry_script(app).name == "ally_docs.py"
+    (app / "ally_docs.py").unlink()
+    assert app_module._entry_script(app) is None
+
+
 def test_a_missing_root_counts_as_zero(tmp_path):
     assert app_module._looks_like_installs(tmp_path / "nope") == 0
 
