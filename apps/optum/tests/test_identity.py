@@ -67,6 +67,9 @@ class Page:
     def wait_for_timeout(self, _ms):
         pass
 
+    def title(self):
+        return ""
+
     def wait_for_selector(self, _sel, **_kw):
         # A page with nothing to read waits out its time.
         if not self.pages.get(self.url):
@@ -299,3 +302,24 @@ def test_a_product_page_that_shows_nothing_and_says_nothing_still_stops(make_app
         listed(app, SECOND, said={statements_url(OTHER): "If there are no statements, call us."})
     assert listing.last(app) == listing.STOPPED
     assert [r["account"] for r in app.discovery.data.values()] == [PID]
+
+
+# -- the sign-in check ---------------------------------------------------------
+
+def logged_in_says(make_app, capsys, forms) -> str:
+    app = make_app()
+    page = Page({site.FORMS_URL: forms})
+    app.page = lambda: page
+    capsys.readouterr()
+    app.cmd_login()
+    return capsys.readouterr().out
+
+
+def test_login_says_success_only_when_the_forms_page_links_a_statement(make_app, capsys):
+    """A link into a product is the site's menu, which any signed-in page
+    of the site draws, and the old check took it for the forms page."""
+    menu_only = [link(f"/account/products/{PID}"), link(f"/account/products/{PID}/settings", "Settings")]
+    said = logged_in_says(make_app, capsys, menu_only)
+    assert "Success" not in said and "cannot" in said
+    said = logged_in_says(make_app, capsys, menu_only + [latest(PID)])
+    assert "Success" in said and "links your latest statement" in said

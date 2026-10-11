@@ -467,21 +467,24 @@ class App:
     def cmd_login(self):
         print("Checking the connection to your signed-in Optum Bank browser...\n")
         page = self.page()
-        ok = site.goto_documents(page)
+        # What only a signed-in page shows, the forms page's own link to a
+        # product's statements, never the site's menu, which draws on any
+        # page of the site.
+        listed = site.forms_page_links_statements(page)
         challenge = site.detect_security_challenge(page)
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
         elif site.looks_signed_out(page):
             print("Connected, but Optum Bank shows a signed-out page.")
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
-        elif ok:
-            print("Success: connected and the Documents page is visible.")
+        elif listed:
+            print("Success. Connected, and the Forms & documents page links your latest statement.")
             print("Keep that browser window OPEN, then run the diagnostics or pilot.")
         else:
-            print("Connected, but the Documents list did not load, so this cannot say")
-            print("whether you are signed in. Look at the browser window and answer")
-            print("anything Optum Bank asks there yourself. If it shows your account, open your")
-            print("Documents/Statements page in it, then run --diagnose.")
+            print("Connected, but the Forms & documents page linked no statement, so this cannot")
+            print("say whether you are signed in. Look at the browser window and answer")
+            print("anything Optum Bank asks there yourself. If it shows your account, open")
+            print("Forms & documents in it, then run --diagnose.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:

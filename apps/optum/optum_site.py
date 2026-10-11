@@ -375,8 +375,11 @@ _DOC_ENTRIES_JS = r"""() => {
 
 
 def _wait_for_forms(page, timeout_ms: int = 30000) -> bool:
+    """Wait for the forms page's own link to a product's statements, its
+    "Download latest statement". A link into a product alone is the site's
+    menu, which draws on every signed-in page."""
     try:
-        page.wait_for_selector("a[href*='/account/products/']", timeout=timeout_ms)
+        page.wait_for_selector("a[href*='/account/products/'][href*='/statements']", timeout=timeout_ms)
         return True
     except Exception:
         return False
@@ -401,6 +404,12 @@ def goto_documents(page) -> bool:
         log.info("the forms page settled off this app's addresses")
         return False
     return _wait_for_forms(page)
+
+
+def forms_page_links_statements(page) -> bool:
+    """Whether the Forms & documents page opened and its own content links
+    at least one product's statements, which only a signed-in page shows."""
+    return bool(goto_documents(page) and product_ids(_entries(page)))
 
 
 def scroll_full_page(page, rounds: int = 8, delay_ms: int = 600) -> None:
