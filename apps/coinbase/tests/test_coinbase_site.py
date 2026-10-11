@@ -313,6 +313,25 @@ class Persisted(unittest.TestCase):
         for raw in ['href=r.href,', '"href": r.href}', 'source_url=source_url)', '{"source_url": source_url}', '"Source URL": doc.href,']:
             self.assertNotIn(raw, src, raw)
 
+    def test_its_port_is_its_own_and_named_the_same_everywhere(self):
+        """The example config, the sign-in fallback and login.bat name one
+        port, and no other app's example config names it."""
+        from urllib.parse import urlsplit
+        port = urlsplit(json.loads((HERE / "config.example.json").read_text(encoding="utf-8"))
+                        ["cdp_url"]).port
+        self.assertEqual(port, 9286)
+        src = (HERE / "coinbase_docs.py").read_text(encoding="utf-8")
+        self.assertIn('self.config.get("cdp_url", ""), "%d")' % port, src)
+        self.assertIn("port %d)" % port, (HERE / "login.bat").read_text(encoding="utf-8"))
+        others = []
+        for cfg in sorted(HERE.parent.glob("*/config.example.json")):
+            if cfg.parent == HERE:
+                continue
+            url = json.loads(cfg.read_text(encoding="utf-8")).get("cdp_url") or ""
+            if urlsplit(url).port == port:
+                others.append(cfg.parent.name)
+        self.assertEqual(others, [], "another app signs in on this port")
+
     def test_rules_classify_coinbase_titles(self):
         from paperpull_core import doc_types
         rules = doc_types.load_rules(HERE / "document_rules.json")
