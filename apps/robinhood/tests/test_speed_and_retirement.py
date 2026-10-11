@@ -112,28 +112,6 @@ class Duplicates(unittest.TestCase):
         self.assertFalse(docs.is_crypto_duplicate("https://robinhood.com/account/reports-statements/crypto", key, None))
 
 
-class Order(unittest.TestCase):
-    def test_documents_are_taken_page_by_page_newest_first(self):
-        import robinhood_docs as docs
-        I, R, C, T = site.STATEMENT_URLS[0], site.STATEMENT_URLS[1], site.STATEMENT_URLS[2], site.TAX_URL
-        items = [(C, "2026-03-31"), (I, "2026-03-31"), (T, "2025-12-31"), (R, "2026-03-31"), (I, "2026-02-28"),
-                 (R, "2026-02-28"), (C, "2026-02-28"), (I, ""), ("", "2026-01-31")]
-        ordered = sorted(items, key=lambda it: (docs.source_rank(it[0]), docs.date_desc_key(it[1])))
-        self.assertEqual(ordered, [(I, "2026-03-31"), (I, "2026-02-28"), (I, ""), (R, "2026-03-31"), (R, "2026-02-28"),
-                                   (C, "2026-03-31"), (C, "2026-02-28"), (T, "2025-12-31"), ("", "2026-01-31")])
-
-
-class PilotOrder(unittest.TestCase):
-    def test_pilot_takes_the_newest_across_pages(self):
-        import robinhood_docs as docs
-        I, R, C = site.STATEMENT_URLS[0], site.STATEMENT_URLS[1], site.STATEMENT_URLS[2]
-        items = [(I, "2026-03-31"), (I, "2026-02-28"), (R, "2026-03-31"), (C, "2026-03-31"), (I, "2026-01-31")]
-        newest = sorted(items, key=lambda it: docs.date_desc_key(it[1]))[:3]
-        self.assertEqual({src for src, _ in newest}, {I, R, C}, "a pilot of three sees all three pages")
-        grouped = sorted(items, key=lambda it: (docs.source_rank(it[0]), docs.date_desc_key(it[1])))[:3]
-        self.assertEqual({src for src, _ in grouped}, {I}, "a run takes a page at a time")
-
-
 class Sources(unittest.TestCase):
     def test_retirement_page_is_read(self):
         urls = dict(site.STATEMENT_PAGES)
@@ -346,6 +324,33 @@ def _listed(app, *items):
         app.discovery.update(doc.key, doc.to_dict())
 
 
+def test_documents_are_taken_page_by_page_newest_first(tmp_path):
+    app = _app(tmp_path)
+    _listed(app, (CRYPTO, "2026-03-31"), (INDIVIDUAL, "2026-03-31"), (TAX, "2025-12-31"),
+            (RETIREMENT, "2026-03-31"), (INDIVIDUAL, "2026-02-28"), (RETIREMENT, "2026-02-28"),
+            (CRYPTO, "2026-02-28"), (INDIVIDUAL, ""), ("", "2026-01-31"))
+    assert [(d.source_url, d.date) for d in app._select()] == [
+        (INDIVIDUAL, "2026-03-31"), (INDIVIDUAL, "2026-02-28"), (INDIVIDUAL, ""),
+        (RETIREMENT, "2026-03-31"), (RETIREMENT, "2026-02-28"),
+        (CRYPTO, "2026-03-31"), (CRYPTO, "2026-02-28"), (TAX, "2025-12-31"), ("", "2026-01-31")]
+
+
+def test_the_pilot_takes_the_newest_across_every_page(tmp_path, monkeypatch):
+    app = _app(tmp_path)
+    _listed(app, (INDIVIDUAL, "2026-03-31"), (INDIVIDUAL, "2026-02-28"), (RETIREMENT, "2026-03-31"),
+            (CRYPTO, "2026-03-31"), (INDIVIDUAL, "2026-01-31"))
+    app.config["pilot_count"] = 3
+    taken = []
+    monkeypatch.setattr(app, "cmd_discover", lambda quiet=False: 0)
+    monkeypatch.setattr(app, "process", lambda docs, dry_run=False: taken.extend(docs))
+    monkeypatch.setattr(app, "_pilot_report", lambda docs: None)
+    app.cmd_pilot()
+    assert [(d.source_url, d.date) for d in taken] == [
+        (INDIVIDUAL, "2026-03-31"), (RETIREMENT, "2026-03-31"), (CRYPTO, "2026-03-31")]
+    assert [d.source_url for d in app._select()][:3] == [INDIVIDUAL] * 3, \
+        "a run without a limit takes a page at a time"
+
+
 def test_max_docs_takes_the_newest_across_every_page(tmp_path):
     """--max-docs N in Run All took N statements of the individual page
     first, once a run took its documents page by page."""
@@ -355,6 +360,52 @@ def test_max_docs_takes_the_newest_across_every_page(tmp_path):
     app.args.max_docs = 3
     assert [(d.source_url, d.date) for d in app._select()] == [
         (INDIVIDUAL, "2026-03-31"), (RETIREMENT, "2026-03-31"), (CRYPTO, "2026-03-31")]
+
+
+def _shows_the_control(monkeypatch, shows=True):
+    monkeypatch.setattr(site, "has_control", lambda page, title, year="": shows)
+
+
+def test_a_page_kept_open_that_shows_the_control_is_not_opened_again(tmp_path, monkeypatch):
+    app = _app(tmp_path)
+    pressed = _presses(monkeypatch)
+    _shows_the_control(monkeypatch)
+    page = _Tab(url=INDIVIDUAL)
+    assert _take(app, page, _statement())["downloaded_ok"]
+    assert page.opened == [] and pressed == [INDIVIDUAL]
+
+
+def test_a_page_kept_open_that_no_longer_shows_the_control_is_opened_again(
+        tmp_path, monkeypatch):
+    app = _app(tmp_path)
+    pressed = _presses(monkeypatch)
+    _shows_the_control(monkeypatch, shows=False)
+    page = _Tab(url=INDIVIDUAL)
+    _take(app, page, _statement())
+    assert page.opened == [INDIVIDUAL] and pressed == [INDIVIDUAL]
+
+
+def test_the_page_is_opened_again_after_a_sign_in(tmp_path, monkeypatch):
+    """Signing in again at a console leaves the tab on the documents page,
+    so the page the document is on is opened again, though the address
+    looked like it before the check."""
+    app = _app(tmp_path)
+    pressed = _presses(monkeypatch)
+    _shows_the_control(monkeypatch)
+    asked = iter([True])
+    app.check_session = lambda page, challenge=None: next(asked, False)
+    page = _Tab(url=INDIVIDUAL)
+    _take(app, page, _statement())
+    assert page.opened == [INDIVIDUAL] and pressed == [INDIVIDUAL]
+
+
+def test_a_document_of_another_page_opens_its_own(tmp_path, monkeypatch):
+    app = _app(tmp_path)
+    pressed = _presses(monkeypatch)
+    _shows_the_control(monkeypatch)
+    page = _Tab(url=TAX)
+    _take(app, page, _statement())
+    assert page.opened == [INDIVIDUAL] and pressed == [INDIVIDUAL]
 
 
 def _prompt_over_the_rows(app, monkeypatch, answer):
