@@ -7,6 +7,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Review names in the panel, and on PaperPull Server.** Every receipt
+  app asks for a better name for each receipt it was unsure how to name,
+  and it only ever asked in a console, from the `review_names` file in its
+  folder. PaperPull Server has no console, so it had no way to do it. A
+  receipt provider's More now has **Review names**, on the desktop and the
+  server alike. It lists the receipts waiting, with each one's date, order
+  number and items, and renames each one you type a better summary for,
+  with its rows in the receipt index and order history and its record in
+  progress.json following it. A blank box keeps its name. It is the same
+  review as the console one, run by the app with what you typed, so it
+  renames only what that review would, and a name typed for a receipt that
+  stopped waiting meanwhile does nothing and is said. The double-click
+  file still works as before.
+
 ## [0.48.0] - 2026-10-12
 
 A new control panel, on the desktop and on PaperPull Server, built around

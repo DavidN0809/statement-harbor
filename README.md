@@ -344,6 +344,8 @@ The commands are `setup`, `login`, `discover`, `pilot`, `all`, `resume`,
 Sign in, Get new documents, Try the newest few first and Only check what's
 there sit on each provider's page, Continue appears after a run that
 stopped, and the rest are under More, each with a line saying what it does.
+A receipt provider's More also has **Review names**, for the receipts it
+was unsure how to name.
 Which dates (one year, or a date range) becomes the same `--year`,
 `--start-date` and `--end-date` every app takes, and **Restore deleted
 files** adds `--redownload` to one run scoped to a year or to both ends of
@@ -557,8 +559,11 @@ flavors, and everything else is the same `paperpull` command on either:
 A second account is the same on both: `paperpull amex all --account spouse`.
 
 `review_names` is in each receipt app, the ones that name a purchase from its
-items, because it asks you for one name at a time and so cannot run in the
-panel. It is also the one double-click file in a folder the installed app
+items. It asks in a console for a better name for each receipt the app was
+unsure of, one at a time. The panel has the same review as **Review names**
+under a receipt provider's More, which lists those receipts and renames each
+one you type a better summary for, and that is how PaperPull Server offers
+it. The double-click file is also the one in a folder the installed app
 made, since the panel does the rest there, and in such a folder it runs on
 the app's own Python.
 
