@@ -7,6 +7,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Changed
+- **PaperPull Server is no longer a beta.** It has shipped with every
+  release since 0.43.0, so the label is gone
+  from its setup guide, the README, the panel's footer, the image's
+  description and the server kit's read-me. Nothing about how it runs
+  changes.
+
 ## [0.48.0] - 2026-10-12
 
 A new control panel, on the desktop and on PaperPull Server, built around

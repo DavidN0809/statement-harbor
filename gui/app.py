@@ -3086,7 +3086,7 @@ FOOTER_DESKTOP = (
     '<a href="https://github.com/rheeloaded/paperpull#support" target="_blank" rel="noopener">'
     'buy the Store edition</a></span>')
 FOOTER_SERVER = (
-    '<span>PaperPull Server v__VERSION__ (beta) &middot; read-only, runs on your own server</span>\n'
+    '<span>PaperPull Server v__VERSION__ &middot; read-only, runs on your own server</span>\n'
     '  <span>Free, and it costs money to make. If it saves you time, you can '
     '<a href="https://ko-fi.com/rheeloaded" target="_blank" rel="noopener">donate on Ko-fi</a>.</span>')
 
