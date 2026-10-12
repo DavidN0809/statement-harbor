@@ -16,6 +16,7 @@ history with the tool and ask the app's own _already_done and the core's
 skip line on the new computer. Every name and number is invented.
 """
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -73,6 +74,57 @@ def test_a_copy_in_review_keeps_its_record_when_the_old_computer_set_it_aside(
     copy.unlink()
     assert not census.app_in(mod, new)._already_done(p), (
         "%s no longer asks again for a receipt whose copy in review was deleted" % app.name)
+
+
+# Where each person's app writes, as their config names it. The first
+# person writes into the install, as config.example.json says, a second
+# person added by tools/add_account.py beside it, and one a person chose
+# inside it, whose folder is not the one their paths are relative to.
+FOLDERS = {"primary": ".", "beside": "../{app} - sam", "inside": "Receipts of sam"}
+
+
+def set_up(root: Path, app: Path, where: str) -> tuple:
+    """An install as the control panel makes one, and the person's folder.
+    The app runs in the install, so the paths it records are relative to it.
+    (the install, the folder the person's app writes into, as it names it)"""
+    home = move.install(root, app)
+    (home / census.entry_of(app).name).write_text("", encoding="utf-8")
+    (home / "config.json").write_text(json.dumps({"output_dir": "."}), encoding="utf-8")
+    folder = Path(FOLDERS[where].format(app=app.name))
+    if where != "primary":
+        (home / "config.sam.json").write_text(json.dumps({"output_dir": str(folder)}),
+                                              encoding="utf-8")
+    return home, folder
+
+
+@pytest.mark.parametrize("where", sorted(FOLDERS))
+@pytest.mark.parametrize("app", census.APPS, ids=census.IDS)
+def test_a_copy_in_review_under_a_relative_folder_keeps_its_record(app, where, tmp_path,
+                                                                    monkeypatch, capsys):
+    """The tool runs from wherever the control panel or a shell started it,
+    and reads a relative path against the install, as the app does."""
+    mod = census.load(app)
+    old, folder = set_up(tmp_path / "old", app, where)
+    monkeypatch.chdir(old)
+    p = move.set_aside(mod, folder)
+    new, _ = set_up(tmp_path / "new", app, where)
+    monkeypatch.chdir(new)
+    copy = put_aside_for_review(mod, folder)
+    assert not copy.is_absolute(), copy
+
+    monkeypatch.chdir(tmp_path)
+    archive = tmp_path / "history.ppz"
+    assert migrate.export(tmp_path / "old", archive, minimal=True) == 0
+    assert migrate.do_import(archive, tmp_path / "new", assume_yes=True) == 0
+    capsys.readouterr()
+
+    monkeypatch.chdir(new)
+    done, said, rec = move.asked_after_the_move(mod, folder, p)
+    assert rec["state"] == State.NEEDS_MANUAL_REVIEW.value, (
+        "%s's copy in review became %r" % (app.name, rec["state"]))
+    assert done and move.SAID not in said, (app.name, said, rec)
+    copy.unlink()
+    assert not census.app_in(mod, folder)._already_done(p), app.name
 
 
 @pytest.mark.parametrize("app", census.APPS, ids=census.IDS)

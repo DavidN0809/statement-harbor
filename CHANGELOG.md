@@ -17,9 +17,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   a copy waiting in Manual Review here. A run then said the receipt did not
   show on three separate days for a purchase with a copy on disk, and
   deleting the copy no longer asked for it again. Such a record now keeps
-  its own state while its copy is still there, and takes what the other
-  computer finished once the copy has been deleted. A document the other
-  computer saved is still never downloaded again.
+  its own state while its copy is still there, including in an install
+  that writes into its own folder, as a new one does. One whose copy was
+  deleted before the import takes what the other computer finished, as
+  before, and a document the other computer saved is still never
+  downloaded again.
 
 ## [0.47.0] - 2026-10-12
 

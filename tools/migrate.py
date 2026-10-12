@@ -777,8 +777,10 @@ def _moved(rec: dict, old_bases, new_base: Path) -> dict:
     return rec
 
 
-def _merge(target: dict, incoming: dict, old_bases, new_base: Path):
+def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None):
     """Fold incoming records into target. Never deletes, never downgrades.
+    `home` is the folder the target's app runs in, which a relative path in
+    its records is read against, new_base when not given.
 
     The caller must hand over a DEEP copy. dict(records) copies only the outer
     mapping, so the record objects stay shared, and this function edits them in
@@ -811,7 +813,7 @@ def _merge(target: dict, incoming: dict, old_bases, new_base: Path):
             if carried:
                 cur.update(carried)
                 changed = True
-        if _takes_the_state(cur, inc):
+        if _takes_the_state(cur, inc, Path(home or new_base)):
             cur["state"] = inc["state"]
             # The state comes with what it was written with. A receipt set
             # aside is final in Meijer only with its days, and a note an
@@ -833,8 +835,16 @@ def merged(place: dict, entry: dict, manifest: dict):
     a plan and the import that follows count the same."""
     out = copy.deepcopy(place["records"])
     added, updated = _merge(out, entry["incoming"] or {}, bases_of(entry, manifest),
-                            Path(place["path"]))
+                            Path(place["path"]), home_of(place))
     return out, added, updated
+
+
+def home_of(place: dict) -> Path:
+    """The folder a place's app runs in, the install that holds the
+    person's config. A relative path in its records is read against it,
+    as the app reads it. A folder with no config is its own."""
+    config = place.get("config")
+    return Path(config).parent if config else Path(place["path"])
 
 
 def write_history(where: Path, records: dict, stamp: str) -> None:
@@ -851,7 +861,7 @@ def write_history(where: Path, records: dict, stamp: str) -> None:
     tmp.replace(path)
 
 
-def _takes_the_state(cur: dict, inc: dict) -> bool:
+def _takes_the_state(cur: dict, inc: dict, home: Path) -> bool:
     """Whether a record the target already had takes the incoming state.
     Only one this install has not finished, and only for a state that
     finishes it. A record an older version gave up on here is asked for
@@ -865,7 +875,7 @@ def _takes_the_state(cur: dict, inc: dict) -> bool:
     would end."""
     if not _done(dict(inc, downloaded_ok=False)):
         return False
-    if _in_review_here(cur):
+    if _in_review_here(cur, home):
         return False
     if cur.get("state") not in TERMINAL:
         return True
@@ -873,16 +883,21 @@ def _takes_the_state(cur: dict, inc: dict) -> bool:
             and (inc.get("state") != "No Receipt Available" or set_aside(inc)))
 
 
-def _in_review_here(rec: dict) -> bool:
+def _in_review_here(rec: dict, home: Path) -> bool:
     """A record of this install whose copy put aside for review is still
-    where it says. The apps also ask that the copy opens. One that does not
-    keeps its record too, and the app tries the purchase again, as it would
-    have without the import."""
+    where it says. A relative path is the app's own folder's, home, since
+    an install made with config.example.json writes into "." and a second
+    person's folder is "../<install> - <name>". The apps also ask that the
+    copy opens. One that does not keeps its record too, and the app tries
+    the purchase again, as it would have without the import."""
     if rec.get("state") != "Needs Manual Review":
         return False
     path = str(rec.get("pdf_path") or "")
+    if not path:
+        return False
     try:
-        return bool(path) and Path(path).is_file()
+        where = Path(path) if _is_absolute(path) else Path(home) / path.replace("\\", "/")
+        return where.is_file()
     except (OSError, ValueError):
         return False
 
