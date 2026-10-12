@@ -39,6 +39,10 @@ THE RULES
 * Nothing moves between folders. A rename here changes a name, never a
   location.
 * Preview is the default everywhere. A caller has to ask for the change.
+* Rename never ends with a file moved and a ledger still giving it the
+  name it had. Every ledger is shown to be writable before a file moves,
+  and when one still cannot be written, every file goes back under the
+  name it had (run_for, put_back).
 """
 from __future__ import annotations
 
@@ -51,8 +55,8 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
 from .models import State
-from .storage import (build_pdf_filename, fitted_name, sanitize_component, title_case,
-                      unique_path)
+from .storage import (build_pdf_filename, fitted_name, free_to_write, sanitize_component,
+                      title_case, unique_path)
 
 
 @dataclass
@@ -530,6 +534,195 @@ def _renamed(c: Change, result: Result) -> None:
     result.names[c.old_path.name] = c.new_path.name
 
 
+# What holds a name put_back wants when the file there is none of the files
+# apply moved, one that came while the ledgers were written.
+_OTHER = -1
+
+
+def put_back(result: Result) -> List[tuple]:
+    """Every file `apply` moved, back under the name it had, never over
+    another file. Returns (where it is now, the path it had) for each file
+    that could not be put back, in the order they were tried, each chain
+    from its free end, so renaming them back by hand in that order works.
+
+    The renames are undone the way apply did them, turned round. A file
+    whose old name another of them holds now waits for that one to go back
+    first, so each chain goes back from its free end. Files holding each
+    other's old names, as two that swapped do, are a ring, and one of them
+    goes aside under a temporary name so the rest can go back, then goes
+    last. A file renamed only in letter case is a ring of one where the
+    folder ignores case. A file apply left under a temporary name
+    (Result.stranded) goes home with the rest. A file whose old name holds
+    a file none of these is stays where it is, and so does each file
+    waiting for it."""
+    moves = _moved_by(result)
+    # The file each old name holds now, asked of the disk before anything
+    # moves, as apply asks it, so a name spelled in another case is the
+    # file's own wherever the folder ignores case.
+    at = {}
+    for i, (where, _old) in enumerate(moves):
+        at.setdefault(_file_key(where), i)
+    holds = [at.get(_file_key(old), _OTHER) if old.exists() else None
+             for _where, old in moves]
+    home, done, stuck = set(), set(), {}
+    for first in range(len(moves)):
+        # Follow the old names from this file to the end of its chain, or
+        # round to a file already met, which makes a ring.
+        path, seen = [], {}
+        i = first
+        while i is not None and i != _OTHER and i not in done and i not in seen:
+            seen[i] = len(path)
+            path.append(i)
+            i = holds[i]
+        if i is not None and i != _OTHER and i in seen:
+            ring, path = path[seen[i]:], path[:seen[i]]
+            _ring_back(ring, moves, home, stuck)
+            done.update(ring)
+        for j in reversed(path):          # the free end first
+            holder = holds[j]
+            if (holder is None or holder in home) and _put(*moves[j]):
+                home.add(j)
+            else:
+                stuck[j] = moves[j]
+            done.add(j)
+    return list(stuck.values())
+
+
+def _moved_by(result: Result) -> List[tuple]:
+    """(where it is now, the path it had) for each file apply moved, once
+    each. A file left under a temporary name while its own name holds
+    another file is in Result.mapping and Result.stranded both."""
+    moves = {}
+    for old, new in result.mapping.items():
+        moves[new] = (Path(new), Path(old))
+    for aside, old in result.stranded.items():
+        moves[aside] = (Path(aside), Path(old))
+    return list(moves.values())
+
+
+def _ring_back(ring: List[int], moves: List[tuple], home: set, stuck: dict) -> None:
+    """Files of put_back holding each other's old names, ring[i] the old
+    name of ring[i + 1] and the last ring[0]'s, back as _rename_ring moved
+    them, turned round. ring[0] goes aside, then each file from the last
+    back takes its old name, which the one after it has just left, and
+    ring[0] goes last. When one cannot go back, those before it keep where
+    they are, since it still holds their old names, and so does ring[0],
+    back where it was if nothing has taken that, or else under the
+    temporary name."""
+    where, old = moves[ring[0]]
+    # Not a name any of these files is to go back to either.
+    wanted = {_same_file(str(o)) for _w, o in moves}
+    aside = where.with_name(where.name + ".renaming")
+    n = 0
+    while aside.exists() or _same_file(str(aside)) in wanted:
+        n += 1
+        aside = where.with_name("%s.renaming%d" % (where.name, n))
+    if not _put(where, aside):
+        for i in ring:
+            stuck[i] = moves[i]
+        return
+    went = True
+    for i in reversed(ring[1:]):
+        if went and _put(*moves[i]):
+            home.add(i)
+        else:
+            went = False
+            stuck[i] = moves[i]
+    if went and _put(aside, old):
+        home.add(ring[0])
+        return
+    stuck[ring[0]] = (where, old) if _put(aside, where) else (aside, old)
+
+
+def _write_ledgers(app, ledgers, result: Result, numbered: dict, say=print) -> None:
+    """Point each ledger at the files as they are now called, the index
+    first, then the order history, then the run state.
+
+    When one cannot be written, each written before it is written back, the
+    run state is put back as it was in memory too, since every app saves it
+    on its way out, and every file goes back under the name it had
+    (put_back). Then it says what happened and stops with SystemExit(1),
+    so the panel does not report the files renamed. Ctrl+C while it writes
+    puts everything back the same and stops as Ctrl+C."""
+    before = [[dict(r) for r in rows] for _csv, rows in ledgers]
+    data = getattr(app.progress, "data", None)
+    records = ({k: dict(v) for k, v in data.items() if isinstance(v, dict)}
+               if isinstance(data, dict) else {})
+    written, writing = [], ""
+    try:
+        for (csv, rows), rows_before in zip(ledgers, before):
+            writing = _name_of(csv)
+            if update_rows(rows, result, note="renamed", numbered=numbered):
+                csv.rewrite(rows)
+                written.append((csv, rows_before))
+        writing = _name_of(app.progress)
+        update_progress(app.progress, result)
+    except BaseException as e:
+        if records:
+            data.update(records)
+        unwritten = []
+        for csv, rows_before in reversed(written):
+            # Ctrl+C while a write back waits for a ledger stops that wait
+            # and no more, so the files still go home.
+            try:
+                csv.rewrite(rows_before)
+            except BaseException:
+                unwritten.append(csv)
+        moved = len(_moved_by(result))
+        stuck = put_back(result)
+        if isinstance(e, KeyboardInterrupt):
+            what = "Rename was stopped while it wrote %s" % writing
+        else:
+            what = "%s could not be written (%s)" % (writing, type(e).__name__)
+        say("")
+        if not stuck:
+            say("%s, so every file was put back under the name it had and nothing was "
+                "renamed." % what)
+        else:
+            if len(stuck) < moved:
+                say("%s, so Rename put back the files it had renamed, all but %d."
+                    % (what, len(stuck)))
+            else:
+                say("%s, and Rename could not put back the files it had renamed." % what)
+            if unwritten:
+                say("The run state still gives each of those the name it had, so rename "
+                    "each back to it by hand.")
+            else:
+                say("The index and the run state still give each of those the name it had, "
+                    "so rename each back to it by hand.")
+            for where, old in stuck:
+                say("  %s" % where.name)
+                say("    back to %s" % old.name)
+        for csv in unwritten:
+            say("%s could not be put back either, so it still names the files by their "
+                "new names." % _name_of(csv))
+            if getattr(csv, "backups_dir", None):
+                say("The copy it had before this Rename is in the Backups folder.")
+        if isinstance(e, PermissionError):
+            say("Close any program that has %s open and run Rename again." % writing)
+        if isinstance(e, OSError):
+            raise SystemExit(1) from e
+        raise
+
+
+def _ledger_files(app, ledgers) -> List[Path]:
+    """The file behind each ledger a rename writes, the run state's too,
+    for each one kept in a file."""
+    stores = [csv for csv, _rows in ledgers] + [getattr(app, "progress", None)]
+    return [Path(store.path) for store in stores if getattr(store, "path", None)]
+
+
+def _name_of(store) -> str:
+    """What a ledger is called when Rename speaks of it, its file's name."""
+    path = getattr(store, "path", None)
+    if path:
+        return Path(path).name
+    columns = getattr(store, "columns", None)
+    if columns is None:
+        return "the run state"
+    return "the index" if "PDF Full Path" in columns else "the order history"
+
+
 def _listed(names) -> str:
     """"a", "a and b", "a, b and c"."""
     names = list(names)
@@ -827,6 +1020,23 @@ def run_for(app, apply_changes: bool = False, say=print,
             say("")
             say("Nothing has been changed. Run this again with --apply to do it.")
         return Result()
+    if not any(c.renaming and c.new_path for c in changes):
+        return Result()
+
+    # The ledgers are written after the files move, so each has to be one
+    # that can be written before any file moves. Excel holds a CSV it has
+    # open so that nothing can replace it, and the write that found that out
+    # after the files had moved gave up after its minute. Waiting the same
+    # minute here, while nothing has moved, lets a person close it, and when
+    # it stays open nothing is renamed.
+    held = [p for p in _ledger_files(app, ledgers) if not free_to_write(p, say=say)]
+    if held:
+        them = "it" if len(held) == 1 else "them"
+        say("")
+        say("Nothing was renamed, since %s could not be written, and Rename writes the "
+            "new names into %s as it renames. Close any program that has %s open and "
+            "run Rename again." % (_listed([p.name for p in held]), them, them))
+        raise SystemExit(1)
 
     # Every other spelling of a file about to move, in the ledgers and the
     # run state, read while the file is still there to be compared.
@@ -839,11 +1049,13 @@ def run_for(app, apply_changes: bool = False, say=print,
     if not result.mapping:
         _say_stranded(result, say)
         return result
-    numbered = _numbered(changes, result)
-    for csv, rows in ledgers:
-        if update_rows(rows, result, note="renamed", numbered=numbered):
-            csv.rewrite(rows)
-    update_progress(app.progress, result)
+    # The ledgers are written after the files move, and a write that cannot
+    # be done, the index open in Excel, gave up after its minute with every
+    # renamed file still named by its old name in the index and the run
+    # state. Verify then found each one missing, and the next Rename, reading
+    # rows whose files were gone, said every file was already named the way
+    # the app names it. Now every file goes back when a write fails.
+    _write_ledgers(app, ledgers, result, _numbered(changes, result), say=say)
     if result.renamed:
         say("")
         say("Renamed %d file(s). The index and the run state now point at them."

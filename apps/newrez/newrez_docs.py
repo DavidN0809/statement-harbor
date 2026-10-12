@@ -146,6 +146,10 @@ class _Ledger:
     def __init__(self, csv, rows):
         self._csv, self._rows = csv, rows
         self.columns = csv.columns
+        # Where the real one is kept, so a rename can see that it can be
+        # written before any file moves, as it does every other app's.
+        self.path = csv.path
+        self.backups_dir = csv.backups_dir
 
     def read_all(self):
         return self._rows

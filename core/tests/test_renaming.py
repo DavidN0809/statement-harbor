@@ -638,6 +638,121 @@ def test_a_file_that_is_not_in_the_ledger_is_never_touched(tmp_path):
     assert (tmp_path / "somebody elses file.pdf").exists()
 
 
+# -- putting the renames back --------------------------------------------------
+#
+# When a ledger cannot be written after the files moved, run_for puts every
+# file back under the name it had (put_back), since the ledgers still name
+# them so. That has to undo whatever apply did, chains, rings, a ring that
+# went back partway and a file left under a temporary name, and never move
+# a file over another.
+
+@pytest.mark.parametrize("wants, order", _in_every_order(
+    chain_of_two=CHAIN_OF_TWO, chain_of_three=CHAIN_OF_THREE,
+    swap=SWAP, ring_of_three=RING_OF_THREE, case_only=CASE_ONLY,
+    crossed_case=CROSSED_CASE))
+def test_every_chain_and_ring_goes_back_as_it_was(tmp_path, wants, order):
+    """A chain goes back from its free end and a ring through a name put
+    aside, as apply did them turned round, so each file is under its own
+    name again and nothing is left aside."""
+    rows = _wanting(tmp_path, wants, order)
+    result = renaming.apply(_plan_wanted(tmp_path, rows), say=lambda *a: None)
+    assert result.renamed == len(wants)
+    assert renaming.put_back(result) == []
+    assert _holding(tmp_path) == {old: old for old, _new in wants}
+
+
+@pytest.mark.parametrize("k", range(1, 9))
+@pytest.mark.parametrize("wants", [SWAP, RING_OF_THREE, CHAIN_OF_THREE, CROSSED_CASE],
+                         ids=["swap", "ring_of_three", "chain_of_three", "crossed_case"])
+def test_a_rename_refused_partway_goes_back_as_it_was(tmp_path, _held_from, monkeypatch,
+                                                      wants, k):
+    """apply was refused the k-th rename, so some files moved, a ring may
+    have gone back partway and kept some of its new names, and a file may
+    be left under its temporary name, with or without its old name taken.
+    Once nothing holds them, every one goes back to its own name."""
+    rows = _wanting(tmp_path, wants)
+    changes = _plan_wanted(tmp_path, rows)
+    _held_from(k)
+    result = renaming.apply(changes, say=lambda *a: None)
+    monkeypatch.undo()
+    assert renaming.put_back(result) == []
+    assert _holding(tmp_path) == {old: old for old, _new in wants}
+
+
+@pytest.mark.parametrize("taken", [False, True], ids=["its_name_free", "its_name_taken"])
+def test_a_file_a_swap_left_aside_goes_home(tmp_path, _held_from, monkeypatch, taken):
+    """The swap's staged file was refused its new name and stayed under
+    "A.pdf.renaming". With the other file refused its way back too, that
+    one kept A's old name, and A is in Result.mapping as well as
+    Result.stranded. Either way it goes home once, after the other file."""
+    rows = _wanting(tmp_path, SWAP)
+    changes = _plan_wanted(tmp_path, rows)
+    state = _held_from(10 ** 6)
+    real = Path.rename
+
+    def refuse(self, target):
+        if self.name.endswith(".renaming"):
+            state["held"].add(str(self).lower())
+            if taken:
+                state["held"].add(str(tmp_path / "A.pdf").lower())
+        return real(self, target)
+    monkeypatch.setattr(Path, "rename", refuse)
+    result = renaming.apply(changes, say=lambda *a: None)
+    aside = str(tmp_path / "A.pdf.renaming")
+    assert result.stranded == {aside: str(tmp_path / "A.pdf")}
+    assert (result.mapping.get(str(tmp_path / "A.pdf")) == aside) is taken
+    assert "A.pdf.renaming" in _holding(tmp_path)
+    monkeypatch.undo()
+    assert renaming.put_back(result) == []
+    assert _holding(tmp_path) == {"A.pdf": "A.pdf", "B.pdf": "B.pdf"}
+
+
+def test_a_chain_whose_free_end_was_taken_stays_where_it_is(tmp_path):
+    """Another program saved a file under A's old name after the chain
+    moved. A cannot go back over it, and B, whose old name A holds, cannot
+    go back either. Both are given back, where each is and the name it
+    had, and the newcomer is left alone."""
+    rows = _wanting(tmp_path, CHAIN_OF_TWO)
+    result = renaming.apply(_plan_wanted(tmp_path, rows), say=lambda *a: None)
+    (tmp_path / "A.pdf").write_bytes(b"%PDF-1.7 newcomer")
+    # The free end first, the order they would be renamed back by hand.
+    assert renaming.put_back(result) == [(tmp_path / "B.pdf", tmp_path / "A.pdf"),
+                                         (tmp_path / "C.pdf", tmp_path / "B.pdf")]
+    assert _holding(tmp_path) == {"A.pdf": "newcomer", "B.pdf": "A.pdf", "C.pdf": "B.pdf"}
+
+
+def test_a_ring_that_cannot_turn_back_is_left_as_it_was(tmp_path, _held_from):
+    """A, B and C each took the next one's name. A's file, at B.pdf, is
+    held, so the file put aside to start the ring cannot be followed. It
+    comes back to the name it had, and no file is left aside."""
+    rows = _wanting(tmp_path, RING_OF_THREE)
+    result = renaming.apply(_plan_wanted(tmp_path, rows), say=lambda *a: None)
+    after = _holding(tmp_path)
+    assert after == {"B.pdf": "A.pdf", "C.pdf": "B.pdf", "A.pdf": "C.pdf"}
+    state = _held_from(10 ** 6)
+    state["held"].add(str(tmp_path / "B.pdf").lower())
+    assert renaming.put_back(result) == [(tmp_path / "B.pdf", tmp_path / "A.pdf"),
+                                         (tmp_path / "C.pdf", tmp_path / "B.pdf"),
+                                         (tmp_path / "A.pdf", tmp_path / "C.pdf")]
+    assert _holding(tmp_path) == after
+
+
+def test_a_ring_held_partway_back_keeps_the_rest_where_they_are(tmp_path, _held_from):
+    """B's file, at C.pdf, is held. A's goes home, B's stays, and C's, put
+    aside to start the ring, can go neither home, which B's still holds,
+    nor back, which A's has taken, so it stays aside and is given back by
+    that name. Nothing is moved over another file."""
+    rows = _wanting(tmp_path, RING_OF_THREE)
+    result = renaming.apply(_plan_wanted(tmp_path, rows), say=lambda *a: None)
+    state = _held_from(10 ** 6)
+    state["held"].add(str(tmp_path / "C.pdf").lower())
+    # C.pdf back to B.pdf first, which frees C.pdf for the one put aside.
+    assert renaming.put_back(result) == [(tmp_path / "C.pdf", tmp_path / "B.pdf"),
+                                         (tmp_path / "A.pdf.renaming", tmp_path / "C.pdf")]
+    assert _holding(tmp_path) == {"A.pdf": "A.pdf", "C.pdf": "B.pdf",
+                                  "A.pdf.renaming": "C.pdf"}
+
+
 def test_only_a_pdf_in_a_folder_the_app_files_in_is_renamed(tmp_path, monkeypatch):
     """A ledger can name anything. Of nine rows, the one naming a PDF in the
     folder the app files documents in is renamed. Six name that folder, the
