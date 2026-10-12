@@ -768,7 +768,8 @@ function runOutcome() {
     record: ['Recording saved', 'It is in the Diagnostics folder of ' + who + ', ready to attach to an issue.'],
     rename: ['Rename preview ready', 'Nothing has been changed. The technical details list every file that would change.'],
     rename_apply: ['Files renamed', 'The technical details list each file.'],
-    review_names: ['Receipts renamed', 'The technical details list each file.'],
+    review_names: rvRenamed(RUN.lines) ? ['Receipts renamed', 'The technical details list each file.']
+      : ['Nothing was renamed', 'The technical details say why.'],
   }[RUN.action];
   if (plain) return {tone: 'ok', title: plain[0], say: plain[1], clean: true};
   if (res) return {tone: 'ok', title: 'Finished, no issues reported', say: '', clean: true};
@@ -1121,6 +1122,12 @@ async function rvLoad(before) {
   $('rv-list').hidden = !n;
   $('rv-go').disabled = !n;
 }
+// How many receipts a review's output says it renamed. It ends with code 0
+// when it renamed none, every name having gone stale or failed, so the
+// output is what tells.
+function rvRenamed(lines) {
+  return (lines || []).filter(t => /^\s*Renamed (->|to) /.test(t)).length;
+}
 function rvAnswers() {
   return [...$('rv-list').querySelectorAll('input[data-i]')].map(inp => {
     const x = RV.receipts[+inp.dataset.i];
@@ -1141,7 +1148,9 @@ function rvGo() {
       $('rv-go').disabled = false;
       return;
     }
-    rvLoad('Renamed. The output below names each file. ');
+    const n = rvRenamed(RUN.lines);
+    rvLoad(n ? 'Renamed ' + many(n, 'receipt') + '. The output below names each file. '
+      : 'Nothing was renamed. The output below says why. ');
   }});
   if (!started) { $('rv-state').textContent = 'Wait for the run going now to finish first.'; $('rv-go').disabled = false; }
 }

@@ -2699,7 +2699,11 @@ REVIEW_LIST_SECONDS = 120
 def _hand_over(text: str) -> Path:
     """A folder only this user can read, holding `text` for one run."""
     folder = Path(tempfile.mkdtemp(prefix="paperpull-review-"))
-    (folder / HANDED).write_text(text, encoding="utf-8")
+    try:
+        (folder / HANDED).write_text(text, encoding="utf-8")
+    except BaseException:
+        _drop(folder)
+        raise
     return folder
 
 
@@ -2754,14 +2758,19 @@ def _review_list(app: str, account: str) -> dict:
     if blocked:
         raise HTTPException(409, blocked.splitlines()[0] if blocked.strip() else "setup needed")
     cmd = _review_cmd(meta, account)
-    folder = Path(tempfile.mkdtemp(prefix="paperpull-review-"))
+    folder = None
     try:
+        try:
+            folder = Path(tempfile.mkdtemp(prefix="paperpull-review-"))
+        except OSError as e:
+            raise HTTPException(500, "Review Names had nowhere to list into, %s" % e)
         env = dict(_run_env(meta), **{REVIEW_LIST_ENV: str(folder / HANDED)})
         try:
-            # A closed pipe, as a run has, so the app asks nothing.
-            done = subprocess.run(cmd, cwd=meta["dir"], input="", capture_output=True,
-                                  text=True, encoding="utf-8", errors="replace",
-                                  env=env, timeout=REVIEW_LIST_SECONDS)
+            # A closed pipe, as a run has, so the app asks nothing. What it
+            # says on stderr stays with the rest, so a crash says why.
+            done = subprocess.run(cmd, cwd=meta["dir"], input="", stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                  errors="replace", env=env, timeout=REVIEW_LIST_SECONDS)
         except subprocess.TimeoutExpired:
             raise HTTPException(504, "Review Names did not finish listing in %d seconds."
                                 % REVIEW_LIST_SECONDS)
@@ -2783,26 +2792,51 @@ def _review_list(app: str, account: str) -> dict:
         _drop(folder)
 
 
-@app.post("/api/review-names", dependencies=[Depends(_same_origin_only)])
-async def api_review_names(request: Request):
-    """The receipts an app would ask a better name for. Renames nothing."""
+async def _review_json(request: Request):
+    """A Review Names request's body, which is JSON, as a run's is."""
+    kind = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if kind != "application/json":
+        raise HTTPException(415, "Review Names is asked for with a JSON body")
     try:
-        body = await request.json()
+        return await request.json()
     except Exception:
         raise HTTPException(400, "expected a JSON body")
+
+
+@app.post("/api/review-names", dependencies=[Depends(_same_origin_only)])
+async def api_review_names(request: Request):
+    """The receipts an app would ask a better name for. Renames nothing it
+    names, but an app may write its own records while it reads them (Target
+    mends an order's list of invoices), so the list counts as a run of that
+    account, refused while one goes or a history is imported, and holding
+    off both while it lists. Checked and claimed with nothing awaited
+    between, as _start_run claims a run."""
+    body = await _review_json(request)
     asked = _review_body(body)
     if set(body) - {"app", "account"}:
         raise HTTPException(400, "a Review Names list holds only app and account")
-    return await to_thread.run_sync(_review_list, asked["app"], asked["account"])
+    app_name, account = asked["app"], asked["account"]
+    if _IMPORTING.locked():
+        raise HTTPException(409, "A history file is being imported. Review names once it "
+                                 "has finished.")
+    if (app_name, account) in _RUNS:
+        raise HTTPException(409, "%s is running for this account. Review names once it has "
+                                 "finished." % app_name)
+    _RUNS[(app_name, account)] = {"action": "review_names_list",
+                                  "started": datetime.now().isoformat(timespec="seconds")}
+    _RUNNING.add(app_name)
+    try:
+        return await to_thread.run_sync(_review_list, app_name, account)
+    finally:
+        _RUNS.pop((app_name, account), None)
+        if not any(a == app_name for a, _ in _RUNS):
+            _RUNNING.discard(app_name)
 
 
 @app.post("/api/review-names/apply", dependencies=[Depends(_same_origin_only)])
 async def api_review_names_apply(request: Request):
     """Rename each receipt given a new summary, streamed as a run is."""
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(400, "expected a JSON body")
+    body = await _review_json(request)
     asked = _review_body(body)
     if set(body) - {"app", "account", "answers"}:
         raise HTTPException(400, "Review Names holds only app, account and answers")

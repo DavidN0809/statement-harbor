@@ -60,29 +60,29 @@ Path("seen.json").write_text(json.dumps(seen), encoding="utf-8")
 class Asked:
     """A request as a POST handler reads it."""
 
-    def __init__(self, body):
-        self.headers = {"content-type": "application/json"}
+    def __init__(self, body, kind="application/json"):
+        self.headers = {"content-type": kind} if kind else {}
         self.body = body
 
     async def json(self):
         return self.body
 
 
-def listed(body):
+def listed(body, kind="application/json"):
     """(status, answer) for one POST /api/review-names."""
     async def go():
         try:
-            return 200, await app_module.api_review_names(Asked(body))
+            return 200, await app_module.api_review_names(Asked(body, kind))
         except fastapi.HTTPException as e:
             return e.status_code, str(e.detail)
     return asyncio.run(go())
 
 
-def applied(body):
+def applied(body, kind="application/json"):
     """(status, everything streamed) for one POST /api/review-names/apply."""
     async def go():
         try:
-            response = await app_module.api_review_names_apply(Asked(body))
+            response = await app_module.api_review_names_apply(Asked(body, kind))
         except fastapi.HTTPException as e:
             return e.status_code, str(e.detail)
         return 200, "".join([part async for part in response.body_iterator])
@@ -211,6 +211,53 @@ def test_an_app_that_lists_nothing_is_said(shop):
     status, detail = listed({"app": "Shop Receipts"})
     assert status == 500
     assert "Something went wrong here." in detail
+
+
+def test_an_app_that_crashes_while_listing_says_why(shop):
+    (shop / "shop_receipts.py").write_text(
+        "raise RuntimeError('an invented failure')\n", encoding="utf-8")
+    status, detail = listed({"app": "Shop Receipts"})
+    assert status == 500
+    assert "an invented failure" in detail
+
+
+def test_no_list_while_that_account_runs_or_a_history_is_imported(shop):
+    """Listing starts the app, which may write its own records (Target
+    mends an order's list of invoices), so it waits as a run would."""
+    app_module._RUNS[("Shop Receipts", "primary")] = {"action": "all", "started": ""}
+    status, detail = listed({"app": "Shop Receipts"})
+    assert status == 409 and "running" in detail
+    assert not (shop / "seen.json").exists()
+    app_module._RUNS.clear()
+    assert app_module._IMPORTING.acquire(blocking=False)
+    try:
+        status, detail = listed({"app": "Shop Receipts"})
+    finally:
+        app_module._IMPORTING.release()
+    assert status == 409 and "imported" in detail
+    assert not (shop / "seen.json").exists()
+
+
+def test_a_list_counts_as_a_run_while_it_lists(shop, monkeypatch):
+    held = []
+    real = app_module._review_list
+
+    def noting(app, account):
+        held.append(((app, account) in app_module._RUNS, app in app_module._RUNNING))
+        return real(app, account)
+    monkeypatch.setattr(app_module, "_review_list", noting)
+    status, _ = listed({"app": "Shop Receipts"})
+    assert status == 200
+    assert held == [(True, True)]
+    assert not app_module._RUNS and "Shop Receipts" not in app_module._RUNNING
+
+
+@pytest.mark.parametrize("ask", [lambda b: listed(b, kind="text/plain"),
+                                 lambda b: applied(dict(b, answers=[answer()]), kind="")])
+def test_a_body_that_is_not_json_is_refused(shop, ask):
+    status, _ = ask({"app": "Shop Receipts"})
+    assert status == 415
+    assert not (shop / "seen.json").exists()
 
 
 # -- the new names ----------------------------------------------------------------------

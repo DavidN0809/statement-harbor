@@ -18,10 +18,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   server alike. It lists the receipts waiting, with each one's date, order
   number and items, and renames each one you type a better summary for,
   with its rows in the receipt index and order history and its record in
-  progress.json following it. A blank box keeps its name. It is the same
-  review as the console one, run by the app with what you typed, so it
-  renames only what that review would, and a name typed for a receipt that
-  stopped waiting meanwhile does nothing and is said. The double-click
+  progress.json following it. A blank box keeps its name, and a summary
+  is taken as one line of at most 120 characters. The app runs the review
+  the console one runs, with what you typed, so it renames only what that
+  review would, and a name typed for a receipt that stopped waiting
+  meanwhile does nothing and is said. The double-click
   file still works as before.
 
 ## [0.48.0] - 2026-10-12
