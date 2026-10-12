@@ -1115,11 +1115,15 @@ class App:
         marked store_read, which 0.41.0 on writes when it reads one, is kept.
         Anything else in store_info was written before 0.41.0, the purchase
         type, "In-Store", "Fuel Center" or a type title-cased, or Kroger when
-        there was no type, and is never kept (#41, review of 0.41.0)."""
+        there was no type, and is never kept (#41, review of 0.41.0). A
+        store_info that is not text, which a hand edit or a damaged file can
+        leave, names no store. Read as text it stopped Rename and Review
+        Names."""
         for store in (self.progress, self.discovery):
             rec = store.get(key) or {}
-            if rec.get("store_read") and (rec.get("store_info") or "").strip():
-                return str(rec["store_info"]).strip()
+            info = rec.get("store_info")
+            if rec.get("store_read") and isinstance(info, str) and info.strip():
+                return info.strip()
         return ""
 
     def _forget_unread_store(self, purchase: Purchase) -> None:

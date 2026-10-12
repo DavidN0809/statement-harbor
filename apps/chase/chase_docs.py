@@ -63,6 +63,13 @@ def ask(prompt: str) -> str:
         raise SystemExit(3)
 
 
+def _text(value) -> str:
+    """A title or an account a record holds, and "" for anything but text.
+    A hand edit or a damaged file can leave a number there, and handed to
+    sanitize_component it stopped every command as the records loaded."""
+    return value if isinstance(value, str) else ""
+
+
 class Document:
     """One Chase document."""
 
@@ -110,10 +117,10 @@ class Document:
         # BOUNDLESS CREDIT CARD (...1234)" and "(...5678)" share a
         # prefix), and the second card's whole history was dropped as a
         # duplicate without a word.
-        raw = sanitize_component(self.account or "")
+        raw = sanitize_component(_text(self.account))
         last4 = re.search(r"(\d{4})\s*\)?\s*$", raw)
         acct = raw[:40] + ("-" + last4.group(1) if last4 else "")
-        return f"{self.category}:{self.date}:{sanitize_component(self.title)[:60]}:{acct}"
+        return f"{self.category}:{self.date}:{sanitize_component(_text(self.title))[:60]}:{acct}"
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -145,8 +152,8 @@ def migrate_legacy_keys(records: dict) -> int:
         if doc.document_id:
             continue
         legacy = (f"{doc.category}:{doc.date}:"
-                  f"{sanitize_component(doc.title)[:60]}:"
-                  f"{sanitize_component(doc.account or '')[:40]}")
+                  f"{sanitize_component(_text(doc.title))[:60]}:"
+                  f"{sanitize_component(_text(doc.account))[:40]}")
         new_key = doc.key
         if old_key != legacy or old_key == new_key:
             continue

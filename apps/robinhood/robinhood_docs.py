@@ -250,11 +250,17 @@ class _DatedTaxForms:
             for name, rec in (getattr(store, "data", None) or {}).items():
                 if not isinstance(rec, dict) or rec.get("category") != doc_types.TAX:
                     continue
-                if rec.get("undated_key") and rec["undated_key"] != name:
-                    stand_ins[rec["undated_key"]] = name
-                title = (rec.get("title") or "").strip()
-                if rec.get("date"):
-                    dated.add((rec["date"], title))
+                # A key, a title or a date that is not text, which a hand
+                # edit or a damaged file can leave, is none. Read as text
+                # or made part of a key, it stopped Rename.
+                undated_key, title, date = (
+                    v if isinstance(v, str) else ""
+                    for v in (rec.get("undated_key"), rec.get("title"), rec.get("date")))
+                title = title.strip()
+                if undated_key and undated_key != name:
+                    stand_ins[undated_key] = name
+                if date:
+                    dated.add((date, title))
                 elif store is app.progress:
                     undated.setdefault(title, []).append((name, rec))
         rows = app.index_csv.read_all()
