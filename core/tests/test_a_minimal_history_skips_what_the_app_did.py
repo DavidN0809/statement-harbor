@@ -85,6 +85,12 @@ WALKS_FOR_RENAME = {
         "newrez_docs._DatedByStatement.__init__":
             "dates a saved statement's row by the day it prints, in Rename's view alone",
     },
+    "target": {
+        "target_receipts.App._mend_invoice_lists":
+            "points each order's list of invoices at its files as they are now, before "
+            "Rename or Review Names reads the list, and a record --minimal moved has no "
+            "list to mend",
+    },
 }
 
 CUT_KEY = ("moves a record off a key cut before 0.34.0, and --minimal carries what it reads "
@@ -120,6 +126,14 @@ WALKS_DECIDE_NOTHING = {
         "optum_docs.adopt_product_keys":
             "moves a record off a key without its product, which no released version wrote, "
             "since Optum first shipped in 0.46.0 with this move",
+    },
+    "target": {
+        "renaming._numbers_naming":
+            "which other order's row, pdf_path or list of invoices names a file, asked "
+            "only for an order whose own record holds a list. A moved order without its "
+            "list claims what its pdf_path names, as an order saved before Target kept "
+            "lists does, and an order number missing from a record is read off its key, "
+            "which every history carries",
     },
 }
 
@@ -691,7 +705,8 @@ def test_every_core_walk_is_still_met():
     ("kroger", "kroger_receipts.App._settle_stores", {"store_info"}),
     ("kroger", "kroger_receipts.App._store_kept", {"store_read"}),
     ("capitalone", "keys.told_apart", {"document_id", "downloaded_ok"}),
-    ("att", "att_docs.find_wrong_year_copies", {"date", "account", "category", "pdf_pages"}),
+    ("att", "att_docs.find_wrong_year_copies", {"date", "pdf_pages"}),
+    ("att", "att_docs._bill_of", {"account", "category"}),
     ("att", "att_docs._saved_size", {"pdf_size"}),
     ("newrez", "newrez_docs._statement_months", {"category", "date"}),
     ("optum", "optum_docs.adopt_product_keys", {"category", "date"}),
@@ -699,7 +714,8 @@ def test_every_core_walk_is_still_met():
     ("aafmaa", "keys._identity", {"category", "date", "title", "account", "document_id"}),
 ], ids=["a loop over items", "a record handed to a method", "among *args",
         "getattr of the store", "a loop over keys alone", "the store's get under such a key",
-        "saved= and a word by default", "handed on again", "a function of one record",
+        "saved= and a word by default", "handed on again", "a record's bill read apart",
+        "a function of one record",
         "the store among *args", "from_dict and its key", "a document handed on",
         "a loop over fixed words"])
 def test_the_walk_census_follows_each_way_an_app_reaches_its_records(app, where, fields):
