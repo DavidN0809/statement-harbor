@@ -644,9 +644,7 @@ def _write_ledgers(app, ledgers, result: Result, numbered: dict, say=print) -> N
     so the panel does not report the files renamed. Ctrl+C while it writes
     puts everything back the same and stops as Ctrl+C."""
     before = [[dict(r) for r in rows] for _csv, rows in ledgers]
-    data = getattr(app.progress, "data", None)
-    records = ({k: dict(v) for k, v in data.items() if isinstance(v, dict)}
-               if isinstance(data, dict) else {})
+    records = _records_of(app.progress)
     written, writing = [], ""
     try:
         for (csv, rows), rows_before in zip(ledgers, before):
@@ -657,18 +655,8 @@ def _write_ledgers(app, ledgers, result: Result, numbered: dict, say=print) -> N
         writing = _name_of(app.progress)
         update_progress(app.progress, result)
     except BaseException as e:
-        if records:
-            data.update(records)
-        unwritten = []
-        for csv, rows_before in reversed(written):
-            # Ctrl+C while a write back waits for a ledger stops that wait
-            # and no more, so the files still go home.
-            try:
-                csv.rewrite(rows_before)
-            except BaseException:
-                unwritten.append(csv)
         moved = len(_moved_by(result))
-        stuck = put_back(result)
+        stuck, unwritten = _undo(records, written, result)
         if isinstance(e, KeyboardInterrupt):
             what = "Rename was stopped while it wrote %s" % writing
         else:
@@ -702,6 +690,39 @@ def _write_ledgers(app, ledgers, result: Result, numbered: dict, say=print) -> N
         if isinstance(e, OSError):
             raise SystemExit(1) from e
         raise
+
+
+def _records_of(progress):
+    """The run state's records in memory, and a copy of each for _undo to
+    put back."""
+    data = getattr(progress, "data", None)
+    if not isinstance(data, dict):
+        return None
+    return data, {k: dict(v) if isinstance(v, dict) else v for k, v in data.items()}
+
+
+def _undo(records, written: list, result: Result) -> tuple:
+    """Undo what was written into the ledgers after files moved, once a
+    write has failed. The run state's records go back as they were in
+    memory (_records_of), and a record made since is taken away, because
+    every app saves the run state on its way out. Each CSV in `written`, as
+    (the CSV, the rows it had), goes back to those rows, the last written
+    first, and every file moved goes back under the name it had (put_back).
+    Returns the files that could not go back, as put_back gives them, and
+    the CSVs that could not be written back."""
+    if records is not None:
+        data, copies = records
+        data.clear()
+        data.update(copies)
+    unwritten = []
+    for csv, rows_before in reversed(written):
+        # Ctrl+C while a write back waits for a ledger stops that wait
+        # and no more, so the files still go home.
+        try:
+            csv.rewrite(rows_before)
+        except BaseException:
+            unwritten.append(csv)
+    return put_back(result), unwritten
 
 
 def _ledger_files(app, ledgers) -> List[Path]:
