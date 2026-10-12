@@ -655,8 +655,11 @@ def names_account(page, account: str) -> bool:
     a heading in its main region, or, where no heading names it, by the
     title of every statement it lists. True for an account no words are
     kept for, which is read as it always was. False when the headings
-    cannot be read, when any names another account, and when neither they
-    nor the statements name this one.
+    cannot be read, when any heading or statement names another account,
+    and when neither the headings nor the statements name this one. A
+    heading that seems to name it, a Retirement offer or a holder called
+    Ira drawn in capitals, never lets through a list whose statements name
+    another account.
 
     Only headings and titles. A tab or a link that says Retirement is on
     every page of the statements hub, and the one for the address open is
@@ -680,13 +683,12 @@ def names_account(page, account: str) -> bool:
     if not isinstance(headings, list):
         return False
     said = [str(h) for h in headings]
-    if any(_OTHER_ACCOUNT_RE.search(h) for h in said):
+    titles = _listed_titles(page)
+    if any(_OTHER_ACCOUNT_RE.search(t) for t in said + titles):
         return False
     if any(words.search(h) for h in said):
         return True
-    titles = _listed_titles(page)
-    return bool(titles) and all(words.search(t) and not _OTHER_ACCOUNT_RE.search(t)
-                                for t in titles)
+    return bool(titles) and all(words.search(t) for t in titles)
 
 
 def _listed_titles(page) -> list:

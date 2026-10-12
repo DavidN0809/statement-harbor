@@ -361,6 +361,10 @@ def test_the_retirement_page_is_known_by_its_statements_when_no_heading_names_it
              "Dana Example", False),
             # a heading that names another account, whatever the rows say
             (ira + ira_too, "Individual investing", False),
+            # and rows that name another account, whatever the heading says,
+            # an offer of a retirement account or a holder called Ira
+            (individual, "Open a Robinhood Retirement account", False),
+            (individual, '<span style="text-transform: uppercase">Ira Example</span>', False),
             # nothing listed
             ("", "Dana Example", False)]:
         html = HUB + "<main>%s%s</main>" % ("<h1>%s</h1>" % heading if heading else "", rows)

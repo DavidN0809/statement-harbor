@@ -21,7 +21,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   is now also read when no heading names any account and every statement
   it lists names a retirement account and none names another, and the
   individual list shown at that address is still never read as
-  retirement statements.
+  retirement statements. A page any of whose statements names another
+  account is not read whatever its headings say, so an offer to open a
+  retirement account, or a holder called Ira shown in capitals, no longer
+  passes for the retirement account's own heading.
 
 ## [0.48.0] - 2026-10-12
 
