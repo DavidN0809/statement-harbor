@@ -31,6 +31,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and a second PayPal account on Coinbase's, and the two browsers attached
   to each other's signed-in session. The new port now moves past any port
   another app or account already uses.
+- **Rename no longer leaves the index naming files by their old names.**
+  Apply renames, and Rename them on the File names page, renamed the files
+  first and then wrote the index, the order history and the run state.
+  With the index open in Excel, that write waited its minute and gave up
+  after the files had moved, so the index and progress.json still named
+  every renamed file by its old name. Verify then reported each one
+  missing, and the next rename said every file was already named the way
+  the app names it, so nothing pointed the index at them again. Now each
+  of them is checked before anything is renamed, waiting the same minute
+  while one is open in another program, and nothing is renamed while one
+  stays open. A write that still fails after the files moved puts every
+  file back under its old name, where the index and the run state still
+  find it, and a file that cannot be put back is listed with its new name
+  and its old one. Either way the rename says what happened and stops as
+  a run that did not finish, so the panel no longer reports the files
+  renamed. It also no longer says that Resume carries on from where it
+  stopped, since Resume has nothing of a rename's to carry on with.
 
 ## [0.46.0] - 2026-10-11
 
