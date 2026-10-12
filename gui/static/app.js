@@ -151,7 +151,10 @@ function present(r) {
     case 'attention': {
       const res = (r.last_run && r.last_run.result) || {};
       const bits = [];
-      if (res.manual_review) bits.push(many(res.manual_review, n) + ' set aside for you to check');
+      const named = Math.min(res.name_review || 0, res.manual_review || 0);
+      const aside = (res.manual_review || 0) - named;
+      if (named) bits.push(many(named, n) + ' saved under a name to review');
+      if (aside) bits.push(many(aside, n) + ' set aside for you to check');
       if (res.wrong_document) bits.push(res.wrong_document + ' refused as the wrong document');
       if (res.failed) bits.push(res.failed + ' failed');
       if (res.validation_failures) bits.push(many(res.validation_failures, 'PDF') + ' that did not check out');
@@ -745,14 +748,30 @@ function runOutcome() {
       (downloads ? 'continue.' : recheck ? 'check again.' : 'run it again.'),
     clean: false, resume: downloads, recheck, signin: true};
   if (res && res.attention) {
+    // A receipt saved under a name the app was unsure of is counted as one
+    // to review, and its file is where it belongs. Only the rest sit in
+    // the Manual Review folder, which was all this ever said.
+    const named = Math.min(res.name_review || 0, res.manual_review || 0);
+    const aside = (res.manual_review || 0) - named;
     const details = [];
     if (res.wrong_document) details.push(`${res.wrong_document} refused as the wrong document`);
-    if (res.manual_review) details.push(`${res.manual_review} need review`);
+    if (named) details.push(`${named} saved under a name to review`);
+    if (aside) details.push(`${aside} set aside`);
     if (res.failed) details.push(`${res.failed} failed`);
     if (res.validation_failures) details.push(`${res.validation_failures} PDF validation failures`);
+    const says = [];
+    if (named) says.push((named === 1 ? 'A receipt was' : named + ' receipts were') + ' saved under a name ' +
+      'PaperPull was unsure of. Review names gives each a better one.');
+    // An invoice that failed its check is put aside in Manual Review and
+    // counted in validation_failures, while its order may count as one
+    // saved under a name to review.
+    const asideToo = aside > 0 || (res.validation_failures || 0) > 0;
+    if (asideToo) says.push('A document set aside sits in the Manual Review folder, where PaperPull kept it ' +
+      'rather than file it under the wrong name.');
+    if (!says.length) says.push('The technical details below say what happened.');
     return {tone: 'warn', title: saved.length ? many(saved.length, 'new ' + n) + ' saved, some need a look' : 'Finished, needs attention',
-      say: 'Finished, needs attention (' + details.join(', ') + '). A document set aside sits in the Manual Review folder, ' +
-        'where PaperPull kept it rather than file it under the wrong name.', clean: true, attention: true};
+      say: 'Finished, needs attention (' + details.join(', ') + '). ' + says.join(' '), clean: true, attention: true,
+      names: named > 0, aside: asideToo};
   }
   if (res && ['pilot', 'all', 'resume'].includes(RUN.action)) {
     return saved.length ? {tone: 'ok', title: many(saved.length, 'new ' + n) + ' saved', say: 'Finished, no issues reported.', clean: true}
@@ -856,9 +875,14 @@ function renderRun() {
     }
     html += techDetails(!o.clean && !RUN.failure) + '</section>';
     if (o.attention && r) {
-      html += '<section class="callout warn" style="margin-top:20px"><div class="text"><h2>Some documents need a look</h2>' +
-        '<p>' + esc(o.say) + '</p>' + (!SERVER && !inSample() ? '<button type="button" class="btn btn-s" data-do="reveal" data-key="' + key + '">' +
-        sv(P.folder) + 'Open ' + esc(RUN.provider) + "'s folder</button>" : '') + '</div></section>';
+      const folder = !SERVER && !inSample() && (o.aside || !o.names);
+      html += '<section class="callout warn" style="margin-top:20px"><div class="text"><h2>' +
+        (o.names && !o.aside ? 'Some receipts need a better name' : 'Some documents need a look') + '</h2>' +
+        '<p>' + esc(o.say) + '</p>' + (o.names || folder ? '<div class="row-actions">' +
+        (o.names ? '<button type="button" class="btn btn-s" data-do="review" data-key="' + key + '">' + sv(P.tag) +
+          'Review names</button>' : '') +
+        (folder ? '<button type="button" class="btn btn-s" data-do="reveal" data-key="' + key + '">' +
+          sv(P.folder) + 'Open ' + esc(RUN.provider) + "'s folder</button>" : '') + '</div>' : '') + '</div></section>';
     }
     if (RUN.failure) {
       html += '<section class="callout plain" id="failnote" style="margin-top:20px">' + sv(P.report, 22) + '<div class="text">' +
@@ -1116,7 +1140,7 @@ async function rvLoad(before) {
     const head = [x.date, x.number ? '#' + x.number : ''].filter(Boolean).join(' · ');
     return '<div class="rv-item"><div class="rv-file">' + esc(x.file || '') + '</div>' +
       '<div class="hint">' + esc(head) + (items.length ? ' · ' + esc(items.join('; ')) : '') + '</div>' +
-      '<input type="text" autocomplete="off" maxlength="120" data-i="' + i + '" placeholder="Keep this name" ' +
+      '<input type="text" autocomplete="off" maxlength="120" data-i="' + i + '" placeholder="Leave blank to keep this name" ' +
       'aria-label="' + esc('New summary for ' + (x.file || 'this receipt')) + '"></div>';
   }).join('');
   $('rv-list').hidden = !n;
@@ -1128,11 +1152,21 @@ async function rvLoad(before) {
 function rvRenamed(lines) {
   return (lines || []).filter(t => /^\s*Renamed (->|to) /.test(t)).length;
 }
+// Words that ask to keep a name, never a new one. The box once read
+// "Keep this name", and typed in it renamed receipts "Keep This Name". The
+// same list as KEEP_WORDS in core renaming.py, which reads them again.
+const KEEP_WORDS = new Set(['keep', 'keep it', 'keep this', 'keep name', 'keep the name', 'keep this name',
+  'keep its name', 'keep same', 'keep the same', 'keep the same name', 'same',
+  'same name', 'the same', 'no change', 'unchanged', 'leave it', 'leave as is',
+  'leave blank', 'leave it blank', 'leave blank to keep this name']);
+function keepsName(text) {
+  return KEEP_WORDS.has(String(text || '').toLowerCase().replace(/[^a-z ]+/g, ' ').split(/\s+/).filter(Boolean).join(' '));
+}
 function rvAnswers() {
   return [...$('rv-list').querySelectorAll('input[data-i]')].map(inp => {
     const x = RV.receipts[+inp.dataset.i];
     return {id: String(x.id || ''), number: String(x.number || ''), summary: inp.value.trim()};
-  }).filter(a => a.id && a.summary);
+  }).filter(a => a.id && a.summary && !keepsName(a.summary));
 }
 function rvGo() {
   if (!RV) return;

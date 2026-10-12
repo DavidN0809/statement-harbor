@@ -1193,7 +1193,14 @@ def _latest_saved(root: Path) -> list:
         return []
     found = []
     for rec in raw.values() if isinstance(raw, dict) else ():
-        if not isinstance(rec, dict) or not rec.get("downloaded_ok"):
+        if not isinstance(rec, dict):
+            continue
+        # A record from before an app wrote downloaded_ok has none at all,
+        # and one it finished says Completed. Target's from before 0.41.1 are
+        # that way, so its page said Nothing saved yet over 67 receipts. One
+        # that says downloaded_ok false was not saved.
+        ok = rec.get("downloaded_ok")
+        if not (ok is True or (ok is None and rec.get("state") == "Completed")):
             continue
         name = rec.get("pdf_filename")
         if not isinstance(name, str) or not name.strip():

@@ -5,7 +5,7 @@ FIELDS = ("manual_review", "failed", "validation_failures", "new_files")
 # Counts an app from before they existed does not send. Absent is zero,
 # present has to be a count like the rest, so an install the panel has
 # not refreshed yet still reports its run.
-OPTIONAL = ("wrong_document", "stopped")
+OPTIONAL = ("wrong_document", "stopped", "name_review")
 
 
 def _count(value):
@@ -25,6 +25,9 @@ def parse(line):
         return None
     result = {k: data[k] for k in FIELDS}
     result.update({k: data.get(k, 0) for k in OPTIONAL})
+    # Part of manual_review, never more than it.
+    if result["name_review"] > result["manual_review"]:
+        return None
     result["attention"] = any(result[k] for k in FIELDS + OPTIONAL
                               if k != "new_files")
     return result
