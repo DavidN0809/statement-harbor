@@ -1331,7 +1331,10 @@ class App:
         if aside:
             self._say_put_aside(aside)
         if not pend:
+            # A scoped Resume knows only that its own part is done.
             print("Nothing else to resume." if aside else
+                  "Nothing to resume - everything in scope is complete."
+                  if listing.scoped(self) else
                   "Nothing to resume - all discovered purchases are complete.")
             return
         print(f"Resuming: {len(pend)} incomplete purchase(s).")

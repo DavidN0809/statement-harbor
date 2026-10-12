@@ -935,7 +935,10 @@ class App:
         if self.args.max_purchases:
             pend = pend[:self.args.max_purchases]
         if not pend:
-            print("Nothing to resume - all discovered purchases are complete.")
+            # A scoped Resume knows only that its own part is done.
+            print("Nothing to resume - everything in scope is complete."
+                  if listing.scoped(self) else
+                  "Nothing to resume - all discovered purchases are complete.")
             return
         print(f"Resuming: {len(pend)} incomplete purchase(s).")
         self.process_purchases(pend, dry_run=self.args.dry_run)

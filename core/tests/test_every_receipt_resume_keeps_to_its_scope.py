@@ -14,6 +14,7 @@ listing is one an earlier run read whole, so Resume does not read it
 again.
 """
 import importlib
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -123,6 +124,8 @@ class Home:
 
         def fetch(app, _page, purchase, *a, **kw):
             self.fetched.append((purchase.key, kw.get("by_dates")))
+        # Whether the app's own fetch places a purchase by its page's date.
+        self.places = "by_dates" in inspect.signature(cls.process_one).parameters
         monkeypatch.setattr(cls, "process_one", fetch)
 
         def whole(app, *_a, **_kw):
@@ -241,4 +244,52 @@ def test_a_scoped_resume_places_each_purchase_by_its_dates(home):
     home.listed_before()
     home.run(*RESUME, "--year", "2025")
     told = {by for _key, by in home.fetched}
-    assert told <= {None, True}, (home.app.name, home.fetched)
+    assert told == ({True} if home.places else {None}), (home.app.name, home.fetched)
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_scoped_resume_takes_what_a_scoped_run_all_takes(home):
+    """The same purchases as the app's own Run All for that year, a
+    purchase whose card shows no date included or left out as Run All
+    leaves it. Walmart's online orders show none until their page is open,
+    and its Run All takes them to be placed there."""
+    home.listed_before()
+    kinds = getattr(home.mod, "PURCHASE_TYPES", models.PURCHASE_TYPES)
+    undated = Purchase(purchase_type=kinds[0], purchase_date="",
+                       order_number="1000000099", total="12.34")
+    found = json.loads((home.out / "discovery.json").read_text(encoding="utf-8"))
+    found[undated.key] = dict(undated.to_dict(), state=State.DISCOVERED.value)
+    (home.out / "discovery.json").write_text(json.dumps(found), encoding="utf-8")
+    home.run(*RUN_ALL, "--year", "2025")
+    by_run_all = sorted(home.fetched)
+    home.fetched.clear()
+    said, _result, _ended = home.run(*RESUME, "--year", "2025")
+    assert sorted(home.fetched) == by_run_all, report(home, said)
+    assert home.keys["2025"] in {k for k, _ in by_run_all}
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_scoped_resume_says_only_its_scope_is_complete(home):
+    """Everything of 2025 is done and 2026 is not. A Resume for 2025 has
+    nothing to do and does not call every purchase complete."""
+    home.listed_before(done=("2024", "2025"))
+    said, result, _ended = home.run(*RESUME, "--year", "2025")
+    assert home.fetched == [], report(home, said)
+    assert "everything in scope is complete" in said, said[-1500:]
+    assert "all discovered purchases are complete" not in said, said[-1500:]
+    assert result and result.get("stopped") == 0, said[-1500:]
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_resume_with_an_order_number_takes_only_that_order(home):
+    home.listed_before()
+    said, _result, _ended = home.run(*RESUME, "--order-number", "1000000002")
+    assert home.years_fetched() == ["2025"], report(home, said)
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_resume_counts_its_limit_after_the_done_ones(home):
+    """--max-purchases 1 with the newest purchase done takes the next one,
+    not nothing."""
+    home.listed_before(done=("2026",))
+    said, _result, _ended = home.run(*RESUME, "--max-purchases", "1")
+    assert home.years_fetched() == ["2025"], report(home, said)

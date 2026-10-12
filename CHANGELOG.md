@@ -53,9 +53,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   of every year, and ignored the configured start date too. From a
   terminal, `--resume --redownload --year 2025` fetched every purchase of
   every year again. Resume now chooses its purchases the way Pilot and Run
-  All do, as the document apps' Resume already did, and Walmart places an
-  online order with no date by its order page, as its Run All does. A
-  Resume with no scope carries on with everything left, as before.
+  All do, as the document apps' Resume already did. So a configured start
+  date holds on Resume too, a purchase with no date is left out of a
+  Resume with a scope or a start date in every app but Walmart, and
+  Walmart places such an online order by its order page, all as Run All
+  does. A scoped Resume with nothing to do now says everything in scope is
+  complete, not every purchase.
 
 ## [0.46.0] - 2026-10-11
 
