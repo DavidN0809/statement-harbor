@@ -3095,6 +3095,25 @@ def favicon():
 
 
 STATIC = HERE / "static"
+# The panel's two typefaces, gui/static/fonts, licensed under the SIL Open
+# Font License (NOTICE.md). Served by name from this list and nothing else,
+# so no request can name another file.
+FONTS = ("AtkinsonHyperlegibleNext.ttf", "AtkinsonHyperlegibleMono.ttf")
+
+
+@app.get("/fonts/{name}", include_in_schema=False)
+def font(name: str):
+    """One of the panel's typefaces. Like the icon they are the same for
+    everyone and say nothing about the person. On the server they come only
+    after the password, as every page does. Kept for a day in the browser."""
+    if name not in FONTS:
+        raise HTTPException(404, "no such font")
+    try:
+        data = (STATIC / "fonts" / name).read_bytes()
+    except OSError:
+        raise HTTPException(404, "no such font")
+    return Response(content=data, media_type="font/ttf",
+                    headers={"Cache-Control": "max-age=86400"})
 
 
 def _page() -> str:

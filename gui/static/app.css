@@ -2,9 +2,9 @@
    the person picks it in Settings. Colors are tokens here and nowhere else,
    so the two themes stay in step. Blue and teal come from the app icon. */
 @font-face { font-family: "Atkinson Hyperlegible Next"; font-weight: 200 800; font-display: swap;
-             src: url("/fonts/AtkinsonHyperlegibleNext.woff2") format("woff2"); }
+             src: url("/fonts/AtkinsonHyperlegibleNext.ttf") format("truetype"); }
 @font-face { font-family: "Atkinson Hyperlegible Mono"; font-weight: 200 800; font-display: swap;
-             src: url("/fonts/AtkinsonHyperlegibleMono.woff2") format("woff2"); }
+             src: url("/fonts/AtkinsonHyperlegibleMono.ttf") format("truetype"); }
 
 :root {
   color-scheme: light;

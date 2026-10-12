@@ -275,6 +275,8 @@ ROUTES = {
                                        desktop="changes", server="changes"),
     ("GET", "/"): dict(page=True, desktop="reads", server="reads"),
     ("GET", "/favicon.ico"): dict(page=True, desktop="reads", server="reads"),
+    ("GET", "/fonts/{name}"): dict(page=True, ask="/fonts/AtkinsonHyperlegibleNext.ttf",
+                                   desktop="reads", server="reads"),
     ("GET", "/login"): dict(page=True, desktop="reads", server="reads"),
     ("POST", "/login"): dict(form=True, body={"password": PASSWORD},
                              desktop="reads", server="changes"),

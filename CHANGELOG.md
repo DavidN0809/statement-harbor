@@ -36,7 +36,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Discover is Only check what's there, Run All is Get new documents and
   Resume is Continue, while the terminal's commands keep their names.
   Spreadsheets, File names and Settings are pages of their own. Light by
-  default, dark when the system or Settings asks, and it fits a phone.
+  default, dark when the system or Settings asks, and it fits a phone. It
+  is set in Atkinson Hyperlegible, made for legibility, which ships inside
+  the app under the SIL Open Font License, so no font is fetched from the
+  web.
 - **Download again is Restore deleted files**, a dialog of its own under
   More. It still needs a year or both a From and a To date, says what
   happens to files you still have and applies to one run, and it is never
