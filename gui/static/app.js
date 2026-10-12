@@ -35,6 +35,7 @@ const P = {
   lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   restore: '<path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v5h5"/>',
   pencil: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+  tag: '<path d="M3 12V4h8l10 10-8 8z"/><path d="M7.5 7.5h.01"/>',
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
   report: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
   file: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>',
@@ -104,11 +105,12 @@ function mono(r, big) {
 }
 const ACTION_WORDS = {login: 'Sign in', discover: "Check what's there", pilot: 'Try the newest few',
   all: 'Get new documents', resume: 'Continue', verify: 'Check saved files', diagnose: 'Support report',
-  record: 'Record steps', rename: 'Rename preview', rename_apply: 'Apply renames'};
+  record: 'Record steps', rename: 'Rename preview', rename_apply: 'Apply renames', review_names: 'Review names'};
 const ACTION_DOING = {login: 'Opening the sign-in window for %s', discover: 'Checking what %s has',
   pilot: 'Trying the newest few from %s', all: 'Getting new documents from %s', resume: 'Continuing %s',
   verify: 'Checking the files saved from %s', diagnose: 'Making a support report on %s',
-  record: 'Recording your steps on %s', rename: 'Previewing new names for %s', rename_apply: 'Renaming files from %s'};
+  record: 'Recording your steps on %s', rename: 'Previewing new names for %s', rename_apply: 'Renaming files from %s',
+  review_names: 'Renaming receipts from %s'};
 
 // -- where an account stands, in words ---------------------------------------------
 // Each state gets one chip, one sentence and one next step. Nothing here
@@ -149,7 +151,10 @@ function present(r) {
     case 'attention': {
       const res = (r.last_run && r.last_run.result) || {};
       const bits = [];
-      if (res.manual_review) bits.push(many(res.manual_review, n) + ' set aside for you to check');
+      const named = Math.min(res.name_review || 0, res.manual_review || 0);
+      const aside = (res.manual_review || 0) - named;
+      if (named) bits.push(many(named, n) + ' saved under a name to review');
+      if (aside) bits.push(many(aside, n) + ' set aside for you to check');
       if (res.wrong_document) bits.push(res.wrong_document + ' refused as the wrong document');
       if (res.failed) bits.push(res.failed + ' failed');
       if (res.validation_failures) bits.push(many(res.validation_failures, 'PDF') + ' that did not check out');
@@ -488,7 +493,7 @@ function closeMenus() {
 }
 function menuItem(doIt, key, ico, title, line, disabled) {
   return '<button type="button" role="menuitem" class="mi' + (doIt === 'run' || doIt === 'record' || doIt === 'support' ||
-    doIt === 'rename' || doIt === 'restore' ? ' starts' : '') + '" data-do="' + doIt + '" data-key="' + esc(key) + '"' +
+    doIt === 'rename' || doIt === 'review' || doIt === 'restore' ? ' starts' : '') + '" data-do="' + doIt + '" data-key="' + esc(key) + '"' +
     (disabled ? ' disabled' : '') + (doIt === 'run' ? ' data-action="verify"' : '') + '>' + sv(ico, 20) +
     '<span><b>' + esc(title) + '</b><span>' + esc(line) + '</span></span></button>';
 }
@@ -503,8 +508,12 @@ function openMenu(btn) {
   if (VIEW !== 'account') html += menuItem('nav', k, P.chevron, 'Open ' + r.provider, 'Sign in, choose dates and see recent runs');
   html += '<div class="grp">Your files</div>';
   if (!SERVER) html += menuItem('restore', k, P.restore, 'Restore deleted files', 'Fetch again the PDFs you deleted, for dates you choose', sample);
-  html += menuItem('rename', k, P.pencil, 'Rename existing files', 'Match them to your File names setting, with a preview first') +
-    menuItem('run', k, P.shield, 'Check saved files', 'Re-check every PDF already saved. Downloads nothing');
+  html += menuItem('rename', k, P.pencil, 'Rename existing files', 'Match them to your File names setting, with a preview first');
+  // Only a receipt provider has Review Names (META.apps[app].reviews_names).
+  if (META.apps[r.app] && META.apps[r.app].reviews_names) {
+    html += menuItem('review', k, P.tag, 'Review names', 'Give a better name to receipts PaperPull was unsure of', sample);
+  }
+  html += menuItem('run', k, P.shield, 'Check saved files', 'Re-check every PDF already saved. Downloads nothing');
   if (!SERVER && !sample) html += menuItem('reveal', k, P.folder, 'Open folder', 'Where ' + r.provider + "'s files are saved");
   html += '<div class="rule"></div><div class="grp">Get help</div>' +
     menuItem('support', k, P.report, 'Make a support report', "Reads " + r.provider + "'s page and saves a file with no account details, to attach to an issue") +
@@ -555,7 +564,7 @@ function lockStarts() {
 // and the agreement arrive as true and false, never as text in an address.
 // EventSource can only GET, so this reads the same stream with fetch and
 // hands its events to the same handlers.
-function postRun(body) {
+function postRun(body, url) {
   const stop = new AbortController(), on = {};
   const src = { onmessage: null, onerror: null, refused: '',
                 addEventListener(name, fn) { on[name] = fn; }, close() { stop.abort(); } };
@@ -563,7 +572,7 @@ function postRun(body) {
   (async () => {
     let r;
     try {
-      r = await fetch('/api/run', { method: 'POST', signal: stop.signal,
+      r = await fetch(url || '/api/run', { method: 'POST', signal: stop.signal,
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     } catch (e) { lost(); return; }
     if (!r.ok) {
@@ -627,9 +636,11 @@ function startRun(r, action, opts) {
   // person's recording waits in their own folder.
   recordingApp = (action === 'record') ? app : null;
   recordingAccount = account;
-  es = again ? postRun(Object.assign({ app, account, action, redownload: true, confirmed: true },
+  // Review Names carries what the person typed, in a body to its own address.
+  es = opts.review ? postRun({ app, account, answers: opts.review }, '/api/review-names/apply')
+     : again ? postRun(Object.assign({ app, account, action, redownload: true, confirmed: true },
                                      Object.fromEntries(q.entries())))
-             : new EventSource(`/api/run?${q.toString()}`);
+     : new EventSource(`/api/run?${q.toString()}`);
   es.addEventListener('result', e => { try { RUN.result = JSON.parse(e.data); } catch (x) { RUN.result = null; } });
   es.addEventListener('saved', e => { try { RUN.saved = JSON.parse(e.data); } catch (x) { RUN.saved = []; } });
   es.onmessage = e => onLine(e.data);
@@ -737,14 +748,30 @@ function runOutcome() {
       (downloads ? 'continue.' : recheck ? 'check again.' : 'run it again.'),
     clean: false, resume: downloads, recheck, signin: true};
   if (res && res.attention) {
+    // A receipt saved under a name the app was unsure of is counted as one
+    // to review, and its file is where it belongs. Only the rest sit in
+    // the Manual Review folder, which was all this ever said.
+    const named = Math.min(res.name_review || 0, res.manual_review || 0);
+    const aside = (res.manual_review || 0) - named;
     const details = [];
     if (res.wrong_document) details.push(`${res.wrong_document} refused as the wrong document`);
-    if (res.manual_review) details.push(`${res.manual_review} need review`);
+    if (named) details.push(`${named} saved under a name to review`);
+    if (aside) details.push(`${aside} set aside`);
     if (res.failed) details.push(`${res.failed} failed`);
     if (res.validation_failures) details.push(`${res.validation_failures} PDF validation failures`);
+    const says = [];
+    if (named) says.push((named === 1 ? 'A receipt was' : named + ' receipts were') + ' saved under a name ' +
+      'PaperPull was unsure of. Review names gives each a better one.');
+    // An invoice that failed its check is put aside in Manual Review and
+    // counted in validation_failures, while its order may count as one
+    // saved under a name to review.
+    const asideToo = aside > 0 || (res.validation_failures || 0) > 0;
+    if (asideToo) says.push('A document set aside sits in the Manual Review folder, where PaperPull kept it ' +
+      'rather than file it under the wrong name.');
+    if (!says.length) says.push('The technical details below say what happened.');
     return {tone: 'warn', title: saved.length ? many(saved.length, 'new ' + n) + ' saved, some need a look' : 'Finished, needs attention',
-      say: 'Finished, needs attention (' + details.join(', ') + '). A document set aside sits in the Manual Review folder, ' +
-        'where PaperPull kept it rather than file it under the wrong name.', clean: true, attention: true};
+      say: 'Finished, needs attention (' + details.join(', ') + '). ' + says.join(' '), clean: true, attention: true,
+      names: named > 0, aside: asideToo};
   }
   if (res && ['pilot', 'all', 'resume'].includes(RUN.action)) {
     return saved.length ? {tone: 'ok', title: many(saved.length, 'new ' + n) + ' saved', say: 'Finished, no issues reported.', clean: true}
@@ -760,6 +787,8 @@ function runOutcome() {
     record: ['Recording saved', 'It is in the Diagnostics folder of ' + who + ', ready to attach to an issue.'],
     rename: ['Rename preview ready', 'Nothing has been changed. The technical details list every file that would change.'],
     rename_apply: ['Files renamed', 'The technical details list each file.'],
+    review_names: rvRenamed(RUN.lines) ? ['Receipts renamed', 'The technical details list each file.']
+      : ['Nothing was renamed', 'The technical details say why.'],
   }[RUN.action];
   if (plain) return {tone: 'ok', title: plain[0], say: plain[1], clean: true};
   if (res) return {tone: 'ok', title: 'Finished, no issues reported', say: '', clean: true};
@@ -846,9 +875,14 @@ function renderRun() {
     }
     html += techDetails(!o.clean && !RUN.failure) + '</section>';
     if (o.attention && r) {
-      html += '<section class="callout warn" style="margin-top:20px"><div class="text"><h2>Some documents need a look</h2>' +
-        '<p>' + esc(o.say) + '</p>' + (!SERVER && !inSample() ? '<button type="button" class="btn btn-s" data-do="reveal" data-key="' + key + '">' +
-        sv(P.folder) + 'Open ' + esc(RUN.provider) + "'s folder</button>" : '') + '</div></section>';
+      const folder = !SERVER && !inSample() && (o.aside || !o.names);
+      html += '<section class="callout warn" style="margin-top:20px"><div class="text"><h2>' +
+        (o.names && !o.aside ? 'Some receipts need a better name' : 'Some documents need a look') + '</h2>' +
+        '<p>' + esc(o.say) + '</p>' + (o.names || folder ? '<div class="row-actions">' +
+        (o.names ? '<button type="button" class="btn btn-s" data-do="review" data-key="' + key + '">' + sv(P.tag) +
+          'Review names</button>' : '') +
+        (folder ? '<button type="button" class="btn btn-s" data-do="reveal" data-key="' + key + '">' +
+          sv(P.folder) + 'Open ' + esc(RUN.provider) + "'s folder</button>" : '') + '</div>' : '') + '</div></section>';
     }
     if (RUN.failure) {
       html += '<section class="callout plain" id="failnote" style="margin-top:20px">' + sv(P.report, 22) + '<div class="text">' +
@@ -1071,6 +1105,98 @@ function rnRun(apply) {
     $('rn-prev').disabled = false; $('rn-apply').disabled = !RN_PREVIEWED;
   }
 }
+
+// Review Names. The receipts the app was unsure how to name are listed by
+// the app itself (/api/review-names), a person types a better summary for
+// any of them, and the app renames those (/api/review-names/apply). A blank
+// box keeps its name, as Enter does in the console version.
+let RV = null;
+function openReview(r) {
+  DLG_ROW = r;
+  RV = {row: r, receipts: []};
+  $('rv-title').textContent = 'Review names from ' + r.provider;
+  $('rv-list').innerHTML = ''; $('rv-list').hidden = true;
+  $('rv-log').hidden = true; $('rv-log').textContent = '';
+  $('rv-go').disabled = true;
+  $('rv-paperless').hidden = !(SERVER && META.server && META.server.paperless);
+  $('dlg-review').showModal();
+  rvLoad('');
+}
+async function rvLoad(before) {
+  const rv = RV;
+  $('rv-state').textContent = before + 'Finding the receipts to review…';
+  let d;
+  try { d = await postJSON('/api/review-names', {app: rv.row.app, account: rv.row.account}); }
+  catch (e) { if (RV === rv) $('rv-state').textContent = before + e.message; return; }
+  if (RV !== rv) return;
+  rv.receipts = Array.isArray(d.receipts) ? d.receipts : [];
+  // What the app said about rows it left out, without its own count line.
+  const said = (d.said || []).filter(t => !/need review\.$|need name review\.$/.test(t)).join(' ');
+  const n = rv.receipts.length;
+  $('rv-state').textContent = before + (n ? many(n, 'receipt') + ' waiting for a better name.'
+    : 'No receipts are waiting for a better name.') + (said ? ' ' + said : '');
+  $('rv-list').innerHTML = rv.receipts.map((x, i) => {
+    const items = Array.isArray(x.items) ? x.items.filter(Boolean) : [];
+    const head = [x.date, x.number ? '#' + x.number : ''].filter(Boolean).join(' · ');
+    return '<div class="rv-item"><div class="rv-file">' + esc(x.file || '') + '</div>' +
+      '<div class="hint">' + esc(head) + (items.length ? ' · ' + esc(items.join('; ')) : '') + '</div>' +
+      '<input type="text" autocomplete="off" maxlength="120" data-i="' + i + '" placeholder="Leave blank to keep this name" ' +
+      'aria-label="' + esc('New summary for ' + (x.file || 'this receipt')) + '"></div>';
+  }).join('');
+  $('rv-list').hidden = !n;
+  $('rv-go').disabled = !n;
+}
+// How many receipts a review's output says it renamed. It ends with code 0
+// when it renamed none, every name having gone stale or failed, so the
+// output is what tells.
+function rvRenamed(lines) {
+  return (lines || []).filter(t => /^\s*Renamed (->|to) /.test(t)).length;
+}
+// Words that ask to keep a name, never a new one. The box once read
+// "Keep this name", and typed in it renamed receipts "Keep This Name". The
+// same list as KEEP_WORDS in core renaming.py, which reads them again.
+const KEEP_WORDS = new Set(['keep', 'keep it', 'keep this', 'keep name', 'keep the name', 'keep this name',
+  'keep its name', 'keep same', 'keep the same', 'keep the same name', 'same',
+  'same name', 'the same', 'no change', 'unchanged', 'leave it', 'leave as is',
+  'leave blank', 'leave it blank', 'leave blank to keep this name']);
+function keepsName(text) {
+  return KEEP_WORDS.has(String(text || '').toLowerCase().replace(/[^a-z ]+/g, ' ').split(/\s+/).filter(Boolean).join(' '));
+}
+function rvAnswers() {
+  return [...$('rv-list').querySelectorAll('input[data-i]')].map(inp => {
+    const x = RV.receipts[+inp.dataset.i];
+    return {id: String(x.id || ''), number: String(x.number || ''), summary: inp.value.trim()};
+  }).filter(a => a.id && a.summary && !keepsName(a.summary));
+}
+function rvGo() {
+  if (!RV) return;
+  const answers = rvAnswers();
+  if (!answers.length) { $('rv-state').textContent = 'Type a new summary for at least one receipt first.'; return; }
+  $('rv-go').disabled = true;
+  $('rv-state').textContent = 'Renaming…';
+  const rv = RV;
+  const started = startRun(rv.row, 'review_names', {stay: true, sink: 'rv-log', review: answers, onDone: code => {
+    if (RV !== rv) return;
+    if (code !== '0') {
+      $('rv-state').textContent = 'That did not finish. The output below says why.';
+      $('rv-go').disabled = false;
+      return;
+    }
+    const n = rvRenamed(RUN.lines);
+    rvLoad(n ? 'Renamed ' + many(n, 'receipt') + '. The output below names each file. '
+      : 'Nothing was renamed. The output below says why. ');
+  }});
+  if (!started) { $('rv-state').textContent = 'Wait for the run going now to finish first.'; $('rv-go').disabled = false; }
+}
+// Enter in a box goes to the next one. In a form of method dialog it would
+// close the dialog, and everything typed with it.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || !e.target.closest || !e.target.closest('#rv-list')) return;
+  e.preventDefault();
+  const boxes = [...$('rv-list').querySelectorAll('input[data-i]')];
+  const next = boxes[boxes.indexOf(e.target) + 1];
+  (next || $('rv-go')).focus();
+});
 
 // -- the server's sign-in window ---------------------------------------------------
 function openDock(provider) {
@@ -1718,6 +1844,7 @@ const DO = {
   },
   'restore': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRestore(r); },
   'rename': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRename(r); },
+  'review': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openReview(r); },
   'support': el => { DLG_ROW = rowByKey(el.dataset.key); closeMenus(); if (DLG_ROW) $('dlg-support').showModal(); },
   'record': el => { DLG_ROW = rowByKey(el.dataset.key); closeMenus(); if (DLG_ROW) $('dlg-record').showModal(); },
   'person': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openPerson(r); },
@@ -1740,6 +1867,7 @@ const DO = {
   'rm-go': () => rmGo(),
   'rn-preview': () => rnRun(false),
   'rn-apply': () => rnRun(true),
+  'rv-go': () => rvGo(),
   'sp-go': () => { $('dlg-support').close(); startRun(DLG_ROW, 'diagnose'); },
   'rc-go': () => { $('dlg-record').close(); startRun(DLG_ROW, 'record'); },
   'dock-close': () => closeDock(),

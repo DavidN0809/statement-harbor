@@ -3,7 +3,7 @@
 ![Version](https://img.shields.io/github/v/tag/rheeloaded/paperpull?sort=semver&label=version&color=blue)
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
-[![Self-host with Docker](https://img.shields.io/badge/self--host-Docker%20image-2496ED?logo=docker&logoColor=white)](#paperpull-server-beta)
+[![Self-host with Docker](https://img.shields.io/badge/self--host-Docker%20image-2496ED?logo=docker&logoColor=white)](#paperpull-server)
 [![Sponsor on GitHub](https://img.shields.io/badge/sponsor-on%20GitHub-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/rheeloaded)
 [![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-support%20this%20project-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/rheeloaded)
 [![Website](https://img.shields.io/badge/website-paperpull.net-4c8dff)](https://paperpull.net)
@@ -22,7 +22,7 @@ open source, no account, no cloud. Made for archiving (into
 instead of clicking through each site by hand.
 
 **On your computer, or on a server at home.** The desktop app runs on
-Windows and macOS. **[PaperPull Server](#paperpull-server-beta)** is the
+Windows and macOS. **[PaperPull Server](#paperpull-server)** is the
 same app as one Docker image, for a NAS or home server beside
 Paperless-ngx. You use it from a browser on any computer in the house,
 sign in to each provider on a browser screen it shows you, and each run's
@@ -30,7 +30,7 @@ new documents can go straight into Paperless. Both are free.
 
 ![The PaperPull control panel's Accounts page on the sample archive, each provider with its status and one button. Every name and amount is invented.](docs/panel.png)
 
-**Watch it:** a [75-second demo](https://youtu.be/_wZToSSMRPU) on the real panel with made-up accounts. **Website:** [paperpull.net](https://paperpull.net), with the [getting-started guide](https://paperpull.net/guide.html), the [provider directory](https://paperpull.net/providers.html) and the [Paperless-ngx tutorial](https://paperpull.net/paperless.html). **Download:** the [latest release](https://github.com/rheeloaded/paperpull/releases/latest), Windows 10 or 11 and macOS on Apple Silicon, Linux from source. **Self-hosting** takes the Docker image `ghcr.io/rheeloaded/paperpull-server` and [three steps](#paperpull-server-beta).
+**Watch it:** a [75-second demo](https://youtu.be/_wZToSSMRPU) on the real panel with made-up accounts. **Website:** [paperpull.net](https://paperpull.net), with the [getting-started guide](https://paperpull.net/guide.html), the [provider directory](https://paperpull.net/providers.html) and the [Paperless-ngx tutorial](https://paperpull.net/paperless.html). **Download:** the [latest release](https://github.com/rheeloaded/paperpull/releases/latest), Windows 10 or 11 and macOS on Apple Silicon, Linux from source. **Self-hosting** takes the Docker image `ghcr.io/rheeloaded/paperpull-server` and [three steps](#paperpull-server).
 
 **It also turns those PDFs into spreadsheets.** Your receipts become one
 long table of every item you have ever bought, across every store and every
@@ -241,7 +241,7 @@ directly as `--config`, and the sign-in launcher takes the label too
 (`login.bat spouse` / `./login.command spouse`). `python tools/add_account.py
 spouse` does every app at once.
 
-## PaperPull Server (beta)
+## PaperPull Server
 
 PaperPull also runs on an always-on machine at home, a NAS or a home server
 with Docker, next to [Paperless-ngx](https://docs.paperless-ngx.com/), and
@@ -287,7 +287,7 @@ PaperPull.
 ## Quick start
 
 These steps are for the desktop app. The server's are
-[above](#paperpull-server-beta).
+[above](#paperpull-server).
 
 **Want to see it first?** The panel's welcome screen offers **Open the
 sample**, a folder of invented statements and receipts. The Accounts page
@@ -344,6 +344,8 @@ The commands are `setup`, `login`, `discover`, `pilot`, `all`, `resume`,
 Sign in, Get new documents, Try the newest few first and Only check what's
 there sit on each provider's page, Continue appears after a run that
 stopped, and the rest are under More, each with a line saying what it does.
+A receipt provider's More also has **Review names**, for the receipts it
+was unsure how to name.
 Which dates (one year, or a date range) becomes the same `--year`,
 `--start-date` and `--end-date` every app takes, and **Restore deleted
 files** adds `--redownload` to one run scoped to a year or to both ends of
@@ -557,8 +559,11 @@ flavors, and everything else is the same `paperpull` command on either:
 A second account is the same on both: `paperpull amex all --account spouse`.
 
 `review_names` is in each receipt app, the ones that name a purchase from its
-items, because it asks you for one name at a time and so cannot run in the
-panel. It is also the one double-click file in a folder the installed app
+items. It asks in a console for a better name for each receipt the app was
+unsure of, one at a time. The panel has the same review as **Review names**
+under a receipt provider's More, which lists those receipts and renames each
+one you type a better summary for, and that is how PaperPull Server offers
+it. The double-click file is also the one in a folder the installed app
 made, since the panel does the rest there, and in such a folder it runs on
 the app's own Python.
 
@@ -625,8 +630,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Self-hosted.** PaperPull Server, one Docker image published with
-  every release since 0.43.0 as `ghcr.io/rheeloaded/paperpull-server`,
-  in beta. See [PaperPull Server](#paperpull-server-beta).
+  every release since 0.43.0 as `ghcr.io/rheeloaded/paperpull-server`.
+  See [PaperPull Server](#paperpull-server).
 - ✅ **Packaged.** A Windows installer and a signed, notarized macOS app,
   both built by GitHub Actions from the tagged commit, with checksums. The
   Windows builds are code-signed, and the

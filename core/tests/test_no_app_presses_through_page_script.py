@@ -115,6 +115,12 @@ REVIEWED = {
         "Nothing a site drew is pressed.",
 }
 
+# A file of JavaScript is read whole, so one entry above holds every press
+# of its kind in the file, and a press added there would join the one
+# reviewed without a review of its own. Each such entry says how many
+# presses its reason covers.
+REVIEWED_IN_A_FILE = {("gui/static/app.js", "<script>", "click()"): 1}
+
 # Parts of a script that are not followed back, each a value put into a
 # script rather than a script, with the reason, keyed by the file, the
 # function the part is in and what the part is. Every script is followed
@@ -758,6 +764,54 @@ def test_every_reviewed_press_is_still_made(counted):
     gone = sorted(k for k in REVIEWED if k not in found)
     assert not gone, "REVIEWED names a press nothing makes any more, %s" % gone
     assert all(len(reason) > 80 for reason in REVIEWED.values())
+
+
+def presses_beyond_review(texts: dict) -> list:
+    """Each entry of a file read whole whose file holds another number of
+    its presses than REVIEWED_IN_A_FILE says it covers, as (entry, presses
+    made, their lines). `texts` is each file's text by its path."""
+    out = []
+    for key, count in sorted(REVIEWED_IN_A_FILE.items()):
+        rel, _where, kind = key
+        made = presses_in(texts[rel]).count(kind)
+        if made != count:
+            lines = [n for n, line in enumerate(texts[rel].splitlines(), 1)
+                     if kind in presses_in(line)]
+            out.append((key, made, lines))
+    return out
+
+
+def test_a_file_read_whole_holds_only_the_presses_reviewed_there():
+    whole = {k for k in REVIEWED if k[1] == "<script>"}
+    assert whole == set(REVIEWED_IN_A_FILE), (
+        "Each reviewed press of a file read whole says how many presses it covers in "
+        "REVIEWED_IN_A_FILE", sorted(whole ^ set(REVIEWED_IN_A_FILE)))
+    texts = {rel: (REPO / rel).read_text(encoding="utf-8") for rel, _w, _k in whole}
+    beyond = presses_beyond_review(texts)
+    assert not beyond, (
+        "%s. A file of JavaScript is read whole, so a press added to it joins the "
+        "one reviewed there without a review of its own. Review each press added, "
+        "say in that entry's REVIEWED reason why it is safe too, and set its count in "
+        "REVIEWED_IN_A_FILE to the presses reviewed" % ". ".join(
+            "%s holds %d presses of %s, at lines %s, where its entry covers %d"
+            % (key[0], made, key[2], lines, REVIEWED_IN_A_FILE[key])
+            for key, made, lines in beyond))
+
+
+def test_a_second_press_in_a_file_read_whole_is_not_taken_for_the_one_reviewed():
+    """Not a pin of nothing. A second click() in the panel's page script,
+    on a line of its own or beside the one reviewed, is found."""
+    rel = "gui/static/app.js"
+    text = (REPO / rel).read_text(encoding="utf-8")
+    key = (rel, "<script>", "click()")
+    assert presses_beyond_review({rel: text}) == []
+    found = presses_beyond_review({rel: text + "\ndocument.querySelector('#x').click();\n"})
+    assert [(k, made) for k, made, _lines in found] == [(key, 2)], found
+    assert len(found[0][2]) == 2, "both lines are named, %s" % found
+    beside = text.replace("a.click();", "a.click(); a.click();", 1)
+    assert beside != text
+    found = presses_beyond_review({rel: beside})
+    assert [(k, made) for k, made, _lines in found] == [(key, 2)], found
 
 
 def test_every_script_handed_to_a_page_is_read_to_the_end(counted):
