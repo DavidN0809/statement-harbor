@@ -50,9 +50,9 @@ reviews = _harness("test_every_app_reviews_a_name_once.py", "not_text_review_har
 
 # What a hand edit or a damaged file can leave where text belongs.
 DAMAGED = {"a number": 5, "a list": ["Invented"], "a mapping": {"k": "Invented"}}
-# A path and the names beside it are read through renaming, and
-# test_every_app_renames_past_a_damaged_record.py damages them there. The
-# held file's record keeps naming it here.
+# A path and the names beside it, which a held file's record keeps naming
+# it by here. Damaged on their own records like every other field, read
+# through renaming._text.
 NAMING = {"pdf_path", "pdf_filename", "invoices", "items", "summary"}
 # What a finished download writes in its record.
 SAVED = {"date": "2026-05-14", "downloaded_ok": True, "state": State.COMPLETED.value,
@@ -143,8 +143,7 @@ def damaged_records(fields: dict) -> dict:
     for base, rec in records(fields).items():
         for what, value in DAMAGED.items():
             for field in fields:
-                if field not in NAMING:
-                    out["Invented:%s %s %s" % (field, base, what)] = dict(rec, **{field: value})
+                out["Invented:%s %s %s" % (field, base, what)] = dict(rec, **{field: value})
     return out
 
 
