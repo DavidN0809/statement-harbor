@@ -28,6 +28,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 app_module = pytest.importorskip("app")
 uvicorn = pytest.importorskip("uvicorn")
+import server_mode  # noqa: E402
 
 # A stand-in app. It notes its arguments, then does what plan.json beside it
 # says, waiting for a file when started with the flag plan says to wait on,
@@ -206,6 +207,13 @@ def test_a_config_whose_folder_is_not_text_takes_no_row_down(root, bad):
     assert rows[("Bank Statements", "second")]["latest"] == []
     assert rows[("Bank Statements", "primary")]["state"] == "due"
     assert rows[("Shop Receipts", "primary")]["state"] == "not_started"
+    # Refused where the folder is worked out, never taken to be the
+    # install's own, which is the first person's, and the server hands
+    # nothing of that person's on to a plug-in.
+    with pytest.raises(ValueError):
+        server_mode.output_root(root / "Bank Statements", "second")
+    (root / "Bank Statements" / "new-this-run.txt").write_text("Statements/x.pdf\n", encoding="utf-8")
+    assert server_mode.new_files(root / "Bank Statements", "second", 0) == []
 
 
 def test_without_the_status_reader_no_account_is_called_not_started(root, monkeypatch):
@@ -432,3 +440,55 @@ def test_a_second_persons_failure_file_is_offered_for_them(root):
     with pytest.raises(app_module.HTTPException) as e:
         app_module.api_failure_latest("Bank Statements", "nobody")
     assert e.value.status_code == 404
+
+
+def test_a_broken_second_config_never_reaches_the_first_persons_diagnostics(root):
+    """Guessing the install's folder for a config that names none would
+    offer the first person's failure file to the second, and end the first
+    person's recording from the second's Stop."""
+    (root / "Bank Statements" / "config.second.json").write_text(
+        json.dumps({"output_dir": 7}), encoding="utf-8")
+    first = root / "Bank Statements" / "Diagnostics"
+    first.mkdir()
+    (first / "failure-pilot-20261012-100000.json").write_text("{}", encoding="utf-8")
+    assert app_module.api_failure_latest("Bank Statements", "second") == {"found": False}
+    assert app_module.api_failure_latest("Bank Statements")["found"] is True
+    with pytest.raises(app_module.HTTPException) as e:
+        asyncio.run(app_module.api_record_stop(_Req({"app": "Bank Statements", "account": "second"})))
+    assert e.value.status_code == 404
+    assert not (first / ".stop-recording").exists()
+
+
+def test_a_run_that_ended_by_itself_before_its_page_closed_keeps_its_code(base, root, monkeypatch):
+    """The page can go while the panel is still finishing a run that has
+    already ended, during the Paperless copy on the server say. That run
+    finished, and its row must not say it stopped partway. Here the panel
+    is held just after the app ended, and the page goes then."""
+    import anyio
+    bank = root / "Bank Statements"
+    _plan(bank, saved=["Statements/2026-09-30 Bank Statement.pdf"])
+    real = app_module.to_thread
+
+    class Held:
+        @staticmethod
+        async def run_sync(fn, *args, **kwargs):
+            out = await real.run_sync(fn, *args, **kwargs)
+            if getattr(fn, "__name__", "") == "wait":
+                await anyio.sleep(3)
+            return out
+    monkeypatch.setattr(app_module, "to_thread", Held)
+    conn = http.client.HTTPConnection("127.0.0.1", base, timeout=30)
+    conn.request("POST", "/api/run", body=json.dumps({"app": "Bank Statements", "action": "all"}),
+                 headers={"Content-Type": "application/json"})
+    resp = conn.getresponse()
+    while b"Checking the connection" not in resp.fp.readline():
+        pass
+    time.sleep(0.5)
+    conn.sock.close()
+    conn.close()
+    assert _settled(30)
+    log = app_module._read_run_log(bank)
+    assert len(log) == 1
+    assert log[0]["exit_code"] == 0 and log[0]["closed"] is False
+    assert log[0]["result"]["new_files"] == 1
+    assert _rows()[("Bank Statements", "primary")]["last_outcome"] == ""

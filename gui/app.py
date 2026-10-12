@@ -2345,20 +2345,10 @@ async def api_history_import(request: Request):
 def _diagnostics_of(meta: dict, account: str = "primary") -> Path:
     """An account's Diagnostics folder, wherever its config sends output. A
     second person's config sends theirs to their own folder, which is where
-    their recording waits and their failure file is written."""
-    app_dir = Path(meta["dir"])
-    config = "config.json" if account == "primary" else "config.%s.json" % account
-    out = ""
-    try:
-        cfg = json.loads((app_dir / config).read_text(encoding="utf-8-sig"))
-        value = cfg.get("output_dir") if isinstance(cfg, dict) else None
-        out = value if isinstance(value, str) else ""
-    except (OSError, ValueError):
-        pass
-    base = Path(out).expanduser() if out else app_dir
-    if not base.is_absolute():
-        base = (app_dir / base)
-    return base / "Diagnostics"
+    their recording waits and their failure file is written. Found the way
+    a run's own folder is found, so a config that names no usable folder
+    raises ValueError rather than lead to the first person's folder."""
+    return _account_root(meta, account) / "Diagnostics"
 
 
 def _account_named(meta: dict, account) -> str:
@@ -2383,7 +2373,7 @@ def _latest_failure(meta: dict, account: str = "primary"):
     import time
     try:
         found = sorted(_diagnostics_of(meta, account).glob("failure-*.json"))
-    except OSError:
+    except (OSError, ValueError):
         return None
     for path in reversed(found):
         try:
@@ -2458,7 +2448,10 @@ async def api_record_stop(request: Request):
     apps = discover_apps()
     if name not in apps:
         raise HTTPException(404, "unknown app")
-    target = _diagnostics_of(apps[name], _account_named(apps[name], (body or {}).get("account")))
+    try:
+        target = _diagnostics_of(apps[name], _account_named(apps[name], (body or {}).get("account")))
+    except ValueError:
+        raise HTTPException(404, "that account's config names no folder PaperPull can read")
     try:
         target.mkdir(parents=True, exist_ok=True)
         (target / ".stop-recording").write_text("stop\n", encoding="utf-8")
@@ -2768,12 +2761,14 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         # and one output folder. Stopping is safe: downloaded_ok is only set
         # after a document is saved, so a re-run resumes and re-fetches nothing.
         result = None
+        read_all = False
         try:
             while True:
                 # readline blocks, so it goes to a worker thread rather than
                 # stalling the event loop for every other request.
                 line = await to_thread.run_sync(proc.stdout.readline)
                 if not line:
+                    read_all = True
                     break
                 parsed = run_result.parse(line)
                 if parsed is not None:
@@ -2793,17 +2788,21 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             # The files this run saved, by name, for the page to list under
             # its one-line outcome. The log below keeps them for the home page.
             yield f"event: saved\ndata: {json.dumps(_saved_this_run(root, started) if root else [])}\n\n"
-            await to_thread.run_sync(note, code, result)
+            # Marked first. The note's thread finishes even when the page
+            # goes meanwhile, so marking it after would note the run twice.
             noted = True
+            await to_thread.run_sync(note, code, result)
             yield "data: \n\n"
             yield f"event: done\ndata: {code}\n\n"
         finally:
             if not noted:
                 # The page went away before the run was noted. A run that had
                 # already ended by itself, say while the Paperless copy ran,
-                # is noted with its own code. One still going is stopped by
-                # this, and its account's row says it stopped partway.
-                ended = proc.poll()
+                # is noted with its own code, but only once its output was
+                # read to the end, or its counts were, since a code of 0 with
+                # the counts line still unread could hide a run that stopped.
+                # Any other is stopped by this, and its row says so.
+                ended = proc.poll() if (read_all or result is not None) else None
                 if ended is not None:
                     note(ended, result)
                 else:
