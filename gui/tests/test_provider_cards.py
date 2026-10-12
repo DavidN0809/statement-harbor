@@ -46,7 +46,7 @@ def test_every_line_is_written_for_the_person_choosing():
             assert not hits, (slug, key, hits)
             assert len(text) <= 90, (slug, key, len(text))
             # The house punctuation, and nothing a person has to decode.
-            assert not re.search(r"[;:–—`*\[\]|]", text), (slug, key, text)
+            assert not re.search(r"[;:\u2013\u2014`*\[\]|]", text), (slug, key, text)
 
 
 def test_every_card_is_in_a_group_the_page_can_name():
