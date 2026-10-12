@@ -453,15 +453,18 @@ def skip_fields_of(provider: str) -> tuple:
     return SKIP_FIELDS + PROVIDER_SKIP_FIELDS.get(provider, ())
 
 
-def _skip_fields(rec: dict, provider: str = "") -> dict:
-    """The fields a skip decision reads, the provider's own among them, and
-    those of the provider's kind of record this one is. For a record asked
-    for again that is its last note too, one of the fixed words an older
-    version wrote, which says nothing of the purchase."""
-    out = {f: rec[f] for f in skip_fields_of(provider) if f in rec}
+def _own_fields(rec: dict, provider: str) -> tuple:
+    """The fields one provider's own checks read off this record, besides
+    those every app's skip decision reads."""
     which, fields = PROVIDER_KIND_FIELDS.get(provider, (None, ()))
-    if fields and which(rec):
-        out.update((f, rec[f]) for f in fields if f in rec)
+    return PROVIDER_SKIP_FIELDS.get(provider, ()) + (fields if fields and which(rec) else ())
+
+
+def _skip_fields(rec: dict, provider: str = "") -> dict:
+    """The fields a skip decision reads, the provider's own among them. For
+    a record asked for again that is its last note too, one of the fixed
+    words an older version wrote, which says nothing of the purchase."""
+    out = {f: rec[f] for f in SKIP_FIELDS + _own_fields(rec, provider) if f in rec}
     if asked_again(rec):
         out["notes"] = str(rec.get("notes") or "").rsplit("; ", 1)[-1].strip()
     return out
@@ -818,8 +821,10 @@ def _moved(rec: dict, old_bases, new_base: Path) -> dict:
     return rec
 
 
-def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None):
-    """Fold incoming records into target. Never deletes, never downgrades.
+def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None,
+           provider: str = ""):
+    """Fold incoming records into target, `provider`'s, whose own checks
+    read the fields _own_fields names. Never deletes, never downgrades.
     `home` is the folder the target's app runs in, which a relative path in
     its records is read against, new_base when not given.
 
@@ -854,6 +859,14 @@ def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None):
             if carried:
                 cur.update(carried)
                 changed = True
+        # It lacks what its provider's own checks read too, the digest of a
+        # saved statement or the address of a saved form, which a newer
+        # file carries. Each field it lacks is filled in, and one it holds
+        # stays, since a run here wrote it or emptied it on purpose.
+        lacking = {f: inc[f] for f in _own_fields(inc, provider) if f in inc and f not in cur}
+        if lacking:
+            cur.update(lacking)
+            changed = True
         if _takes_the_state(cur, inc, Path(home or new_base)):
             cur["state"] = inc["state"]
             # The state comes with what it was written with. A receipt set
@@ -876,7 +889,8 @@ def merged(place: dict, entry: dict, manifest: dict):
     a plan and the import that follows count the same."""
     out = copy.deepcopy(place["records"])
     added, updated = _merge(out, entry["incoming"] or {}, bases_of(entry, manifest),
-                            Path(place["path"]), home_of(place))
+                            Path(place["path"]), home_of(place),
+                            provider=place.get("provider", ""))
     return out, added, updated
 
 

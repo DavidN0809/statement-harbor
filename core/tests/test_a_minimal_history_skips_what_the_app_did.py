@@ -1098,3 +1098,50 @@ def test_an_optum_statement_carries_none_of_a_forms_fields():
     fields = set(migrate.PROVIDER_KIND_FIELDS["Optum Bank"][1])
     assert fields <= set(migrate._skip_fields(form, "Optum Bank"))
     assert not fields & set(migrate._skip_fields(statement, "Optum Bank"))
+
+
+def merge_into(cur: dict, inc: dict, provider: str):
+    """The record an import leaves of `cur` with `inc` from a file, and how
+    many records it counts as changed."""
+    target = {"k": dict(cur)}
+    _added, updated = migrate._merge(target, {"k": inc}, [], Path("unused"),
+                                     provider=provider)
+    return target["k"], updated
+
+
+MOVED = {"state": State.COMPLETED.value, "downloaded_ok": True, "pdf_path": "",
+         "date": "2026-09-12"}
+
+
+def test_a_newer_file_fills_only_what_a_moved_record_lacks():
+    """Each field its provider's own checks read that a record lacks, and
+    none it holds, so what a run here wrote stays. A field nobody of that
+    provider reads is not filled, and the import counts the record as
+    changed, so the panel writes it."""
+    inc = dict(HISTORY, state=State.COMPLETED.value, downloaded_ok=True, date="2031-01-31")
+    got, updated = merge_into(MOVED, inc, "American Family")
+    assert (got["pdf_sha256"], got["account"]) == (HISTORY["pdf_sha256"], HISTORY["account"])
+    assert got["date"] == "2026-09-12", "a field the record holds is never overwritten"
+    assert "title" not in got and updated == 1
+    got, updated = merge_into(MOVED, inc, "Chase")
+    assert "pdf_sha256" not in got and updated == 0
+
+
+def test_a_field_a_run_emptied_is_not_filled_again():
+    """AT&T empties a wrong-year copy's size as it clears the copy, and a
+    file made before that still holds the size."""
+    cur = dict(MOVED, category="Statement", account="", pdf_size="", pdf_pages="")
+    got, _ = merge_into(cur, dict(cur, pdf_size="240546", pdf_pages=4), "AT&T")
+    assert (got["pdf_size"], got["pdf_pages"]) == ("", "")
+
+
+def test_an_optum_statement_takes_none_of_a_forms_fields_from_a_whole_file():
+    form = dict(HISTORY, href="/account/products/12345678/tax_documents/777.pdf",
+                account="12345678", category="Tax Document", document_id="")
+    statement = dict(form, href="/account/products/12345678/statements/900001.pdf",
+                     category="Statement")
+    got, _ = merge_into(MOVED, statement, "Optum Bank")
+    assert not {"href", "title", "document_id", "account"} & set(got), got
+    got, _ = merge_into(MOVED, form, "Optum Bank")
+    assert {f: got[f] for f in ("href", "account", "title", "document_id")} == \
+        {f: form[f] for f in ("href", "account", "title", "document_id")}

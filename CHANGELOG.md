@@ -48,6 +48,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   for an install that had not opened AT&T since 0.34.2 when its history
   moved. The export now carries those five for AT&T. Its key holds the
   date, kind and account, which is only Wireless or Internet.
+- **A history file made now, imported over one an older `--minimal` file
+  moved, gives each record what its provider's own checks read.** An
+  import kept a record it already held as it was, so a statement or form
+  moved with an older `--minimal` never gained the digest, address, size
+  or other fields American Family, AT&T, Optum Bank and Robinhood look for
+  in their saved records, whatever file came after. A newer file, minimal
+  or whole, now fills in each of those a record lacks, and never one it
+  holds.
 
 ## [0.47.0] - 2026-10-12
 
