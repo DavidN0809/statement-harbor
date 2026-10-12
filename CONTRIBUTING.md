@@ -417,7 +417,11 @@ cannot be rushed.
    must be made up, no real names, numbers or dates from your own
    statements.
 9. **Add a row** to [PROVIDERS.md](PROVIDERS.md) and to the table in
-   [README.md](README.md).
+   [README.md](README.md), and a line to
+   [gui/providers.json](gui/providers.json), which is what the panel's
+   welcome list shows. Keep that line short and written for someone
+   choosing a provider, say what it downloads and not who built or tested
+   it, and add `"tested": false` while it has not run on a real account.
 10. **Send it** using the loop above. The pull request template has a
     section for a new provider. Fill in the reviewer notes, since you know
     things about this site nobody else does.

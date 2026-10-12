@@ -623,6 +623,28 @@ def test_both_editions_say_what_discover_is_for(base, on_server, monkeypatch):
         assert steps.index("2. <b>Discover") < steps.index("3. <b>Pilot") < steps.index("4. <b>Run All")
 
 
+def _footer(page):
+    return " ".join(page[page.index("<footer>"):page.index("</footer>")].split())
+
+
+def test_each_edition_says_only_what_is_true_of_it_at_the_bottom(base, on_server, monkeypatch):
+    """The desktop footer says the panel runs locally and offers the paid
+    Store edition. The server is free and runs on a box of the person's
+    own, so it says that and keeps only the donation link."""
+    server = _footer(ask(base + "/", session=signed_in(base))[2])
+    monkeypatch.delenv("PAPERPULL_SERVER")
+    desktop = _footer(ask(base + "/")[2])
+    assert "PaperPull Server v%s (beta)" % app_module.VERSION in server
+    assert "runs on your own server" in server and "ko-fi.com/rheeloaded" in server
+    assert "runs locally" not in server and "Store edition" not in server
+    assert "paperpull#support" not in server
+    assert "PaperPull v%s" % app_module.VERSION in desktop and "PaperPull Server" not in desktop
+    assert "runs locally" in desktop and "buy the Store edition</a>" in desktop
+    assert "ko-fi.com/rheeloaded" in desktop
+    for page in (server, desktop):
+        assert "__FOOTER__" not in page and "__VERSION__" not in page
+
+
 def test_the_shared_folder_is_the_only_one_offered(base, on_server, tmp_path):
     session = signed_in(base)
     status, _, page = ask(base + "/api/providers", session=session)

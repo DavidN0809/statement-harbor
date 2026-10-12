@@ -1211,19 +1211,35 @@ def _launcher_left_out(item: Path) -> bool:
             and item.name.lower() not in PACKAGED_LAUNCHERS)
 
 
+PROVIDER_CARDS = HERE / "providers.json"
+
+
 def _provider_notes() -> dict:
-    """What each app downloads, from the table in PROVIDERS.md, keyed by slug.
-    Best effort. A missing file or a changed table just means no note."""
-    notes = {}
+    """What each app downloads, in a line written for the person choosing
+    providers, keyed by slug, from providers.json beside this file.
+
+    The welcome list used to show the "What it downloads" column of
+    PROVIDERS.md, which is written for GitHub and carries who tested an app,
+    issue numbers and how it reads the site, so a new user picking their
+    bank read "Confirmed by @watling777 ... (#26)". providers.json holds the
+    short line, the group the provider sits in and whether it has been run
+    on a real account yet. Best effort. A missing or broken file just means
+    no note, never another document's text."""
     try:
-        text = (HERE.parent / "PROVIDERS.md").read_text(encoding="utf-8")
-    except OSError:
-        return notes
-    for line in text.splitlines():
-        m = re.match(r"\|\s*\[`([a-z0-9_]+)`\][^|]*\|([^|]*)\|([^|]*)\|([^|]*)\|", line)
-        if m:
-            notes[m.group(1)] = {"documents": m.group(3).strip(),
-                                 "category": m.group(4).strip()}
+        data = json.loads(PROVIDER_CARDS.read_text(encoding="utf-8"))
+        groups, cards = data["groups"], data["providers"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+    notes = {}
+    for slug, card in cards.items() if isinstance(cards, dict) else ():
+        if not isinstance(card, dict):
+            continue
+        group = card.get("group", "")
+        notes[slug] = {"documents": card.get("gets", ""),
+                       "group": group,
+                       "category": groups.get(group, "") if isinstance(groups, dict) else "",
+                       "tested": card.get("tested", True) is not False,
+                       "note": card.get("note", "")}
     return notes
 
 
@@ -1256,7 +1272,10 @@ def list_providers() -> list:
         out.append({"slug": d.name, "provider": provider, "kind": kind,
                     "folder": install_folder_name(provider, kind),
                     "documents": n.get("documents", ""),
-                    "category": n.get("category", "")})
+                    "category": n.get("category", ""),
+                    "group": n.get("group", ""),
+                    "tested": n.get("tested", True),
+                    "note": n.get("note", "")})
     return out
 
 
@@ -2663,11 +2682,29 @@ async def api_naming_save(request: Request):
             "changed": changed}
 
 
+# The line along the bottom of the page. The desktop one says the panel runs
+# on this computer and offers the paid Store edition. Neither is true of
+# PaperPull Server, which is free and runs on a box of the person's own, so
+# the server says that instead and keeps only the donation link.
+FOOTER_DESKTOP = (
+    '<span>PaperPull v__VERSION__ &middot; read-only, runs locally</span>\n'
+    '  <span>Free, and it costs money to make. Show your appreciation: '
+    '<a href="https://ko-fi.com/rheeloaded" target="_blank" rel="noopener">donate on Ko-fi</a> or '
+    '<a href="https://github.com/rheeloaded/paperpull#support" target="_blank" rel="noopener">'
+    'buy the Store edition</a></span>')
+FOOTER_SERVER = (
+    '<span>PaperPull Server v__VERSION__ (beta) &middot; read-only, runs on your own server</span>\n'
+    '  <span>Free, and it costs money to make. If it saves you time, you can '
+    '<a href="https://ko-fi.com/rheeloaded" target="_blank" rel="noopener">donate on Ko-fi</a>.</span>')
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     server = server_mode.enabled()
     bar = server_mode.server_bar() if server else ""
-    return (HTML.replace("__VERSION__", VERSION).replace("__SERVER_BAR__", bar)
+    footer = FOOTER_SERVER if server else FOOTER_DESKTOP
+    return (HTML.replace("__FOOTER__", footer)
+            .replace("__VERSION__", VERSION).replace("__SERVER_BAR__", bar)
             .replace("__SERVER__", "true" if server else "false"))
 
 
@@ -3047,8 +3084,7 @@ HTML = r"""<!doctype html>
   </div>
 </main>
 <footer>
-  <span>PaperPull v__VERSION__ &middot; read-only, runs locally</span>
-  <span>Free, and it costs money to make. Show your appreciation: <a href="https://ko-fi.com/rheeloaded" target="_blank" rel="noopener">donate on Ko-fi</a> or <a href="https://github.com/rheeloaded/paperpull#support" target="_blank" rel="noopener">buy the Store edition</a></span>
+  __FOOTER__
 </footer>
 <script>
 // PaperPull Server, where the panel is in a browser on another computer.
@@ -3116,6 +3152,8 @@ async function loadProviders(onlyMissing) {
     (p.installed ? ' disabled checked' : '') + '>' +
     '<span><b>' + esc(p.provider) + '</b>' +
     (p.documents ? '<span class="hint">' + esc(p.documents) + '</span>' : '') +
+    (p.tested === false ? '<span class="hint warn">Not run on a real account yet</span>' : '') +
+    (p.note ? '<span class="hint">' + esc(p.note) + '</span>' : '') +
     (p.installed ? '<span class="hint">already set up</span>' : '') +
     '</span></label>').join('');
 }

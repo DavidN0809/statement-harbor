@@ -7,6 +7,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Changed
+- **The welcome list says what each provider downloads in one plain line.**
+  It showed the provider table from PROVIDERS.md, which is written for
+  GitHub, so someone choosing their bank read who tested it, issue numbers
+  and how it reads the site. Each provider now has a short line of its own
+  in `gui/providers.json`, a provider not yet run on a real account says
+  so, and a few carry a short note, such as Discover cards moving to
+  Capital One.
+
+### Fixed
+- **PaperPull Server's footer no longer says it runs locally or offers the
+  Store edition.** It names PaperPull Server and its version, says it runs
+  on your own server, and keeps the Ko-fi link.
+
 ## [0.47.0] - 2026-10-12
 
 Your providers and download history can move to another computer or to
