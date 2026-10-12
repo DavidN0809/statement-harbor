@@ -1,0 +1,115 @@
+  :root { color-scheme: light dark; --bg:#0f1115; --panel:#171a21; --fg:#e6e6e6;
+          --muted:#98a0ad; --accent:#4c8dff; --line:#262b36; --ok:#3ecf8e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif;
+         background:var(--bg); color:var(--fg); display:flex; flex-direction:column; height:100vh; }
+  header { padding:18px 22px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:18px; }
+  header h1 .tag { color:var(--muted); font-weight:400; }
+  header h1 .ver { color:var(--accent); font-weight:400; font-size:13px; vertical-align:middle; }
+  header .serverbar { margin:12px 0 0; font-size:13px; color:var(--muted);
+                      display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  header .serverbar a { color:var(--accent); text-decoration:none; }
+  header .serverbar a.screenbtn { display:inline-flex; align-items:center; gap:8px;
+                                  background:var(--accent); color:#fff; padding:9px 18px;
+                                  border-radius:8px; font-size:15px; font-weight:600; }
+  header .serverbar a.screenbtn:hover { filter:brightness(1.12); }
+  header .serverbar form { display:inline; }
+  header .serverbar button { background:none; border:0; padding:0; color:var(--accent);
+                             font:inherit; cursor:pointer; }
+  header p { margin:4px 0 0; color:var(--muted); font-size:13px; }
+  main { display:grid; grid-template-columns: 320px 1fr; grid-template-rows: minmax(0, 1fr); gap:0; flex:1; min-height:0; }
+  footer { padding:8px 22px; border-top:1px solid var(--line); font-size:12px;
+           color:var(--muted); display:flex; justify-content:space-between; align-items:center; }
+  footer a { color:var(--accent); text-decoration:none; }
+  footer a:hover { text-decoration:underline; }
+  .setup { flex:1; overflow:auto; padding:32px 22px; }
+  .setup > * { max-width:600px; margin-left:auto; margin-right:auto; }
+  .setup h2 { font-size:22px; margin:0 0 8px; }
+  .setup p.lead { color:var(--muted); margin:0 0 22px; line-height:1.5; }
+  .setup label { text-transform:none; letter-spacing:0; font-size:14px;
+                 color:var(--fg); margin:16px 0 6px; }
+  .stwrap button.nmchip { display:inline-flex; flex-direction:column; align-items:flex-start;
+                          line-height:1.25; padding:5px 10px; text-align:left; }
+  .nmchip small { color:var(--muted); font-size:11px; }
+  .nmchip.nmnone { opacity:.5; }
+  #panenm label { text-transform:none; letter-spacing:0; font-size:14px; color:var(--fg); }
+  #nmpattern { width:100%; padding:8px 10px; background:var(--panel); color:var(--fg);
+               border:1px solid var(--line); border-radius:6px; font-size:14px;
+               font-family:ui-monospace,Consolas,monospace; }
+  .setup input[type=text] { width:100%; font:inherit; padding:8px 10px;
+                            background:var(--panel); color:var(--fg);
+                            border:1px solid var(--line); border-radius:6px; }
+  .setup .providers { max-height:300px; overflow:auto; border:1px solid var(--line);
+                      border-radius:6px; padding:2px 10px; }
+  .setup .providers label { display:flex; gap:10px; align-items:flex-start;
+                            margin:0; padding:8px 2px; border-bottom:1px solid var(--line);
+                            font-size:14px; cursor:pointer; }
+  .setup .providers label:last-child { border-bottom:0; }
+  .setup .providers input { margin-top:3px; flex:none; }
+  .setup .providers .hint { display:block; font-size:12px; margin:1px 0 0; }
+  .setup button { font:inherit; padding:8px 18px; }
+  .setup button.primary { grid-column:auto; }
+  .controls { padding:20px 22px; border-right:1px solid var(--line); overflow:auto; }
+  .tabs { display:flex; gap:2px; padding:0 22px; border-bottom:1px solid var(--line); }
+  .tabs button { background:none; border:0; border-bottom:2px solid transparent;
+                 color:var(--muted); padding:10px 14px; font:inherit; cursor:pointer; }
+  .tabs button.on { color:var(--fg); border-bottom-color:var(--accent); }
+  .stwrap { flex:1; overflow:auto; padding:16px 22px; }
+  .stwrap button { background:var(--panel); color:var(--fg); border:1px solid var(--line);
+                   border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+  table.st { border-collapse:collapse; width:100%; font-size:13px; }
+  table.st th { text-align:left; color:var(--muted); font-weight:500;
+                border-bottom:1px solid var(--line); padding:6px 10px 6px 0; }
+  table.st td { padding:6px 10px 6px 0; border-bottom:1px solid var(--line); }
+  /* Headers align with their columns. The .num rule used to reach only the
+     cells, so "Docs" sat at the left of a column whose numbers sat at the
+     right, a screen-width apart on a wide window. Every column except
+     Provider shrinks to its content, so labels and values stay together. */
+  table.st th.num, table.st td.num { text-align:right; }
+  table.st th:not(:first-child), table.st td:not(:first-child) {
+    width:1%; white-space:nowrap; padding-left:18px; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; }
+  .pill.overdue { background:#4a1d1d; color:#ff9a9a; }
+  .pill.due { background:#4a3a1d; color:#ffd08a; }
+  .pill.current { background:#1d4a35; color:var(--ok); }
+  .pill.other { background:var(--line); color:var(--muted); }
+  .gapbox { margin-top:18px; border-left:3px solid var(--accent); padding:2px 0 2px 12px; }
+  .gapbox h3 { margin:0 0 4px; font-size:14px; }
+  .gapbox p { color:var(--muted); font-size:13px; margin:2px 0; }
+  label { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.04em;
+          color:var(--muted); margin:16px 0 6px; }
+  select { width:100%; padding:9px 10px; background:var(--panel); color:var(--fg);
+           border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  .scope { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .scope input[type=date] { width:100%; padding:8px 10px; background:var(--panel); color:var(--fg);
+           border:1px solid var(--line); border-radius:8px; font-size:13px; box-sizing:border-box; }
+  .scope input[type=date]:disabled { opacity:.45; }
+  .scope .sub { font-size:11px; color:var(--muted); text-transform:none; letter-spacing:0; margin:6px 0 4px; }
+  label.again { display:flex; gap:8px; align-items:flex-start; text-transform:none; letter-spacing:0;
+                font-size:13px; color:var(--fg); margin:12px 0 0; cursor:pointer; }
+  label.again input { margin:3px 0 0; flex:none; }
+  .actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:20px; }
+  .actions.more { margin-top:8px; }
+  .morelink { font-size:12px; color:var(--muted); margin-top:10px; }
+  .morelink a { color:var(--accent); text-decoration:none; }
+  .morehint { font-size:12px; color:var(--muted); margin:6px 0 0; }
+  button { padding:10px; border:1px solid var(--line); border-radius:8px; cursor:pointer;
+           background:var(--panel); color:var(--fg); font-size:14px; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; grid-column:1/3; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .hint { font-size:12px; color:var(--muted); margin-top:16px; }
+  .samplebar { display:none; align-items:center; gap:12px; flex-wrap:wrap;
+    padding:8px 20px; font-size:13px; background:#2a2411; color:#ffcf6b;
+    border-bottom:1px solid #4a3f1c; }
+  .samplebar b { color:#ffe1a3; }
+  .samplebar button { font:inherit; font-size:12px; padding:3px 12px; }
+  .warn { color:#ffcf6b; }
+  .console { background:#0b0d11; margin:0; padding:16px 20px; overflow:auto;
+             font:13px/1.55 ui-monospace,Consolas,monospace; white-space:pre-wrap; }
+  .status { padding:8px 20px; border-bottom:1px solid var(--line); font-size:13px; color:var(--muted); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--muted); margin-right:8px; }
+  .dot.run { background:var(--accent); animation:pulse 1s infinite; }
+  .dot.warn { background:#e6a23c; } .dot.ok { background:var(--ok); } .dot.err { background:#ff5c5c; }
+  @keyframes pulse { 50% { opacity:.3; } }

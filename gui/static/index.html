@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PaperPull</title>
+<link rel="icon" href="/favicon.ico">
+<style>
+__CSS__</style>
+</head>
+<body>
+<header>
+  <h1>PaperPull <span class="ver">v__VERSION__</span><span class="tag"> &middot; Receipt &amp; Statement Downloader</span></h1>
+  <p id="root">control panel</p>
+  __SERVER_BAR__
+</header>
+<div id="samplebar" class="samplebar">
+  <span><b>Sample archive.</b> Every document here is invented. Nothing signs
+  in and nothing downloads, and your own archive is untouched.</span>
+  <button onclick="leaveSample()">Leave the sample</button>
+</div>
+<section id="setup" class="setup" style="display:none">
+  <div id="newuser">
+    <h2>Welcome to PaperPull</h2>
+    <p class="lead" id="newlead">Two steps. Choose where your downloads will live, then tick
+    the providers you have accounts with. A folder is set up for each one, and
+    nothing is downloaded until you ask.</p>
+    <label id="newrootlabel">Folder for your downloads</label>
+    <input id="newroot" type="text">
+    <p class="hint" id="serverroot" style="display:none; margin:8px 0 0; line-height:1.5">
+      <b>/data</b> is the container's name for its data folder. On your server
+      it is the folder named <b>data</b> inside the folder that holds
+      compose.yaml, unless your compose.yaml points it somewhere else. Each
+      provider you tick gets a folder of its own in there, and its documents
+      go in that folder.
+    </p>
+    <label>Providers you have accounts with</label>
+    <div id="providers" class="providers"></div>
+    <div style="margin-top:14px; display:flex; gap:10px; align-items:center;">
+      <button class="primary" onclick="createInstalls()">Set up</button>
+      <span class="hint" style="margin:0" id="newmsg"></span>
+    </div>
+  </div>
+  <p class="hint" style="margin-top:26px" id="movelink">
+    <a href="#" onclick="toggleMove(); return false;" style="color:var(--accent)">Moving from another computer? Bring its providers and history</a>
+  </p>
+  <div id="setupmove" style="display:none"></div>
+  <p class="hint" style="margin-top:26px">
+    <a href="#" onclick="openSample(); return false;" style="color:var(--accent)">Not ready to sign in to anything? See a sample archive</a><br>
+    Invented statements and receipts, so you can try the Status tab and both
+    spreadsheets before you point this at a real account. Nothing is
+    downloaded and nothing of yours is touched.
+  </p>
+  <p class="hint" style="margin-top:18px" id="existinglink">
+    <a href="#" onclick="toggleExisting(); return false;" style="color:var(--accent)">Already have PaperPull downloaders from before?</a>
+  </p>
+  <div id="existing" style="display:none">
+    <p class="hint" style="margin-top:6px">
+      Paste the full path of the folder that holds them, the one with
+      <i>Chase Statements</i>, <i>Amazon Receipts</i> and so on inside it.
+      Nothing is moved or copied. This panel works on what is already there,
+      and your existing way of running them keeps working too.
+    </p>
+    <input id="rootinput" type="text" placeholder="C:\Users\you\Documents\Receipt and Statement Downloader">
+    <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
+      <button onclick="saveRoot()">Use this folder</button>
+      <span class="hint" style="margin:0" id="rootmsg"></span>
+    </div>
+  </div>
+</section>
+<main>
+  <div class="controls">
+    <label for="app">App <a href="#" id="addlink" onclick="addProvider(); return false;" style="color:var(--accent); font-weight:400; font-size:12px; margin-left:8px;">add a provider</a> <a href="#" id="removelink" onclick="removeProvider(); return false;" style="color:var(--muted); font-weight:400; font-size:12px; margin-left:8px;">remove</a></label>
+    <select id="app"></select>
+    <label for="account">Account <a href="#" id="addacct" onclick="addAccount(); return false;" style="color:var(--accent); font-weight:400; font-size:12px; margin-left:8px;">add a person</a></label>
+    <select id="account"></select>
+    <label for="year">Scope</label>
+    <select id="year" onchange="onScope()"></select>
+    <div class="scope">
+      <div><div class="sub">From</div><input id="start" type="date" onchange="onScope()"></div>
+      <div><div class="sub">To</div><input id="end" type="date" onchange="onScope()"></div>
+    </div>
+    <p class="hint" id="scopehint" style="margin-top:8px"></p>
+    <label class="again" id="againrow"><input type="checkbox" id="again" autocomplete="off"
+           onchange="onAgain()"> Download again what this app already downloaded</label>
+    <p class="hint" id="againhint" style="display:none; margin-top:6px">For the next Pilot or
+       Run All, with a year, or both a From and a To date, chosen above. Each document in range
+       whose file is gone is fetched again. A file you still have is never overwritten, though
+       the app may save a second copy beside it. The box clears once that run starts.</p>
+    <div class="actions" id="actions"></div>
+    <button id="stoprec" class="primary" style="display:none;margin-top:8px"
+            onclick="stopRecording()">Stop recording</button>
+    <p class="morelink"><a href="#" id="morelink" onclick="toggleMore(); return false;">more</a></p>
+    <div id="morebox" style="display:none">
+      <div class="actions more" id="moreactions"></div>
+      <p class="morehint"><b>Verify</b> re-checks every saved PDF. <b>Diagnose</b> reads the
+         provider's page and writes two files to its Diagnostics folder, downloading nothing.
+         The one whose name starts with <b>survey-</b> holds counts and states and no text
+         from your account, and that is the one to attach to an issue. The detailed
+         file beside it keeps a word only when it is on PaperPull's fixed list and
+         writes any other as its shape, so it can go with it. A screenshot, where
+         Diagnose takes one, shows the page as it is and stays on this machine.</p>
+      <p class="morehint"><b>Rename preview</b> shows what this app would call the files you
+         already have, and changes nothing. <b>Apply renames</b> then renames them where they
+         sit. Nothing is downloaded either way, nothing moves between folders, and only files
+         this app downloaded are touched.</p>
+    </div>
+    <p class="hint">1. <span id="steplogin"><b>Login</b> opens a browser. Sign in yourself and leave it open.</span><br>
+       2. <b>Discover</b> shows what the provider has for you and downloads
+       nothing. It is optional, since Pilot and Run All look too.<br>
+       3. <b>Pilot</b> tests the newest few.<br>
+       4. <b>Run All</b> downloads everything you don't already have.</p>
+    <p class="hint" style="border-left:3px solid var(--accent); padding-left:10px;">
+       ↻ <b>Safe to re-run.</b> Run All and Resume skip any statement or receipt
+       you've already downloaded. Nothing is ever fetched twice, even if you
+       deleted the PDFs after importing them elsewhere<span id="againnote">, unless
+       you tick <b>Download again</b> under Scope</span>.</p>
+    <p class="hint warn" id="venvwarn" style="display:none"></p>
+  </div>
+  <div style="display:flex; flex-direction:column; min-width:0;">
+  <div class="tabs">
+    <button id="tabout" class="on" onclick="showTab('out')">Output</button>
+    <button id="tabst" onclick="showTab('st')">Status</button>
+    <button id="tabxl" onclick="showTab('xl')">Spreadsheet</button>
+    <button id="tabnm" onclick="showTab('nm')">File names</button>
+  </div>
+  <div id="paneout" style="display:flex; flex-direction:column; min-height:0; flex:1;">
+    <div class="status"><span class="dot" id="dot"></span><span id="statustext">idle</span></div>
+    <pre class="console" id="console"></pre>
+    <p class="hint warn" id="failnote" style="display:none;margin:6px 0 0">
+       This run wrote a file about what went wrong. It holds counts and states
+       and no text from your account. Read it, then attach it to this
+       provider&#39;s issue.
+       <button id="failreveal" onclick="revealFailure()">Show the file to attach</button></p>
+  </div>
+  <div id="panest" class="stwrap" style="display:none;">
+    <p><button onclick="loadStatus()">Refresh</button>
+       <span class="hint" id="stnote"></span></p>
+    <div id="stbody">not loaded yet</div>
+    <div id="stmove">
+      <div id="movebox">
+        <h3 id="hxhead" style="margin:26px 0 6px; font-size:15px">Move to another computer</h3>
+        <p class="hint" style="margin-top:0" id="hxlead"></p>
+        <p id="hxexportrow"><button id="hxexport" onclick="exportHistory()">Export history</button></p>
+        <label for="hxfile">Import a history file</label>
+        <input id="hxfile" type="file" accept=".ppz" onchange="planHistory()">
+        <div id="hxplan" style="margin-top:10px"></div>
+        <p><button class="primary" id="hximport" style="display:none" onclick="importHistory()">Import</button>
+           <span class="hint" id="hxmsg"></span></p>
+      </div>
+    </div>
+  </div>
+  <div id="panexl" class="stwrap" style="display:none;">
+    <p class="hint" style="margin-top:0">Every purchase from a receipt archive, one row
+       per item, newest first, with an Orders sheet and a Summary of spend per year.
+       Built from what the apps already recorded while downloading, so it takes a
+       second and no PDF is opened. Rebuilt from scratch each time. Edit a copy, not
+       this file.</p>
+    <p><select id="xlprovider" style="width:auto; min-width:220px; display:inline-block; margin-right:8px"></select>
+       <span class="hint" id="xlnote"></span></p>
+    <p><button class="primary" id="xlbuild" onclick="buildSpreadsheet(false)">Build Excel workbook</button>
+       <button onclick="buildSpreadsheet(true)">Build CSV instead</button>
+       <button id="xlreveal" onclick="revealSpreadsheet()" style="display:none">Show in folder</button></p>
+    <div id="xlbody"></div>
+    <h3 style="margin:26px 0 6px; font-size:15px">Statements</h3>
+    <p class="hint" style="margin-top:0">The transactions inside your statement PDFs, one row
+       each, with a Statements sheet that says whether every statement adds up. Each PDF is
+       read once and remembered, so the first build takes a few minutes for a big archive and
+       the next takes seconds. Money in is positive, money out is negative, for a bank account
+       and a card alike. A statement that does not reconcile is still exported, with the
+       difference shown, so you know which rows to doubt.</p>
+    <p><select id="txprovider" style="width:auto; min-width:220px; display:inline-block; margin-right:8px"></select>
+       <span class="hint" id="txnote"></span></p>
+    <p><button class="primary" id="txbuild" onclick="buildTransactions(false)">Build transactions workbook</button>
+       <button id="txcsv" onclick="buildTransactions(true)">Build CSV instead</button>
+       <button id="txreveal" onclick="revealSpreadsheet()" style="display:none">Show in folder</button></p>
+    <pre class="console" id="txlog" style="max-height:220px; display:none"></pre>
+  </div>
+  <div id="panenm" class="stwrap" style="display:none;">
+    <p class="hint" style="margin-top:0">How the files this app downloads are named. Add
+       the parts you want, in order. A part marked <b>skip if empty</b> is left out, with
+       the separator in front of it, whenever a document does not have it, so no name ends
+       in a stray dash. Saving renames nothing. Once you save, the page offers to rename
+       the files you already have, preview first.</p>
+    <p id="nmunavail" class="hint warn" style="display:none">File naming is not available
+       in this install. Update PaperPull to get it.</p>
+    <div id="nmbody">
+      <p><b id="nmapp"></b> <span class="hint" id="nmkind"></span></p>
+      <p><label style="display:inline"><input type="radio" name="nmscope" value="shared" checked
+           onchange="nmScope()"> <span id="nmsharedlabel">every app of this kind</span></label>
+         &nbsp; <label style="display:inline"><input type="radio" name="nmscope" value="own"
+           onchange="nmScope()"> <span id="nmownlabel">only this app</span></label></p>
+      <p style="margin:0 0 6px">
+        <span class="hint">Separator</span>
+        <select id="nmsep" style="width:auto; display:inline-block">
+          <option value=" ">space</option><option value=" - ">&nbsp;-&nbsp;</option>
+          <option value=" -- ">&nbsp;--&nbsp;</option><option value="_">_</option>
+          <option value="">none</option></select>
+        <span class="hint" style="margin-left:10px">Date as</span>
+        <select id="nmdate" style="width:auto; display:inline-block">
+          <option>yyyy-mm-dd</option><option>yyyymmdd</option><option>mm-dd-yyyy</option>
+          <option>dd mmm yyyy</option><option>mmmm d yyyy</option></select>
+        <label style="display:inline; margin-left:10px"><input type="checkbox" id="nmskip" checked>
+          skip if empty</label></p>
+      <p class="hint" style="margin:0 0 6px">Click a part to add it where the cursor is.
+         Under each is how many of the files you already have from this app carry it. A
+         part on none of them would always come out empty, so it is shown faded.</p>
+      <div id="nmfields" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px"></div>
+      <input id="nmpattern" type="text" spellcheck="false" autocomplete="off"
+             oninput="nmChanged()" placeholder="an empty box means the default">
+      <p class="hint warn" id="nmproblem" style="display:none; margin:6px 0 0"></p>
+      <div id="nmpreview" style="margin:10px 0"></div>
+      <p><button class="primary" onclick="nmSave()">Save</button>
+         <button onclick="nmDefault()">Back to the default</button>
+         <button onclick="nmClear()">Start empty</button>
+         <span class="hint" id="nmnote" style="margin-left:8px"></span></p>
+      <div id="nmoffer" style="display:none; border-left:3px solid var(--accent);
+           padding:2px 0 2px 12px; margin:6px 0 14px">
+        <p style="margin:4px 0"><b>Rename the files you already have to match?</b></p>
+        <p class="hint" style="margin:4px 0" id="nmofferapps"></p>
+        <p class="hint" style="margin:4px 0">Preview first. It lists every file that would
+           change, in the Output tab, and changes nothing. Renaming then does exactly that.
+           Nothing is downloaded or deleted, nothing moves between folders, and each app's
+           index follows its files, so nothing is ever downloaded twice. The preview can
+           also list files an app would now summarize better than when it saved them.</p>
+        <p style="margin:4px 0"><button id="nmprevbtn" onclick="nmRename(false)">Preview renames</button>
+           <button id="nmapplybtn" class="primary" onclick="nmRename(true)" disabled>Rename them</button>
+           <button onclick="nmOffer(null)">Not now</button>
+           <span class="hint" id="nmofferstate" style="margin-left:8px"></span></p>
+      </div>
+      <p class="hint">Written by hand, <code>{date:yyyymmdd}[ - {provider}][ -- {number|kind}]</code>
+         is the date, then the provider, then the order number, or the kind when there is
+         no number. Square brackets make a part that is skipped when empty, and
+         <code>{a|b}</code> takes the first that has a value.</p>
+    </div>
+  </div>
+  </div>
+</main>
+<footer>
+  __FOOTER__
+</footer>
+<script>
+__JS__</script>
+</body>
+</html>

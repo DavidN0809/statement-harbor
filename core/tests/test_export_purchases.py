@@ -169,10 +169,10 @@ def test_the_cli_writes_beside_the_installs(root, capsys):
 
 def test_the_panel_does_not_send_a_path_to_reveal():
     """Reveal opens only the file the server itself wrote."""
-    gui = Path(__file__).resolve().parents[2] / "gui" / "app.py"
-    src = gui.read_text(encoding="utf-8")
-    assert "def api_export_reveal():" in src
-    assert "fetch('/api/export/reveal', {method: 'POST'})" in src
+    gui = Path(__file__).resolve().parents[2] / "gui"
+    assert "def api_export_reveal():" in (gui / "app.py").read_text(encoding="utf-8")
+    page = (gui / "static" / "app.js").read_text(encoding="utf-8")
+    assert "fetch('/api/export/reveal', {method: 'POST'})" in page
 
 
 def test_a_workbook_open_in_excel_is_a_plain_message_not_a_traceback(root, monkeypatch):
