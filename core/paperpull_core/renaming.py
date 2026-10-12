@@ -42,7 +42,8 @@ THE RULES
 * Rename never ends with a file moved and a ledger still giving it the
   name it had. Every ledger is shown to be writable before a file moves,
   and when one still cannot be written, every file goes back under the
-  name it had (run_for, put_back).
+  name it had (run_for, put_back). Review Names keeps the same rule for
+  each receipt it renames (review_names, _undo).
 """
 from __future__ import annotations
 
@@ -645,9 +646,7 @@ def _write_ledgers(app, ledgers, result: Result, numbered: dict, say=print) -> N
     so the panel does not report the files renamed. Ctrl+C while it writes
     puts everything back the same and stops as Ctrl+C."""
     before = [[dict(r) for r in rows] for _csv, rows in ledgers]
-    data = getattr(app.progress, "data", None)
-    records = ({k: dict(v) for k, v in data.items() if isinstance(v, dict)}
-               if isinstance(data, dict) else {})
+    records = _records_of(app.progress)
     written, writing = [], ""
     try:
         for (csv, rows), rows_before in zip(ledgers, before):
@@ -658,18 +657,8 @@ def _write_ledgers(app, ledgers, result: Result, numbered: dict, say=print) -> N
         writing = _name_of(app.progress)
         update_progress(app.progress, result)
     except BaseException as e:
-        if records:
-            data.update(records)
-        unwritten = []
-        for csv, rows_before in reversed(written):
-            # Ctrl+C while a write back waits for a ledger stops that wait
-            # and no more, so the files still go home.
-            try:
-                csv.rewrite(rows_before)
-            except BaseException:
-                unwritten.append(csv)
         moved = len(_moved_by(result))
-        stuck = put_back(result)
+        stuck, unwritten = _undo(records, written, result)
         if isinstance(e, KeyboardInterrupt):
             what = "Rename was stopped while it wrote %s" % writing
         else:
@@ -703,6 +692,39 @@ def _write_ledgers(app, ledgers, result: Result, numbered: dict, say=print) -> N
         if isinstance(e, OSError):
             raise SystemExit(1) from e
         raise
+
+
+def _records_of(progress):
+    """The run state's records in memory, and a copy of each for _undo to
+    put back."""
+    data = getattr(progress, "data", None)
+    if not isinstance(data, dict):
+        return None
+    return data, {k: dict(v) if isinstance(v, dict) else v for k, v in data.items()}
+
+
+def _undo(records, written: list, result: Result) -> tuple:
+    """Undo what was written into the ledgers after files moved, once a
+    write has failed. The run state's records go back as they were in
+    memory (_records_of), and a record made since is taken away, because
+    every app saves the run state on its way out. Each CSV in `written`, as
+    (the CSV, the rows it had), goes back to those rows, the last written
+    first, and every file moved goes back under the name it had (put_back).
+    Returns the files that could not go back, as put_back gives them, and
+    the CSVs that could not be written back."""
+    if records is not None:
+        data, copies = records
+        data.clear()
+        data.update(copies)
+    unwritten = []
+    for csv, rows_before in reversed(written):
+        # Ctrl+C while a write back waits for a ledger stops that wait
+        # and no more, so the files still go home.
+        try:
+            csv.rewrite(rows_before)
+        except BaseException:
+            unwritten.append(csv)
+    return put_back(result), unwritten
 
 
 def _ledger_files(app, ledgers) -> List[Path]:
@@ -1491,13 +1513,38 @@ def _numbers_naming(rows: Iterable[dict], records: dict) -> dict:
     return out
 
 
-def _write_down(app, rows: List[dict], order_rows: List[dict], backup: bool) -> None:
-    """Both CSVs as the review now has them, the order history even when
-    the index could not be written."""
-    try:
-        app.index_csv.rewrite(rows, backup=backup)
-    finally:
-        app.order_csv.rewrite(order_rows, backup=backup)
+def _say_review_undone(e: BaseException, writing: str, moved: bool, stuck: list,
+                       unwritten: list, earlier: bool) -> None:
+    """What Review Names says when a write for a receipt failed and what it
+    had done for that receipt was undone (_undo). `moved` says the receipt
+    was renamed, `stuck` and `unwritten` are what _undo could not put back,
+    and `earlier` says receipts renamed before it in this review were
+    written down."""
+    if isinstance(e, KeyboardInterrupt):
+        what = "Review Names was stopped while it wrote %s" % writing
+    else:
+        what = "%s could not be written (%s)" % (writing, type(e).__name__)
+    print()
+    if stuck:
+        print("%s, and the receipt could not be put back under the name it had, so rename "
+              "it back to that by hand." % what)
+        for where, old in stuck:
+            print("  %s" % where.name)
+            print("    back to %s" % old.name)
+    elif moved:
+        print("%s, so the receipt was put back under the name it had." % what)
+    else:
+        print("%s, so the receipt keeps the name it had." % what)
+    for csv in unwritten:
+        print("%s could not be put back either, so it still has what was written for this "
+              "receipt." % _name_of(csv))
+        if getattr(csv, "backups_dir", None):
+            print("The copy it had before Review Names started is in the Backups folder.")
+    if earlier:
+        print("Each receipt renamed before it keeps its new name, written down as it was "
+              "renamed.")
+    if isinstance(e, PermissionError):
+        print("Close any program that has %s open and run Review Names again." % writing)
 
 
 def review_names(app, ask, words: ReviewWords = WORDS,
@@ -1515,10 +1562,19 @@ def review_names(app, ask, words: ReviewWords = WORDS,
     and not a file another purchase's index rows or progress record name as
     well, since whose receipt it is cannot be told. The summary a file
     already has leaves it where it is. A rename that fails is said, that
-    receipt keeps its name, and the review goes on. Each rename is written to progress.json and to both
-    CSVs as it happens, so they name the files as they are on disk however
-    the review ends. Closing the console window ends the process at once,
-    with nothing run after it, so writing at the end would not be enough.
+    receipt keeps its name, and the review goes on. Each rename is written
+    to both CSVs and progress.json as it happens, so they name the files as
+    they are on disk however the review ends. Closing the console window
+    ends the process at once, with nothing run after it, so writing at the
+    end would not be enough.
+
+    Each of those three is shown to be writable before the first question,
+    and when one stays held, nothing is asked and nothing is renamed. When a
+    write still fails after a receipt was renamed, that receipt goes back
+    under the name it had, never over another file, what was written for it
+    is written back, and the review says so and stops, with SystemExit(1)
+    when the file system refused the write and with the error itself
+    otherwise, Ctrl+C included (_undo).
 
     A new name marks a receipt Completed only when its record says it was
     saved, with downloaded_ok. One put aside because its PDF failed its
@@ -1562,10 +1618,26 @@ def review_names(app, ask, words: ReviewWords = WORDS,
     if not review:
         print("No receipts need name review.")
         return
+    order_rows = app.order_csv.read_all()
+    # Each new name is written into the index, the order history and
+    # progress.json just after its file is renamed, so each has to be one
+    # that can be written before a file moves. With the index open in Excel
+    # a receipt was renamed and the index kept the name it had, so Verify
+    # reported the file missing. Waiting the minute a write waits, while
+    # nothing has moved, lets a person close it, and when one stays open
+    # nothing is asked and nothing is renamed.
+    held = [p for p in _ledger_files(app, [(app.index_csv, rows), (app.order_csv, order_rows)])
+            if not free_to_write(p)]
+    if held:
+        them = "it" if len(held) == 1 else "them"
+        print()
+        print("Nothing was renamed, since %s could not be written, and Review Names writes "
+              "each new name into %s as it renames. Close any program that has %s open and "
+              "run Review Names again." % (_listed([p.name for p in held]), them, them))
+        raise SystemExit(1)
     print(f"{len(review)} receipt(s) need review. Enter a new summary, "
           "press Enter to keep, or 'q' to stop.\n")
-    order_rows = app.order_csv.read_all()
-    written = pending = False
+    written = stopped = False
     try:
         for r, old_path in review:
             key = f"{r.get('Purchase Type')}:{r.get('Order or Receipt Number')}"
@@ -1597,6 +1669,12 @@ def review_names(app, ask, words: ReviewWords = WORDS,
             # lost it.
             new_name = build_pdf_filename(date, new_summary, doc_type, part=_part_of(r),
                                           record=record)
+            # The ledgers as they are before this receipt, and the file it
+            # moves, so a write that fails can undo what was done for it.
+            records = _records_of(app.progress)
+            rows_before = [dict(row) for row in rows]
+            order_rows_before = [dict(orow) for orow in order_rows]
+            moved = Result()
             try:
                 # The file does not stand in its own way. Asked for a free
                 # name as though it were another file's, the summary it
@@ -1621,6 +1699,7 @@ def review_names(app, ask, words: ReviewWords = WORDS,
                             and not _one_file(str(new_path), str(old_path))):
                         raise FileExistsError(17, "Another file has that name", str(new_path))
                     old_path.rename(new_path)
+                    moved.mapping[str(old_path)] = str(new_path)
                 elif not old_path.is_file():
                     # Deleted while the question waited. A rename would have
                     # failed, and the rows would be marked for a file gone.
@@ -1629,68 +1708,83 @@ def review_names(app, ask, words: ReviewWords = WORDS,
                 print(f"    It could not be renamed ({type(e).__name__}), so it keeps "
                       "its name.\n")
                 continue
-            pending = True
-            number = r.get("Order or Receipt Number")
-            old_filename = r.get("PDF Filename")
-            # The purchase's record says what a run fetches, and it speaks for
-            # this file only when it names it, or when there is no record
-            # yet. An older copy, put aside before a later run saved the
-            # receipt or put aside a newer copy, keeps rows of its own, and
-            # only those take its new name. Written into the record, it moved
-            # the record off the copy the last run left.
-            # A record whose path is not text names no file, as an empty one
-            # names none (_text). Handed to Path, it stopped the review with
-            # the receipt renamed and its record never written.
-            recorded = prog.get("pdf_path")
-            if not isinstance(recorded, (str, os.PathLike)):
-                recorded = ""
-            ours = not prog or str(Path(recorded)) == str(old_path)
-            # Completed is for a receipt that was saved and marked for review
-            # for its name alone, which its record says with downloaded_ok. A
-            # receipt put aside in Manual Review because its PDF failed its
-            # check has none, and marked Completed no run fetched it again,
-            # though its copy was the one that failed.
-            saved = ours and bool(prog.get("downloaded_ok"))
-            # Every index row of this purchase naming this file follows it.
-            # Target once wrote two for most invoice orders, and the one not
-            # renamed named a file that was gone. A row of another purchase
-            # is left as it is, since its other records are not this one's.
-            for row in rows:
-                text = (row.get("PDF Full Path") or "").strip()
-                if (row.get("Order or Receipt Number") != number or not text
-                        or str(Path(text)) != str(old_path)):
-                    continue
-                row["PDF Filename"] = new_path.name
-                row["PDF Full Path"] = str(new_path)
-                row["Purchase Summary"] = new_summary
-                if saved:
-                    row["Processing Status"] = "Completed"
-                row["Classification Confidence"] = "High"
-                row["Notes"] = (row.get("Notes", "") + "; " + REVIEWED).strip("; ")
-            for orow in order_rows:
-                if (orow.get("Order or Receipt Number") == number
-                        and orow.get("PDF Filename") == old_filename):
-                    orow["PDF Filename"] = new_path.name
-                    orow["Purchase Summary"] = new_summary
+            # The index first, then the order history, then progress.json,
+            # as Rename writes them. A file left renamed when the index could
+            # not be written, opened in Excel after the check above, kept the
+            # name it had in the index, so Verify reported it missing and the
+            # next run was confused. Now the receipt goes back under the name
+            # it had and what was written for it is written back (_undo).
+            done, writing = [], _name_of(app.index_csv)
+            try:
+                number = r.get("Order or Receipt Number")
+                old_filename = r.get("PDF Filename")
+                # The purchase's record says what a run fetches, and it speaks
+                # for this file only when it names it, or when there is no
+                # record yet. An older copy, put aside before a later run saved
+                # the receipt or put aside a newer copy, keeps rows of its own,
+                # and only those take its new name. Written into the record, it
+                # moved the record off the copy the last run left.
+                # A record whose path is not text names no file, as an empty
+                # one names none (_text). Handed to Path, it stopped the review
+                # with the receipt renamed and its record never written.
+                recorded = prog.get("pdf_path")
+                if not isinstance(recorded, (str, os.PathLike)):
+                    recorded = ""
+                ours = not prog or str(Path(recorded)) == str(old_path)
+                # Completed is for a receipt that was saved and marked for
+                # review for its name alone, which its record says with
+                # downloaded_ok. A receipt put aside in Manual Review because
+                # its PDF failed its check has none, and marked Completed no
+                # run fetched it again, though its copy was the one that failed.
+                saved = ours and bool(prog.get("downloaded_ok"))
+                # Every index row of this purchase naming this file follows it.
+                # Target once wrote two for most invoice orders, and the one not
+                # renamed named a file that was gone. A row of another purchase
+                # is left as it is, since its other records are not this one's.
+                for row in rows:
+                    text = (row.get("PDF Full Path") or "").strip()
+                    if (row.get("Order or Receipt Number") != number or not text
+                            or str(Path(text)) != str(old_path)):
+                        continue
+                    row["PDF Filename"] = new_path.name
+                    row["PDF Full Path"] = str(new_path)
+                    row["Purchase Summary"] = new_summary
                     if saved:
-                        orow["Processing Status"] = "Completed"
-            if ours:
-                named = {"summary": new_summary, "pdf_filename": new_path.name,
-                         "pdf_path": str(new_path), "confidence": "High"}
-                if saved:
-                    named["state"] = State.COMPLETED.value
-                app.progress.update(key, named)  # key (purchase identifier) unchanged
-            _write_down(app, rows, order_rows, backup=not written)
-            pending, written = False, True
+                        row["Processing Status"] = "Completed"
+                    row["Classification Confidence"] = "High"
+                    row["Notes"] = (row.get("Notes", "") + "; " + REVIEWED).strip("; ")
+                app.index_csv.rewrite(rows, backup=not written)
+                done.append((app.index_csv, rows_before))
+                writing = _name_of(app.order_csv)
+                for orow in order_rows:
+                    if (orow.get("Order or Receipt Number") == number
+                            and orow.get("PDF Filename") == old_filename):
+                        orow["PDF Filename"] = new_path.name
+                        orow["Purchase Summary"] = new_summary
+                        if saved:
+                            orow["Processing Status"] = "Completed"
+                app.order_csv.rewrite(order_rows, backup=not written)
+                done.append((app.order_csv, order_rows_before))
+                if ours:
+                    writing = _name_of(app.progress)
+                    named = {"summary": new_summary, "pdf_filename": new_path.name,
+                             "pdf_path": str(new_path), "confidence": "High"}
+                    if saved:
+                        named["state"] = State.COMPLETED.value
+                    app.progress.update(key, named)  # key (purchase identifier) unchanged
+            except BaseException as e:
+                stopped = True
+                stuck, unwritten = _undo(records, done, moved)
+                _say_review_undone(e, writing, bool(moved.mapping), stuck, unwritten, written)
+                if isinstance(e, OSError):
+                    raise SystemExit(1) from e
+                raise
+            written = True
             if new_path.name == old_path.name:
                 print("    It already has that name, so the file stays as it is.\n")
             else:
                 print(f"{words.renamed}{new_path.name}\n")
     finally:
-        # A rename whose rows were not written down yet, because something
-        # between the two went wrong or the writing itself was cut short.
-        if pending:
-            _write_down(app, rows, order_rows, backup=not written)
-            written = True
-        if written:
+        # Said by the review's own words instead when a write failed.
+        if written and not stopped:
             print("CSV files and progress.json updated.")
