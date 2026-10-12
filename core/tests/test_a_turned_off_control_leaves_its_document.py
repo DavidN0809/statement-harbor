@@ -35,6 +35,7 @@ number here is made up.
 """
 import ast
 import importlib
+import re
 import sys
 import threading
 import time
@@ -379,11 +380,74 @@ class _Ran:
         self.server = server
         self.result = None
         self.stop = None
-        self.seconds = 0.0
+        self.waits: list = []
         self.trace: list = []
 
     def count(self, name: str) -> int:
         return int(self.page.evaluate("window.%s" % name))
+
+
+class _Waits:
+    """Every wait a drive takes, in order, in `taken` while a drive's call
+    runs on this thread. A pause is noted as "paused 1000 ms" or
+    "slept 1.0 s", and a wait of Playwright's that ran out by the first line
+    of its own word for it, "Locator.click: Timeout 500ms exceeded." say, an
+    action waiting for its control or a wait for an event. A read that
+    answered took no wait. Every call of Playwright's sync API goes through
+    SyncBase._sync, and every wait on an event, expect_download say,
+    through EventInfo.value, so a wait that ran out is noted whatever
+    called it. They are counted rather than timed, so how quick the
+    machine is changes nothing."""
+
+    def __init__(self, monkeypatch):
+        from playwright._impl import _sync_base
+        self.taken = None
+        self.thread = None
+        own_sync = _sync_base.SyncBase._sync
+        own_value = _sync_base.EventInfo.value.fget
+        own_sleep = time.sleep
+
+        def _sync(base, coro):
+            try:
+                return own_sync(base, coro)
+            except sync_api.TimeoutError as e:
+                self.note(str(e))
+                raise
+
+        def value(event):
+            try:
+                return own_value(event)
+            except sync_api.TimeoutError as e:
+                self.note(str(e))
+                raise
+
+        def sleep(seconds):
+            self.note("slept %s s" % seconds)
+            return own_sleep(seconds)
+        monkeypatch.setattr(_sync_base.SyncBase, "_sync", _sync)
+        monkeypatch.setattr(_sync_base.EventInfo, "value", property(value))
+        monkeypatch.setattr(time, "sleep", sleep)
+        for cls in (sync_api.Page, sync_api.Frame):
+            def pause(on, timeout, own=cls.wait_for_timeout):
+                self.note("paused %s ms" % timeout)
+                return own(on, timeout)
+            monkeypatch.setattr(cls, "wait_for_timeout", pause)
+
+    def note(self, what: str) -> None:
+        if self.taken is not None and threading.get_ident() == self.thread:
+            self.taken.append((str(what).splitlines() or [""])[0])
+
+    def start(self, taken: list) -> None:
+        self.taken, self.thread = taken, threading.get_ident()
+
+    def end(self) -> None:
+        self.taken = self.thread = None
+
+
+# Playwright's word for a press that waited its whole time for its control
+# to be turned on, which every drive here makes once, on the press's own
+# time.
+_PRESS_RAN_OUT = re.compile(r"(Locator|ElementHandle)\.click: Timeout \d+ms exceeded")
 
 
 @pytest.fixture()
@@ -391,7 +455,7 @@ def drive(browser, tmp_path, monkeypatch):
     """Run `call(site, page, out, staging, trace)` on a page of the test's
     own site, with the press given half a second, the control drawn by
     `control`. `before` runs just before every press_once, and LATER is
-    drawn as each one ends."""
+    drawn as each one ends. The waits the call takes are in `waits`."""
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     httpd.asked = []
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -400,6 +464,7 @@ def drive(browser, tmp_path, monkeypatch):
     monkeypatch.setattr(pressing, "PRESS_MS", 500)
     real = pressing.press_once
     real_click = pressing.click
+    waits = _Waits(monkeypatch)
 
     def run(app, module, call, *, row="June 30, 2026", control, extra="", before=None,
             press_ms=None):
@@ -432,12 +497,13 @@ def drive(browser, tmp_path, monkeypatch):
         out.parent.mkdir(parents=True, exist_ok=True)
         staging = tmp_path / app / "downloads"
         staging.mkdir(exist_ok=True)
-        started = time.monotonic()
+        waits.start(ran.waits)
         try:
             ran.result = call(site, page, out, staging, ran.trace)
         except pressing.Stop as stop:
             ran.stop = stop
-        ran.seconds = time.monotonic() - started
+        finally:
+            waits.end()
         ran.out = out
         monkeypatch.setattr(pressing, "press_once", real)
         monkeypatch.setattr(pressing, "click", real_click)
@@ -545,8 +611,11 @@ def test_a_turned_off_control_is_not_pressed_and_the_run_goes_on(drive, app, fun
     assert ran.server.asked == [], "something was asked for the document"
     assert not ran.out.exists()
     # Left once the press's own time is over, not after a capture's waits
-    # for a document, which take ten seconds and more.
-    assert ran.seconds < 9, ran.seconds
+    # for a document, which take ten seconds and more. The one wait taken
+    # is the press itself, Playwright waiting out the press's own time for
+    # the control to be turned on. The waits are counted, not timed, since
+    # a slow machine once took 54 s over this drive with no other wait.
+    assert len(ran.waits) == 1 and _PRESS_RAN_OUT.match(ran.waits[0]), ran.waits
 
 
 # Bootstrap and Material UI draw a turned off control so it takes no
