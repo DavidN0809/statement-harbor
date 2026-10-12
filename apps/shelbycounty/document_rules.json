@@ -1,0 +1,28 @@
+{
+  "_comment": "Shelby County Trustee property tax: receipts and the current notice, both tax documents.",
+  "tax_rules": [
+    {
+      "pattern": "property\\s+tax\\s+receipt",
+      "summary": "Property Tax Receipt"
+    },
+    {
+      "pattern": "property\\s+tax\\s+notice",
+      "summary": "Property Tax Notice"
+    },
+    {
+      "pattern": "\\breceipt\\b",
+      "summary": "Property Tax Receipt"
+    },
+    {
+      "pattern": "\\bnotice\\b",
+      "summary": "Property Tax Notice"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [],
+  "skip_patterns": [
+    "legal\\s+description",
+    "gis",
+    "payment\\s+portal"
+  ]
+}
