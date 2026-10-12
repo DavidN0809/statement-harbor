@@ -161,8 +161,8 @@ several providers.
   one by each saved statement's digest, date and account part, which
   `--minimal` left out, so on the new computer the statement was saved
   under the wrong bill. The export now carries those three for American
-  Family. The account part is the masked last four its record keys and
-  file names already hold.
+  Family. The account part is the masked last four of the bill's account
+  or policy, which its record keys and file names already hold.
 
 ## [0.46.0] - 2026-10-11
 

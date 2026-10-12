@@ -12,10 +12,13 @@ key through the page that listed it, and --minimal carried neither.
 So it is asked two ways. By reading, every record field each app's
 _already_done reads, followed through what it calls in the app's own
 modules and in the core, is one the tool carries for that app's provider.
-So is every field read off a record any method of the app walks to among
-all the saved ones, since American Family looks there for another bill's
-statement with the very bytes it just took, and with nothing to compare
-saved a statement of one bill as another's. By running, each app's own
+So is every field read off a record a method of the app's App walks to in
+a loop over the saved records' items or values, since American Family looks
+there for another bill's statement with the very bytes it just took, and
+with nothing to compare saved a statement of one bill as another's. That
+walk census does not see the store handed to a module function, a getattr
+spelling, a loop over keys alone or a record read through from_dict, and
+Optum's hold_known_forms is such a walk. By running, each app's own
 _already_done answers the same for a record and for that record as
 --minimal cuts it, over every state, marker, note, day and review copy a
 record holds, and Robinhood's records go through a real export and import,

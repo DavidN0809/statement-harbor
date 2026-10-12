@@ -59,9 +59,10 @@ Robinhood those include each document's category, date, title and account,
 the parts its record keys are made of, the key a tax form was saved under
 before its year was read, which of Robinhood's four fixed statement and tax
 pages listed it, and the SHA-256 digest of the saved file, which says nothing
-of what the file holds. For American Family they include each statement's
-date, its bill's masked last four and the saved file's digest, so a statement
-with the bytes of another bill's is still caught. A record still under a key that left out its
+of what the file holds. For American Family they include each document's
+date, the masked last four of the account or policy its bill is told by and
+the saved file's digest, so a statement with the bytes of another bill's is
+still caught. A record still under a key that left out its
 account's last four, as the apps did past forty characters until 0.34.0 and
 Chase did at any length until 0.17.1, also keeps what its key is built from
 and what the app compares before moving it, the document's kind, date,
@@ -129,7 +130,8 @@ SKIP_FIELDS = ("state", "downloaded_ok", "pdf_path", "discovered_at", "updated_a
 # saved file's digest (_other_accounts_statement). American Family trusts
 # neither copy when a statement it takes has the very bytes of another bill's
 # statement of that date, found by each saved one's digest, date and account
-# part, the masked last four its key and file name hold too (download_one).
+# part, the masked last four of the bill's account or policy, which its key
+# and file name hold too (download_one).
 # Every app's skip decisions, and every walk of its saved records, are read
 # against these by core/tests/test_a_minimal_history_skips_what_the_app_did.py.
 PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "date",
