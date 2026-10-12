@@ -229,6 +229,90 @@ def test_a_person_whose_config_is_here_is_never_written_over(panel, tmp_path):
     assert (new / "Shop Receipts" / "config.spouse.json").read_text(encoding="utf-8") == "{ not json"
 
 
+def test_a_persons_history_left_in_their_folder_is_added_to_never_written_over(panel, tmp_path):
+    """Remove moves only the install, so a second person's folder can stay
+    behind with their history. Adding the person on import found the folder
+    and wrote the file's records over what it held."""
+    old_computer(tmp_path)
+    data = export()
+    new = tmp_path / "new"
+    app_module.create_install(new, "shop")
+    (new / "Shop Receipts - spouse").mkdir()
+    _write(new / "Shop Receipts - spouse" / "progress.json", _done(1, "here"))
+    _use(new)
+
+    planned = plan(data)
+    spouse = [r for r in planned["rows"] if r["account"] == "spouse"][0]
+    assert (spouse["action"], spouse["new"], spouse["known"]) == ("add person", 4, 1)
+    assert _rows(bring(data)) == _rows(planned)
+    recs = json.loads((new / "Shop Receipts - spouse" / "progress.json").read_text(encoding="utf-8"))
+    assert set(recs) == {"here:0", "j:0", "j:1", "j:2", "j:3"}
+    assert (new / "Shop Receipts" / "config.spouse.json").is_file()
+
+
+def test_a_folder_chosen_on_the_welcome_page_is_remembered_when_it_already_holds_them(
+        panel, tmp_path):
+    """The folder chosen already held the providers, synced from another
+    computer, so every line was "already here". It was not remembered, and
+    the panel stayed on its old folder, an empty welcome page."""
+    old_computer(tmp_path)
+    data = export()
+    synced = tmp_path / "synced"
+    for slug in ("bank", "shop"):
+        app_module.create_install(synced, slug)
+    _account_in(synced / "Shop Receipts", "spouse")
+    _use(tmp_path / "somewhere empty")
+    got = bring(data, root=str(synced))
+    assert {r["action"] for r in got["rows"]} == {"fill in"}
+    assert app_module._read_settings()["apps_root"] == str(synced.resolve())
+
+
+def _account_in(install: Path, label: str):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "aa", Path(app_module.__file__).resolve().parents[1] / "tools" / "add_account.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.make_config(install, label)
+
+
+def test_no_run_starts_while_an_import_writes_the_histories(panel, tmp_path, monkeypatch):
+    """A run reads progress.json when it starts and writes it as it goes,
+    so one started during an import wrote over what the import added."""
+    old = old_computer(tmp_path)
+    _use(old)
+    monkeypatch.setattr(app_module, "setup_needed", lambda meta: "")
+
+    def never(*a, **k):
+        raise AssertionError("a run was started during an import")
+    monkeypatch.setattr(app_module.subprocess, "Popen", never)
+
+    async def said(answer):
+        return "".join([c if isinstance(c, str) else c.decode() async for c in answer.body_iterator])
+
+    assert app_module._IMPORTING.acquire(blocking=False)
+    try:
+        answer = app_module._start_run("Bank Statements", "primary", "pilot", [])
+        text = asyncio.run(said(answer))
+    finally:
+        app_module._IMPORTING.release()
+    assert "being imported" in text and "event: done" in text
+    assert app_module._RUNNING == set()
+
+
+def test_no_import_starts_while_another_import_runs(panel, tmp_path):
+    old_computer(tmp_path)
+    data = export()
+    _use(tmp_path / "new")
+    assert app_module._IMPORTING.acquire(blocking=False)
+    try:
+        with pytest.raises(fastapi.HTTPException) as e:
+            bring(data)
+    finally:
+        app_module._IMPORTING.release()
+    assert e.value.status_code == 409
+
+
 def test_a_provider_this_version_lacks_is_skipped_and_says_why(panel, tmp_path):
     data = _hand_made([{"provider": "Nope", "kind": "DOCUMENT", "account": "primary",
                         "folder": "Nope Statements", "file": "apps/0/progress.json"}],

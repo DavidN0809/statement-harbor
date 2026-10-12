@@ -127,11 +127,14 @@ MAX_SETTING_CHARS = 4000
 
 # How much of a file handed over is read. A real archive of thirty providers
 # exported to 330 KB, so these stop only a file that is not one, including a
-# zip that says it is small and unpacks to far more.
-MAX_MANIFEST_BYTES = 4 * 1024 * 1024
-MAX_RECORDS_BYTES = 64 * 1024 * 1024
-MAX_TOTAL_BYTES = 256 * 1024 * 1024
-MAX_ENTRIES = 2000
+# zip that says it is small and unpacks to far more. PaperPull Server reads
+# what anyone signed in sends, on a NAS, and a megabyte of tiny records
+# becomes more than ten in memory, so they are kept well short of that.
+MAX_MANIFEST_BYTES = 1024 * 1024
+MAX_RECORDS_BYTES = 8 * 1024 * 1024
+MAX_TOTAL_BYTES = 24 * 1024 * 1024
+MAX_RECORDS = 200000
+MAX_ENTRIES = 500
 
 
 class NotAnExport(Exception):
@@ -484,7 +487,7 @@ def _entry(raw: dict, schema: int):
     account = str(raw.get("account") or "primary").strip().lower() if schema >= 2 else "primary"
     member = str(raw.get("file") or "") if schema >= 2 else ""
     settings = raw.get("settings") if schema >= 2 else None
-    return {"folder": folder, "provider": provider,
+    return {"schema": schema, "folder": folder, "provider": provider,
             "kind": raw.get("kind") if raw.get("kind") in ("DOCUMENT", "RECEIPT") else None,
             "account": account or "primary",
             "source_dir": str(raw.get("source_dir") or "") if schema >= 2 else "",
@@ -517,11 +520,19 @@ def read(source) -> dict:
         apps = manifest.get("apps")
         if not isinstance(apps, list) or len(apps) > MAX_ENTRIES:
             raise NotAnExport("That file's manifest lists no providers.")
-        entries, total = [], 0
+        entries, total, count, read_once = [], 0, 0, set()
+        too_big = NotAnExport("That file is far larger than any download history, "
+                              "so it was not read.")
         for raw in apps:
             entry = _entry(raw, schema) if isinstance(raw, dict) else None
             if entry is None:
                 continue
+            # Each entry has a file of its own. Several naming one would
+            # each read it again, and pass the limits as several small ones.
+            if entry["file"] in read_once:
+                raise NotAnExport("That file names one history for two places, "
+                                  "so it was not made by PaperPull.")
+            read_once.add(entry["file"])
             entries.append(entry)
             try:
                 data = _member(z, entry["file"], MAX_RECORDS_BYTES)
@@ -529,13 +540,15 @@ def read(source) -> dict:
                 continue
             total += len(data)
             if total > MAX_TOTAL_BYTES:
-                raise NotAnExport("That file is far larger than any download history, "
-                                  "so it was not read.")
+                raise too_big
             try:
                 recs = json.loads(data.decode("utf-8"))
             except ValueError:
                 continue
             if isinstance(recs, dict):
+                count += len(recs)
+                if count > MAX_RECORDS:
+                    raise too_big
                 entry["incoming"] = {str(k): v for k, v in recs.items() if isinstance(v, dict)}
     out = {k: v for k, v in manifest.items() if k != "apps"}
     out["schema"] = schema
@@ -545,18 +558,28 @@ def read(source) -> dict:
 
 def match(entry: dict, places: list):
     """The place here that keeps this entry's history. The same provider and
-    person, then, for a file from before people were told apart, a folder
-    of the same name, which is how a second person's folder came across."""
+    person, then, only for a file from before people were told apart, a
+    folder of the same name, which is how a second person's folder came
+    across then. A newer file says whose each history is, and a folder's
+    name says nothing more, since two people's output folders can share one
+    and a folder can hold another provider's history."""
     provider = entry["provider"].lower()
     for place in places:
         if place["provider"].lower() == provider and place["account"] == entry["account"]:
             return place
     folder = (entry.get("folder") or "").lower()
-    if folder:
+    if folder and entry.get("schema", 1) < 2:
         for place in places:
             if place["folder"].lower() == folder:
                 return place
     return None
+
+
+def history_at(where: Path):
+    """The records a place already keeps, {} when it keeps none yet, None
+    when its progress.json is there and cannot be read."""
+    path = Path(where) / "progress.json"
+    return _records(path) if path.is_file() else {}
 
 
 def bases_of(entry: dict, manifest: dict) -> list:
@@ -597,16 +620,20 @@ def _rewrite_path(old: str, old_bases, new_base: Path) -> str:
 
     A path that cannot be rewritten is CLEARED rather than left alone. The
     skip logic asks whether a manual-review copy is still on disk, and a path
-    from another computer would answer that question wrongly. So is one that
-    would lead out of the folder, which no app ever writes.
+    from another computer would answer that question wrongly. So is one
+    under the old folder that would lead back out of it once moved.
     """
     if not old:
         return ""
     # The apps do not agree on this. Some record a path relative to their own
     # folder, others the full absolute one. A relative path is already portable
-    # and is left exactly as it is. Only an absolute path names a machine.
+    # and is left exactly as it is. Only an absolute path names a machine. A
+    # second person's paths begin with "..", since their folder sits beside
+    # the install a run starts in, so a relative path is never judged by
+    # whether it leaves a folder (a saved invoice with no path is taken
+    # again by Target).
     if not _is_absolute(old):
-        return old if _stays_inside(old) else ""
+        return old
     norm = old.replace("\\", "/")
     for base in old_bases or ():
         b = str(base or "").replace("\\", "/").rstrip("/")
@@ -631,10 +658,11 @@ def _moved(rec: dict, old_bases, new_base: Path) -> dict:
     """A record from another machine with its paths pointed at this one.
 
     Target keeps one file for each invoice of an order as well. An invoice
-    whose path names some other folder of that machine keeps it, since a
-    saved invoice counts as saved whether or not its file is there, and an
-    entry with no file is not counted at all. One that would lead out of
-    its folder is cleared, as a PDF path is."""
+    whose path names some other folder of that machine, or a relative one,
+    keeps it, since a saved invoice counts as saved whether or not its file
+    is there, and an entry with no file is not counted at all. One under the
+    old folder that would lead out of it once moved is cleared, as a PDF
+    path is."""
     rec = dict(rec)
     rec["pdf_path"] = _rewrite_path(str(rec.get("pdf_path") or ""), old_bases, new_base)
     invoices = rec.get("invoices")

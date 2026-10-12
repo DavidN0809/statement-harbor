@@ -580,13 +580,89 @@ def test_a_first_persons_folder_is_never_taken_for_the_start_of_a_seconds():
     assert Path(moved) == new / "Statements" / "a.pdf"
 
 
-def test_a_path_that_leads_out_of_its_folder_is_cleared(tmp_path):
+def test_a_path_moved_out_of_the_old_folder_never_leads_back_out_of_the_new_one(tmp_path):
     new = tmp_path / "new" / "Bank Statements"
     base = "/Users/someone/PaperPull/Bank Statements"
     assert migrate._rewrite_path(base + "/../../../etc/passwd", [base], new) == ""
     assert Path(migrate._rewrite_path(base + "/Statements/../a.pdf", [base], new)) == new / "a.pdf"
-    assert migrate._rewrite_path(r"..\..\elsewhere\a.pdf", [base], new) == ""
     assert migrate._rewrite_path("Statements/a.pdf", [base], new) == "Statements/a.pdf"
+
+
+def test_a_second_persons_relative_paths_are_kept_as_the_app_wrote_them(tmp_path):
+    """A second person's folder sits beside the install a run starts in, so
+    every path their runs record begins with "..". Cleared, Target took a
+    saved invoice with no path for one never saved and fetched it again."""
+    rel = r"..\Target Receipts - spouse\Invoices\a.pdf"
+    old = tmp_path / "old"
+    rec = _rec(path=rel)
+    rec["invoices"] = [{"file": rel, "kept": True}]
+    _install(old, "Target Receipts - spouse", "Target Receipts - spouse", {"T:1": rec})
+    archive = tmp_path / "h.ppz"
+    migrate.export(old, archive)
+
+    new = tmp_path / "new"
+    _install(new, "Target Receipts - spouse", "Target Receipts - spouse", {})
+    migrate.do_import(archive, new, assume_yes=True)
+    got = json.loads((new / "Target Receipts - spouse" / "progress.json").read_text(encoding="utf-8"))
+    assert got["T:1"]["pdf_path"] == rel
+    assert got["T:1"]["invoices"] == [{"file": rel, "kept": True}]
+
+
+def test_a_newer_file_is_never_matched_by_a_folder_name_alone(tmp_path):
+    """Two people's output folders can share a name, and a folder can hold
+    another provider's history. A file that says whose each history is was
+    folded into whichever folder here had the same name."""
+    def install(root, provider, out, people=()):
+        d = root / ("%s Statements" % provider)
+        d.mkdir(parents=True)
+        (d / "x_docs.py").write_text("", encoding="utf-8")
+        (d / "storage.py").write_text('SPEC = AppSpec(provider="%s", kind=DOCUMENT)' % provider,
+                                      encoding="utf-8")
+        (d / "config.json").write_text(json.dumps({"output_dir": str(out)}), encoding="utf-8")
+        for label, where in people:
+            (d / ("config.%s.json" % label)).write_text(
+                json.dumps({"output_dir": str(where)}), encoding="utf-8")
+        return d
+
+    def history(where, recs):
+        where.mkdir(parents=True, exist_ok=True)
+        (where / "progress.json").write_text(json.dumps(recs), encoding="utf-8")
+
+    old, new = tmp_path / "old", tmp_path / "new"
+    install(old, "Bank", tmp_path / "o" / "Pat" / "Bank",
+            people=[("jamie", tmp_path / "o" / "Jamie" / "Bank")])
+    install(old, "Amex", tmp_path / "o" / "Amex" / "Statements")
+    history(tmp_path / "o" / "Pat" / "Bank", {"pat:1": _rec()})
+    history(tmp_path / "o" / "Jamie" / "Bank", {"jamie:1": _rec()})
+    history(tmp_path / "o" / "Amex" / "Statements", {"amex:1": _rec()})
+    archive = tmp_path / "h.ppz"
+    migrate.export(old, archive)
+
+    install(new, "Bank", tmp_path / "n" / "Pat" / "Bank")
+    install(new, "Discover", tmp_path / "n" / "Discover" / "Statements")
+    history(tmp_path / "n" / "Pat" / "Bank", {})
+    history(tmp_path / "n" / "Discover" / "Statements", {})
+    migrate.do_import(archive, new, assume_yes=True)
+    read = lambda p: set(json.loads((p / "progress.json").read_text(encoding="utf-8")))
+    assert read(tmp_path / "n" / "Pat" / "Bank") == {"pat:1"}
+    assert read(tmp_path / "n" / "Discover" / "Statements") == set()
+
+
+def test_a_file_from_before_people_were_told_apart_finds_a_persons_folder_by_name(tmp_path):
+    """Version 1 exported a second person's folder as a provider named for
+    the folder, and found it again here only by that name."""
+    archive = tmp_path / "old.ppz"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("manifest.json", json.dumps({
+            "schema": 1, "source_root": "/old",
+            "apps": [{"folder": "Bank Statements - spouse", "provider": "Bank Statements - spouse",
+                      "kind": None, "records": 1, "already_downloaded": 1}]}))
+        z.writestr("apps/Bank Statements - spouse/progress.json", json.dumps({"id:7": _rec()}))
+    new = tmp_path / "new"
+    _app(new, records={}, people={"spouse": ({}, {})})
+    migrate.do_import(archive, new, assume_yes=True)
+    got = json.loads((new / "Bank Statements - spouse" / "progress.json").read_text(encoding="utf-8"))
+    assert set(got) == {"id:7"}
 
 
 def test_an_orders_invoices_follow_it_to_the_new_computer(tmp_path):
@@ -646,3 +722,21 @@ def test_a_file_far_larger_than_any_history_is_not_read(tmp_path, monkeypatch):
     monkeypatch.setattr(migrate, "MAX_TOTAL_BYTES", 200)
     with pytest.raises(migrate.NotAnExport):
         migrate.read(archive.read_bytes())
+    monkeypatch.setattr(migrate, "MAX_TOTAL_BYTES", 10 ** 8)
+    monkeypatch.setattr(migrate, "MAX_RECORDS", 49)
+    with pytest.raises(migrate.NotAnExport):
+        migrate.read(archive)
+
+
+def test_one_history_named_for_several_places_is_refused(tmp_path):
+    """Each entry reads its own file, so entries that share one would read
+    it again for each, every one inside the limits, and together far past
+    them."""
+    archive = tmp_path / "h.ppz"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("manifest.json", json.dumps({"schema": 2, "apps": [
+            {"provider": "Bank", "account": "primary", "file": "apps/0/progress.json"},
+            {"provider": "Bank", "account": "spouse", "file": "apps/0/progress.json"}]}))
+        z.writestr("apps/0/progress.json", json.dumps({"id:1": _rec()}))
+    with pytest.raises(migrate.NotAnExport):
+        migrate.read(archive)

@@ -1687,7 +1687,7 @@ _MIGRATE_MOD = None
 _IMPORTING = threading.Lock()
 # The file as the page sends it, base64 and all. A real archive of thirty
 # providers exported to 330 KB.
-HISTORY_MAX_BYTES = 48 * 1024 * 1024
+HISTORY_MAX_BYTES = 16 * 1024 * 1024
 
 
 def _migrate_module():
@@ -1829,9 +1829,12 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
                 _apply_settings(mod, install / "config.json", install, entry["settings"])
             cfg = _read_json(install / "config.json") or {}
             where = mod.output_dir_of(install, cfg, tmpl["provider"])
+        have = mod.history_at(where)
+        if have is None:
+            return None, "the history already in %s could not be read" % where.name
         first = {"folder": where.name, "install": install.name, "account": "primary",
                  "provider": tmpl["provider"], "kind": tmpl["kind"], "path": where,
-                 "records": {}, "settings": {}, "config": install / "config.json",
+                 "records": have, "settings": {}, "config": install / "config.json",
                  "made": True}
         places.append(first)
         if account == "primary":
@@ -1843,16 +1846,29 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
         # There, and its history could not be read, so it was not listed.
         # Never written over, since it is somebody's account.
         return None, "%s already has a person called %s" % (install.name, account)
+    # The folder the person gets, asked of add_account, which makes it, and
+    # read before anything is made. It can already hold their history, left
+    # behind when the provider was removed, and that is added to, never
+    # written over.
+    cfg = (_read_json(install / "config.json")
+           or _read_json(_templates_root() / tmpl["slug"] / "config.example.json") or {})
+    acct = _account_module()
+    rel = (acct.output_dir_for(install, cfg, account) if acct
+           else str(Path("..") / ("%s - %s" % (install.name, account))))
+    where = mod.output_dir_of(install, {"output_dir": rel}, tmpl["provider"])
+    have = mod.history_at(where)
+    if have is None:
+        return None, "the history already in %s could not be read" % where.name
     owner = str(entry["settings"].get("owner") or "")[:80]
     if apply:
         dest = _make_account(install, account, owner)
         _apply_settings(mod, dest, install, entry["settings"])
-        where = mod.output_dir_of(install, _read_json(dest) or {}, tmpl["provider"])
-    else:
-        where = root / ("%s - %s" % (install.name, account))
+        made = mod.output_dir_of(install, _read_json(dest) or {}, tmpl["provider"])
+        if made != where:
+            where, have = made, mod.history_at(made) or {}
     place = {"folder": where.name, "install": install.name, "account": account,
              "provider": tmpl["provider"], "kind": tmpl["kind"], "path": where,
-             "records": {}, "settings": {}, "config": install / ("config.%s.json" % account),
+             "records": have, "settings": {}, "config": install / ("config.%s.json" % account),
              "made": True}
     places.append(place)
     return place, ""
@@ -1919,15 +1935,23 @@ async def api_history_import(request: Request):
     already here is backed up before it is written, and nothing is ever
     taken out of one."""
     mod, manifest, root, chosen = await _history_upload(request)
-    if _RUNNING:
-        raise HTTPException(409, "a provider is running right now. Import once it has finished.")
+    # Taken, then the runs asked, with nothing awaited between, and a run
+    # asks whether an import holds it just before it counts itself running
+    # (_start_run), so the two never overlap. A run reads progress.json when
+    # it starts and writes it as it goes, over what an import wrote.
     if not _IMPORTING.acquire(blocking=False):
         raise HTTPException(409, "an import is already under way")
+    if _RUNNING:
+        _IMPORTING.release()
+        raise HTTPException(409, "a provider is running right now. Import once it has finished.")
     try:
         rows = await to_thread.run_sync(_history_walk, mod, manifest, root, True)
     finally:
         _IMPORTING.release()
-    if chosen and any(r.get("action") in ("set up", "add person") for r in rows):
+    # A folder chosen on the welcome page is remembered once it holds what
+    # was imported, set up now or already there.
+    if chosen and any(r.get("action") in ("set up", "add person", "fill in")
+                      and not r.get("failed") for r in rows):
         data = _read_settings()
         data["apps_root"] = str(root.resolve())
         try:
@@ -2219,6 +2243,12 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         # When the run began, so that only a list of new files this run
         # wrote is handed to the server's plug-ins afterwards.
         started = time.time()
+        # Asked with nothing awaited before the run counts itself, so an
+        # import cannot start in between (api_history_import).
+        if _IMPORTING.locked():
+            yield "data: A history file is being imported. Run this once it has finished.\n\n"
+            yield "event: done\ndata: 1\n\n"
+            return
         try:
             _RUNNING.add(app)
             proc = subprocess.Popen(
@@ -3192,7 +3222,7 @@ async function planHistory() {
   HX_FILE = ''; $('hxplan').innerHTML = ''; $('hximport').style.display = 'none';
   $('hxmsg').textContent = '';
   if (!f) return;
-  if (f.size > 32 * 1024 * 1024) { $('hxmsg').textContent = 'that file is far larger than any download history'; return; }
+  if (f.size > 12 * 1024 * 1024) { $('hxmsg').textContent = 'that file is far larger than any download history'; return; }
   $('hxmsg').textContent = 'reading the file...';
   try {
     const url = await new Promise((ok, no) => {
