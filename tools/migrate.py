@@ -70,7 +70,16 @@ never a statement, keeps its product, title and id, which its key holds
 already (a title to sixty characters), and the address of its file on
 Optum's site. That address adds Optum's own number for a form saved under
 the key of its title, so a corrected form listed under the same title is
-still told from it. A record still under a key that left out its account's
+still told from it. For Target an order filed as its invoices keeps its
+list of those saved, each one's file, which of the order's invoices it is,
+the number Target prints on it, whether it was kept or put aside for review
+and whether it names the order's items, and its size and page count, so an
+order with an invoice still to fetch fetches only that one. The invoice
+number is Target's own, not the order's, and nothing else in the file holds
+it. Each file name holds the order's date and summary, as its PDF path does
+once the order is done. Until then that path is empty, so for an order
+still to finish the list adds them.
+A record still under a key that left out its account's
 last four, as the apps did past forty characters until 0.34.0 and Chase did
 at any length until 0.17.1, also keeps what its key is built from
 and what the app compares before moving it, the document's kind, date,
@@ -143,13 +152,18 @@ SKIP_FIELDS = ("state", "downloaded_ok", "pdf_path", "discovered_at", "updated_a
 # 0.34.0 saved under the wrong year as it loads, one found by the same date
 # a year later on a bill of the same kind and account, Wireless or
 # Internet, saved with the same size and page count (#26,
-# clear_wrong_year_copies).
+# clear_wrong_year_copies). Target counts an invoice of an order as saved by
+# the order's list of those it saved, by Target's number for it or its place
+# among the order's, and whether a file is still there, kept or put aside
+# (_invoices_on_file). An order with one still to fetch has no row in the
+# receipt index, so without the list it saves the others a second time.
 # Every app's skip decisions, and every walk of its saved records, are read
 # against these by core/tests/test_a_minimal_history_skips_what_the_app_did.py.
 PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "date",
                                       "title", "account", "pdf_sha256"),
                         "American Family": ("pdf_sha256", "date", "account"),
-                        "AT&T": ("category", "date", "account", "pdf_size", "pdf_pages")}
+                        "AT&T": ("category", "date", "account", "pdf_size", "pdf_pages"),
+                        "Target": ("invoices",)}
 
 
 def _optum_form(rec: dict) -> bool:
@@ -860,10 +874,13 @@ def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None,
                 cur.update(carried)
                 changed = True
         # It lacks what its provider's own checks read too, the digest of a
-        # saved statement or the address of a saved form, which a newer
-        # file carries. Each field it lacks is filled in, and one it holds
-        # stays, since a run here wrote it or emptied it on purpose.
-        lacking = {f: inc[f] for f in _own_fields(inc, provider) if f in inc and f not in cur}
+        # saved statement, the address of a saved form or the list of an
+        # order's saved invoices, which a newer file carries. Each field it
+        # lacks is filled in, with its paths pointed at this machine as a
+        # record added is, and one it holds stays, since a run here wrote it
+        # or emptied it on purpose.
+        here = _moved(inc, old_bases, new_base)
+        lacking = {f: here[f] for f in _own_fields(inc, provider) if f in inc and f not in cur}
         if lacking:
             cur.update(lacking)
             changed = True

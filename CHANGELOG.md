@@ -7,6 +7,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **A Target order moved with `--minimal` while an invoice was still to
+  fetch no longer saves the others again.** Target counts an invoice of an
+  order as saved by the order's list of those it saved, and an order with
+  one still to fetch has no row in the receipt index yet. `--minimal` left
+  the list out, so on the new computer the next run saved the invoices
+  already saved a second time under new names, and Download again did the
+  same to every invoice on the list though its file was copied across. The
+  export now carries the list for Target, each invoice's file, its place
+  among the order's, the number Target prints on it, whether it was kept
+  or put aside and its size and page count. A list filled into a record an
+  older file moved names the files under this computer's folder, as a
+  record the import adds does.
+
 ## [0.48.0] - 2026-10-12
 
 A new control panel, on the desktop and on PaperPull Server, built around
