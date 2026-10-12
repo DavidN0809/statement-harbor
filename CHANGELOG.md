@@ -7,6 +7,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **A copy put aside for review stays in review after a history is moved
+  in.** When the other computer had set the same receipt aside after three
+  days of its page showing nothing, or had recorded the purchase or
+  document as finished without saving it, an import replaced the record of
+  a copy waiting in Manual Review here. A run then said the receipt did not
+  show on three separate days for a purchase with a copy on disk, and
+  deleting the copy no longer asked for it again. Such a record now keeps
+  its own state while its copy is still there, and takes what the other
+  computer finished once the copy has been deleted. A document the other
+  computer saved is still never downloaded again.
+
 ## [0.47.0] - 2026-10-12
 
 Your providers and download history can move to another computer or to

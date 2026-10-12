@@ -857,13 +857,34 @@ def _takes_the_state(cur: dict, inc: dict) -> bool:
     finishes it. A record an older version gave up on here is asked for
     again, and takes a state only from a record that settled it, a save or
     a receipt set aside. An export from before 0.45.0 carried no notes, so
-    its record of the same gave-up purchase looks finished without them."""
+    its record of the same gave-up purchase looks finished without them.
+
+    A copy put aside for review here keeps its record while the copy is
+    still on disk. Every app holds that done, and deleting the copy is how
+    a person asks for it again (#42), which a final state from elsewhere
+    would end."""
     if not _done(dict(inc, downloaded_ok=False)):
+        return False
+    if _in_review_here(cur):
         return False
     if cur.get("state") not in TERMINAL:
         return True
     return (asked_again(cur)
             and (inc.get("state") != "No Receipt Available" or set_aside(inc)))
+
+
+def _in_review_here(rec: dict) -> bool:
+    """A record of this install whose copy put aside for review is still
+    where it says. The apps also ask that the copy opens. One that does not
+    keeps its record too, and the app tries the purchase again, as it would
+    have without the import."""
+    if rec.get("state") != "Needs Manual Review":
+        return False
+    path = str(rec.get("pdf_path") or "")
+    try:
+        return bool(path) and Path(path).is_file()
+    except (OSError, ValueError):
+        return False
 
 
 def _last_note_replaced(cur: dict, inc: dict) -> str:
