@@ -261,6 +261,91 @@ def test_the_form_saved_first_keeps_its_key_in_whatever_order_the_page_lists_the
     assert not app._already_done(docs.Document.from_dict(found["888"]))
 
 
+# -- a history moved to another computer ---------------------------------------
+
+APP = Path(__file__).resolve().parents[1]
+
+
+def app_in(folder: Path):
+    """The app as its own main builds it over `folder`, an output folder
+    tools/migrate.py finds by the storage.py beside its progress.json."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "storage.py").write_bytes((APP / "storage.py").read_bytes())
+    if not (folder / "progress.json").exists():
+        (folder / "progress.json").write_text("{}", encoding="utf-8")
+    config = json.loads((APP / "config.example.json").read_text())
+    config.update({"owner": "Tester", "output_dir": str(folder)})
+    cfg = folder.parent / "config.json"
+    cfg.write_text(json.dumps(config))
+    return docs.App(docs.build_parser().parse_args(["--discover", "--config", str(cfg)]))
+
+
+def moved(old: Path, new: Path, minimal: bool) -> None:
+    """The history at `old` moved by tools/migrate.py into a fresh install
+    at `new`, with no PDF and no discovery.json copied across."""
+    sys.path.insert(0, str(APP.parents[1] / "tools"))
+    import migrate
+    app_in(new)
+    archive = old.parent / "history.ppz"
+    assert migrate.export(old.parent, archive, minimal=minimal) == 0
+    assert migrate.do_import(archive, new.parent, assume_yes=True) == 0
+
+
+def saved_forms(app, pages) -> dict:
+    """Each tax form these pages list, recorded by the app's own Discover
+    and saved, by the id its path ends in."""
+    found = forms_of(listed(app, pages))
+    for rec in found.values():
+        key = docs.Document.from_dict(rec).key
+        app.progress.update(key, dict(rec, state="Completed", downloaded_ok=True))
+    return found
+
+
+@pytest.mark.parametrize("minimal", [False, True], ids=["whole", "minimal"])
+def test_the_form_saved_first_keeps_its_key_after_a_move(tmp_path, minimal):
+    """The original was saved on one computer and the history moved to
+    another. There the page lists the corrected form first. The original
+    keeps the key it was saved under, so it is not fetched again and the
+    corrected form is."""
+    old, new = tmp_path / "old" / "Optum Bank", tmp_path / "new" / "Optum Bank"
+    saved_forms(app_in(old), {site.FORMS_URL: [latest(PID)],
+                              statements_url(PID): [statement(PID), tax(PID, doc="777")]})
+    moved(old, new, minimal)
+
+    app = app_in(new)
+    found = forms_of(listed(app, {
+        site.FORMS_URL: [latest(PID)],
+        statements_url(PID): [statement(PID), tax(PID, doc="888"), tax(PID, doc="777")]}))
+    assert found["777"]["document_id"] == "", "the corrected form took the original's key"
+    assert app._already_done(docs.Document.from_dict(found["777"])), \
+        "the original would be fetched again"
+    assert found["888"]["document_id"] == "888"
+    assert not app._already_done(docs.Document.from_dict(found["888"])), \
+        "the corrected form would never be fetched"
+
+
+@pytest.mark.parametrize("minimal", [False, True], ids=["whole", "minimal"])
+def test_both_saved_forms_stay_saved_after_a_move(tmp_path, minimal):
+    """Both forms were saved on one computer, the original under the key of
+    its title and the corrected one under its id. After the move the page
+    lists them the other way round, and neither is fetched again."""
+    old, new = tmp_path / "old" / "Optum Bank", tmp_path / "new" / "Optum Bank"
+    before = saved_forms(app_in(old), {
+        site.FORMS_URL: [latest(PID)],
+        statements_url(PID): [statement(PID), tax(PID, doc="777"), tax(PID, doc="888")]})
+    assert (before["777"]["document_id"], before["888"]["document_id"]) == ("", "888")
+    moved(old, new, minimal)
+
+    app = app_in(new)
+    found = forms_of(listed(app, {
+        site.FORMS_URL: [latest(PID)],
+        statements_url(PID): [statement(PID), tax(PID, doc="888"), tax(PID, doc="777")]}))
+    assert (found["777"]["document_id"], found["888"]["document_id"]) == ("", "888")
+    for doc in ("777", "888"):
+        assert app._already_done(docs.Document.from_dict(found[doc])), \
+            "form %s would be fetched again" % doc
+
+
 def test_a_corrected_form_is_named_apart_by_the_end_of_its_id():
     assert docs.told_apart_by({"account": PID, "document_id": "4400888"}) == "400888"
     assert docs.told_apart_by({"account": PID}) == "product 5678"
