@@ -1000,6 +1000,29 @@ def test_another_accounts_saved_statement_is_known_after_the_move(loading, tmp_p
         "the individual statement would be saved again as the crypto one"
 
 
+@pytest.mark.parametrize("minimal", [False, True], ids=["whole", "minimal"])
+def test_a_newer_file_mends_a_robinhood_history_an_older_minimal_moved(loading, tmp_path,
+                                                                       monkeypatch, minimal):
+    """The history was moved first with a --minimal that carried nothing of
+    Robinhood's own, and then a file made now was imported over it. The
+    saved statement takes its digest and account from the second, and is
+    known again in place of the crypto one."""
+    mod = loading(ROBINHOOD)
+    old, new = computers(tmp_path)
+    individual = statement(mod)
+    held = {individual.key: saved(individual, pdf_sha256="ab" * 32)}
+    crypto = statement(mod, account="Crypto")
+    with monkeypatch.context() as older:
+        older.setattr(migrate, "PROVIDER_SKIP_FIELDS", {})
+        first = moved(tmp_path, old, new, held)
+    assert not app_over(mod, new, first)._other_accounts_statement(crypto, "ab" * 32)
+
+    got = moved(tmp_path, old, new, held, minimal=minimal)
+    assert got[individual.key].get("pdf_sha256") == "ab" * 32, got[individual.key]
+    assert app_over(mod, new, got)._other_accounts_statement(crypto, "ab" * 32), \
+        "the individual statement would be saved again as the crypto one"
+
+
 def test_a_robinhood_crypto_statement_under_its_old_key_stays_done(loading, tmp_path):
     """A crypto statement saved before its account was part of its key
     counts as done only when the crypto page listed it."""

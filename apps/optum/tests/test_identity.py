@@ -346,6 +346,31 @@ def test_both_saved_forms_stay_saved_after_a_move(tmp_path, minimal):
             "form %s would be fetched again" % doc
 
 
+@pytest.mark.parametrize("minimal", [False, True], ids=["whole", "minimal"])
+def test_a_newer_file_mends_a_history_an_older_minimal_moved(tmp_path, monkeypatch, minimal):
+    """The history was moved first with a --minimal that carried nothing of
+    Optum's forms, and then a file made now was imported over it. The
+    record the first move left without its path, product and title takes
+    them from the second, so the original keeps its key."""
+    old, new = tmp_path / "old" / "Optum Bank", tmp_path / "new" / "Optum Bank"
+    saved_forms(app_in(old), {site.FORMS_URL: [latest(PID)],
+                              statements_url(PID): [statement(PID), tax(PID, doc="777")]})
+    sys.path.insert(0, str(APP.parents[1] / "tools"))
+    import migrate
+    with monkeypatch.context() as older:
+        older.setattr(migrate, "PROVIDER_KIND_FIELDS", {})
+        moved(old, new, minimal=True)
+    moved(old, new, minimal)
+
+    app = app_in(new)
+    found = forms_of(listed(app, {
+        site.FORMS_URL: [latest(PID)],
+        statements_url(PID): [statement(PID), tax(PID, doc="888"), tax(PID, doc="777")]}))
+    assert found["777"]["document_id"] == "", "the corrected form took the original's key"
+    assert app._already_done(docs.Document.from_dict(found["777"]))
+    assert not app._already_done(docs.Document.from_dict(found["888"]))
+
+
 def test_a_corrected_form_is_named_apart_by_the_end_of_its_id():
     assert docs.told_apart_by({"account": PID, "document_id": "4400888"}) == "400888"
     assert docs.told_apart_by({"account": PID}) == "product 5678"
