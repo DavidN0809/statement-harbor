@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from paperpull_core import storage as core_storage
+from paperpull_core.models import State
 
 
 def _harness(file: str, name: str):
@@ -114,15 +115,15 @@ def test_rename_finishes_past_a_record_whose_path_is_not_text(home):
 @pytest.mark.parametrize("what", list(DAMAGED))
 def test_review_names_finishes_past_its_own_record_whose_path_is_not_text(
         app, what, tmp_path, monkeypatch):
+    """A receipt marked for review whose own record's pdf_path and items
+    hold something other than text. The new name is given to the file and
+    its rows, and its record, which names no file, is left as it was and
+    marks nothing Completed, as a record with an empty path is."""
     # Files named the default way, put back after as Home puts them back.
     for name in ("_SPEC", "_FILENAME_PATTERN", "_PATTERN_OWNER", "_FILENAME_OWNER"):
         monkeypatch.setattr(core_storage, name, getattr(core_storage, name))
     core_storage.set_filename_owner("")
     core_storage.set_filename_patterns({})
-    """A receipt marked for review whose own record's pdf_path holds
-    something other than text. The new name is given to the file and its
-    rows, and its record, which names no file, is left as it was, as a
-    record with an empty path is."""
     mod = reviews.load(app)
     inst = reviews.runnable(mod, tmp_path / "out")
     filed = inst.paths.folder_for("Online")
@@ -130,12 +131,19 @@ def test_review_names_finishes_past_its_own_record_whose_path_is_not_text(
     purchase = reviews.as_a_run_left_it(inst, "ORDER-0001", old, saved=True,
                                         confidence="Low")
     value = damaged(old)[what]
-    inst.progress.update(purchase.key, {"pdf_path": value})
+    # The items shown beside it, damaged as well, the list holding entries
+    # that are not mappings and names that are not text.
+    items = value if what != "a list" else ["Invented Item", {"name": 5}, None]
+    inst.progress.update(purchase.key, {"pdf_path": value, "items": items})
     monkeypatch.setattr(mod, "ask", lambda prompt: "Garden Hose")
 
     inst.cmd_review_names()
 
     now = [p for p in filed.glob("*.pdf")]
     assert len(now) == 1 and "Garden Hose" in now[0].name, app.name
-    assert [Path(r["PDF Full Path"]) for r in inst.index_csv.read_all()] == now
-    assert inst.progress.get(purchase.key)["pdf_path"] == value
+    rows = inst.index_csv.read_all()
+    assert [Path(r["PDF Full Path"]) for r in rows] == now
+    assert [r["Processing Status"] for r in rows] != ["Completed"], app.name
+    record = inst.progress.get(purchase.key)
+    assert (record["pdf_path"], record["items"]) == (value, items)
+    assert record["state"] != State.COMPLETED.value, app.name

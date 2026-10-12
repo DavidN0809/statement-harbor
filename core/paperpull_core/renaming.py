@@ -617,11 +617,13 @@ def update_progress(progress, result: Result, *,
 
 
 def _text(value) -> str:
-    """A path or name a record holds, and "" for anything but text.
-    progress.json can be edited by hand or left damaged, and a number, a
-    list or a mapping where a path belongs names no file. Read as text it
-    stopped a Rename after its files had moved, with progress.json not
-    saved, so every record went on naming a file that was gone."""
+    """A path or name a record holds, and "" for anything but text or a
+    path. progress.json can be edited by hand or left damaged, and a
+    number, a list or a mapping where a path belongs names no file. Read as
+    text it stopped a Rename after its files had moved, with progress.json
+    not saved, so every record went on naming a file that was gone."""
+    if isinstance(value, os.PathLike):
+        value = os.fspath(value)
     return value.strip() if isinstance(value, str) else ""
 
 
@@ -1356,7 +1358,11 @@ def review_names(app, ask, words: ReviewWords = WORDS,
         for r, old_path in review:
             key = f"{r.get('Purchase Type')}:{r.get('Order or Receipt Number')}"
             prog = app.progress.get(key) or {}
-            items = [i.get("name", "") for i in prog.get("items", [])][:10]
+            # A list of mappings, each name text, as a damaged record's items
+            # stopped the review here (_text).
+            items = prog.get("items")
+            items = [_text(i.get("name")) for i in (items if isinstance(items, list) else ())
+                     if isinstance(i, dict)][:10]
             print(f"  {r.get('Purchase Date')}  #{r.get('Order or Receipt Number')}"
                   f"  [{r.get('Classification Confidence')}]")
             print(f"{words.current}{r.get('PDF Filename')}")
