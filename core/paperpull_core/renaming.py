@@ -262,8 +262,25 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
     # about to stop existing. Freeing them is apply's job.
     leaving = {str(p).lower() for _i, _r, p, _n, _w in wanted}
     claimed = {}                      # a folder -> the names given out in it
+    planned = {}                      # a file (_file_key) -> the change planned for it
 
     for slot, row, old_path, new_name, whole in wanted:
+        # One change for each file. Download again can leave two rows of one
+        # purchase naming one file, and the second row was given a name of
+        # its own beside the first's. The preview counted the file twice and
+        # listed it with two new names, apply renamed it once, and the name
+        # given out for nothing was held from another file wanting it, which
+        # took " (3)" with " (2)" free and was moved again by the next
+        # Rename. A file the first row left with its name, as one told apart
+        # already, was moved on to " (2)" for the second. Every row naming
+        # the file follows it by its path when the ledgers are written
+        # (update_rows).
+        key = _file_key(old_path)
+        first = planned.get(key)
+        if first is not None:
+            changes[slot] = Change(row, old_path, first.new_name,
+                                   reason=first.reason or "renamed for another row of the index")
+            continue
         target = old_path.parent / new_name
         given = claimed.setdefault(str(old_path.parent).lower(), set())
         free = ((not target.exists() or str(target).lower() in leaving)
@@ -289,11 +306,12 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
             # name counted as taken, and five real files were asked to move.
             if target.name.lower() == old_path.name.lower():
                 given.add(target.name.lower())
-                changes[slot] = Change(row, old_path, target.name, reason="already named that")
+                changes[slot] = planned[key] = Change(row, old_path, target.name,
+                                                      reason="already named that")
                 continue
         given.add(target.name.lower())
-        changes[slot] = Change(row, old_path, target.name, new_path=target,
-                               max_path_length=max_path_length)
+        changes[slot] = planned[key] = Change(row, old_path, target.name, new_path=target,
+                                              max_path_length=max_path_length)
     return changes
 
 
