@@ -88,15 +88,17 @@ WALKS_FOR_RENAME = {
     "target": {
         "target_receipts.App._mend_invoice_lists":
             "points each order's list of invoices at its files as they are now, before "
-            "Rename or Review Names reads the list, and a record --minimal moved has no "
-            "list to mend",
+            "Rename or Review Names reads the list. --minimal carries the list, and a "
+            "purchase type or order number a record lacks is read off its key, which "
+            "every history carries",
     },
 }
 
 CUT_KEY = ("moves a record off a key cut before 0.34.0, and --minimal carries what it reads "
            "for such a record (KEY_FIELDS, test_a_minimal_history_moves_a_cut_key.py)")
 
-# And these decide no download for another reason.
+# And these decide no download for another reason, or read only what a moved
+# record holds, some of it another way.
 WALKS_DECIDE_NOTHING = {
     "aafmaa": {
         "aafmaa_docs.forget_postback_names":
@@ -129,11 +131,10 @@ WALKS_DECIDE_NOTHING = {
     },
     "target": {
         "renaming._numbers_naming":
-            "which other order's row, pdf_path or list of invoices names a file, asked "
-            "only for an order whose own record holds a list. A moved order without its "
-            "list claims what its pdf_path names, as an order saved before Target kept "
-            "lists does, and an order number missing from a record is read off its key, "
-            "which every history carries",
+            "which other order's row, pdf_path or list of invoices names a file. "
+            "--minimal carries pdf_path and the list, and an order number a record lacks "
+            "is read off its key, which every history carries, so a moved order's record "
+            "claims the files it claimed before the move",
     },
 }
 
@@ -1091,15 +1092,18 @@ def test_another_app_does_not_carry_a_providers_own_fields():
     """The same field can hold more in another app, so only the records of
     the provider that reads it carry it."""
     rec = dict(HISTORY, state=State.COMPLETED.value, downloaded_ok=True, pdf_pages="2",
-               href="/account/products/12345678/tax_documents/777.pdf")
+               href="/account/products/12345678/tax_documents/777.pdf",
+               invoices=[{"file": "Invoices/2026-05-14 Invented Invoice (1 of 1).pdf",
+                          "part": "1 of 1", "number": "10000000000000001", "kept": True,
+                          "names": True, "size": 4096, "pages": 1}])
     own = {provider: set(fields) for provider, fields in migrate.PROVIDER_SKIP_FIELDS.items()}
     for provider, (_which, fields) in migrate.PROVIDER_KIND_FIELDS.items():
         own.setdefault(provider, set()).update(fields)
-    assert {"Robinhood", "American Family", "AT&T", "Optum Bank"} <= set(own)
+    assert {"Robinhood", "American Family", "AT&T", "Optum Bank", "Target"} <= set(own)
     for provider, fields in own.items():
         assert fields <= set(migrate._skip_fields(rec, provider)), provider
     every = set().union(*own.values())
-    for provider in ("", "Chase", "Target"):
+    for provider in ("", "Chase", "Walmart"):
         cut = migrate._skip_fields(rec, provider)
         assert not every & set(cut), (provider, cut)
 

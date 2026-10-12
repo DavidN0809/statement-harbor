@@ -25,6 +25,34 @@ All notable changes to PaperPull are recorded here. Versioning follows
   account is not read whatever its headings say, so an offer to open a
   retirement account, or a holder called Ira shown in capitals, no longer
   passes for the retirement account's own heading.
+- **A Target order moved with `--minimal` while an invoice was still to
+  fetch no longer saves the others again.** Target counts an invoice of an
+  order as saved by the order's list of those it saved, and an order with
+  one still to fetch has no row in the receipt index yet. `--minimal` left
+  the list out, so on the new computer the next run saved the invoices
+  already saved a second time under new names, and Download again did the
+  same to every invoice on the list though its file was copied across. The
+  export now carries the list for Target, each invoice's file, its place
+  among the order's, the number Target prints on it, whether it was kept
+  or put aside and its size and page count. A list filled into a record an
+  older file moved names the files under this computer's folder, as a
+  record the import adds does. What `--minimal` prints when it is done now
+  says that order and invoice numbers stay, and file names, which can name
+  accounts and items.
+- **Target no longer stops on an order whose list of invoices was
+  damaged.** An entry whose file was not text, or a list that was not a
+  list, raised as the order's invoices were walked, so the order failed on
+  every run without its invoices being tried. Such a value now reads as
+  none, as every record value does, and an invoice it no longer names is
+  fetched again.
+- **An Apple purchase whose receipt Apple refused keeps its count of
+  refusals through a move with `--minimal`.** Apple saves a record of the
+  purchase in place of its receipt once it has refused the receipt on three
+  separate runs. `--minimal` left out the runs counted so far, so on the
+  new computer the purchase took three more refusals before its record was
+  saved. The export now carries them, and the runs it was not asked on, for
+  a purchase not saved yet, and a newer file fills them in for one an older
+  file moved without them.
 
 ## [0.48.0] - 2026-10-12
 
