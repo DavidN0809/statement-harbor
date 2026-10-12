@@ -463,9 +463,33 @@ def _free_name(directory: Path, filename: str, max_path_length: int,
 _LOCKED_TRIES = 30
 _LOCKED_PAUSE_S = 2
 
+# Each file this run waited for and could not write, after a write gave up
+# or free_to_write found it held. The save every app makes on its way out
+# tries such a file once and does not wait its minute for it again
+# (JsonStore.save).
+_HELD = set()
 
-def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
+# Each file the save on the way out could not write, which report_run_result
+# reads, so a run whose run state was not saved never reads as finished.
+_UNSAVED = []
+
+
+def unsaved_on_leaving() -> list:
+    """The files the save on the way out could not write, in this run."""
+    return list(_UNSAVED)
+
+
+def _held_key(path) -> str:
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
+def atomic_write_text(path: Path, text: str, encoding: str = "utf-8", *,
+                      tries: Optional[int] = None) -> None:
+    """Write *path* whole or not at all, waiting up to a minute while
+    another program holds it. With `tries` of 1 it is tried once, with no
+    wait and nothing said, and PermissionError says the file was held."""
     path = Path(path)
+    tries = _LOCKED_TRIES if tries is None else max(1, tries)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
     try:
@@ -475,16 +499,19 @@ def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
             os.fsync(f.fileno())
         # Windows: os.replace fails while the target is open in Excel etc.
         # Retry with a message instead of crashing mid-run.
-        for attempt in range(_LOCKED_TRIES):
+        for attempt in range(tries):
             try:
                 os.replace(tmp, path)
+                _HELD.discard(_held_key(path))
                 break
             except PermissionError:
-                if attempt == 0:
-                    print(f"  ! {path.name} is locked (open in Excel?). "
-                          f"Close it - retrying for up to 60s...")
-                time.sleep(_LOCKED_PAUSE_S)
+                if tries > 1:
+                    if attempt == 0:
+                        print(f"  ! {path.name} is locked (open in Excel?). "
+                              f"Close it - retrying for up to 60s...")
+                    time.sleep(_LOCKED_PAUSE_S)
         else:
+            _HELD.add(_held_key(path))
             raise PermissionError(
                 f"{path} stayed locked. Close the program using it and re-run; "
                 f"the pending update was not lost (progress is tracked).")
@@ -518,6 +545,7 @@ def free_to_write(path: Path, say=print) -> bool:
     for attempt in range(_LOCKED_TRIES):
         try:
             os.replace(path, path)
+            _HELD.discard(_held_key(path))
             return True
         except FileNotFoundError:
             return True
@@ -529,11 +557,14 @@ def free_to_write(path: Path, say=print) -> bool:
             time.sleep(_LOCKED_PAUSE_S)
         except OSError:
             return False
+    _HELD.add(_held_key(path))
     return False
 
 
-def atomic_write_json(path: Path, data) -> None:
-    atomic_write_text(Path(path), json.dumps(data, indent=2, ensure_ascii=False))
+def atomic_write_json(path: Path, data, **how) -> None:
+    """`how` is passed on to atomic_write_text only when given, so a test's
+    stand-in for it that takes no `tries` serves every other save as before."""
+    atomic_write_text(Path(path), json.dumps(data, indent=2, ensure_ascii=False), **how)
 
 
 def backup_file(path: Path, backups_dir: Path) -> Optional[Path]:
@@ -611,6 +642,13 @@ class JsonStore:
         self.backups_dir = backups_dir
         self.data: Dict[str, dict] = {}
         self._loaded = False
+        # The records as the file holds them, read or last written, or None
+        # when that is not known. The save on the way out writes nothing
+        # when the records are still these.
+        self._as_written: Optional[str] = None
+
+    def _canonical(self) -> str:
+        return json.dumps(self.data, sort_keys=True, ensure_ascii=False, default=str)
 
     def load(self) -> Dict[str, dict]:
         if self.path.exists():
@@ -620,6 +658,7 @@ class JsonStore:
                     raw = json.load(f)
                 if isinstance(raw, dict):
                     self.data = raw
+                    self._as_written = self._canonical()
                 else:
                     # Valid JSON of the wrong shape, a list or a bare null.
                     # This used to fall through and leave data empty, so the
@@ -654,10 +693,40 @@ class JsonStore:
                 continue
         return None
 
-    def save(self, backup: bool = False) -> None:
+    def save(self, backup: bool = False, leaving: bool = False) -> None:
+        """Write the records to the file.
+
+        `leaving` is for the save every app makes on its way out, in the
+        finally of its main. When another program holds the file, that save
+        says in one line that the file was not written and where, and the
+        run ends as it would have. It used to raise out of the finally after
+        its minute, so the person saw a traceback in place of how the run
+        ended, and the panel never got the run's result, which is written
+        after it. A file this run already waited for and could not write, as
+        when Rename's check finds progress.json held and stops, is tried once
+        more and not waited for again."""
         if backup and self.backups_dir is not None:
             backup_file(self.path, self.backups_dir)
-        atomic_write_json(self.path, self.data)
+        if not leaving:
+            atomic_write_json(self.path, self.data)
+            self._as_written = self._canonical()
+            return
+        # A run that changed nothing, a preview or a Verify, has nothing to
+        # write, and a held file then costs it nothing and is not reported.
+        now = self._canonical()
+        if now == self._as_written:
+            return
+        try:
+            if _held_key(self.path) in _HELD:
+                atomic_write_json(self.path, self.data, tries=1)
+            else:
+                atomic_write_json(self.path, self.data)
+            self._as_written = now
+        except PermissionError:
+            _UNSAVED.append(str(self.path))
+            print("  ! %s could not be written, so it keeps what was last saved in it. "
+                  "Close any program that has it open before the next run." % self.path,
+                  flush=True)
 
     def get(self, key: str) -> Optional[dict]:
         if not self._loaded:

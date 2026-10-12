@@ -1214,8 +1214,8 @@ def main(argv=None):
         print("\nStopped by user. Progress saved.")
         return 130
     finally:
-        app.progress.save()
-        app.discovery.save()
+        app.progress.save(leaving=True)
+        app.discovery.save(leaving=True)
         # A run that only looked at the page writes no summary. The
         # summary rewrites new-this-run.txt, and for a mode that
         # downloads nothing that means replacing the real list from
