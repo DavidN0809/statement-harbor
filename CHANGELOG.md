@@ -7,7 +7,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.49.0] - 2026-10-12
+
+Review names comes to the control panel, so PaperPull Server, which has no
+console, can rename the receipts an app was unsure how to name, and
+PaperPull Server is no longer a beta. The release also has Robinhood save
+IRA statements, carries what Target and Apple need through a history moved
+with `--minimal`, and has the panel tell a receipt saved under a name to
+review from one set aside.
 
 ### Added
 - **Review names in the panel, and on PaperPull Server.** Every receipt
