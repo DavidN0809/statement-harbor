@@ -69,6 +69,9 @@ body { margin: 0; min-height: 100vh; display: flex; flex-direction: column;
 a { color: var(--link); }
 a:hover { color: var(--accent-text); }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+/* A page's heading takes focus when the page changes, for screen readers,
+   and needs no ring for that. */
+h1[tabindex="-1"]:focus, main:focus { outline: none; }
 [hidden] { display: none !important; }
 h1, h2, h3 { margin: 0; line-height: 1.2; }
 h1 { font-size: 30px; font-weight: 700; }
@@ -450,7 +453,7 @@ dialog::backdrop { background: var(--overlay); }
 
 /* -- the server's sign-in window ------------------------------------------- */
 body.docked .dock { display: flex; }
-.dock { display: none; position: fixed; top: 0; right: 0; bottom: 0; width: min(760px, 100vw); z-index: 40;
+.dock { display: none; position: fixed; top: 0; right: 0; bottom: 0; width: min(640px, 100vw); z-index: 40;
         flex-direction: column; gap: 12px; padding: 18px; background: var(--surface); border-left: 1px solid var(--line);
         box-shadow: var(--shadow-lg); }
 .dock .dock-head { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
@@ -458,8 +461,8 @@ body.docked .dock { display: flex; }
 .dock .dock-head p { color: var(--ink-2); font-size: 14px; margin-top: 2px; }
 .dock iframe { flex: 1; width: 100%; border: 1px solid var(--line); border-radius: 12px; background: #0f1115; min-height: 320px; }
 .dock .tiny { color: var(--muted); }
-@media (min-width: 1500px) {
-  body.docked main, body.docked .runbar, body.docked footer.foot { margin-right: 760px; width: auto; }
+@media (min-width: 1200px) {
+  body.docked main, body.docked .runbar, body.docked footer.foot { margin-right: 640px; width: auto; }
   body.docked .dock { box-shadow: none; }
 }
 

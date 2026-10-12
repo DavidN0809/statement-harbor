@@ -442,7 +442,9 @@ function renderAccount() {
   lockStarts();
 }
 function gapList(r) {
-  if (!r.gaps.length || r.state !== 'gap') return '';
+  // Shown whenever there are any, since an account that is also past its
+  // usual date can be missing periods in the middle too.
+  if (!r.gaps.length) return '';
   return '<div style="padding:16px 24px 0"><p class="small" style="font-weight:700;margin-bottom:6px">Possible gaps</p>' +
     '<p class="hint" style="margin-bottom:8px">A run that looks current can still be missing periods in the middle.</p><ul class="runs">' +
     r.gaps.map(g => '<li><span style="flex:1">' + esc(when(g.after)) + ' to ' + esc(when(g.before)) + ' · ' + esc(String(g.missing)) +
