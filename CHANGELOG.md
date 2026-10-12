@@ -18,8 +18,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   server alike. It lists the receipts waiting, with each one's date, order
   number and items, and renames each one you type a better summary for,
   with its rows in the receipt index and order history and its record in
-  progress.json following it. A blank box keeps its name, and a summary
-  is taken as one line of at most 120 characters. The app runs the review
+  progress.json following it. A blank box keeps its name, and so do
+  words that ask to keep it, such as keep, keep this name or same, here
+  and in the console alike, so they never become a receipt's name. A
+  summary is taken as one line of at most 120 characters. The app runs the review
   the console one runs, with what you typed, so it renames only what that
   review would, and a name typed for a receipt that stopped waiting
   meanwhile does nothing and is said. The double-click
@@ -68,6 +70,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   every run without its invoices being tried. Such a value now reads as
   none, as every record value does, and an invoice it no longer names is
   fetched again.
+- **A receipt saved under a name the app was unsure of is no longer said
+  to be set aside.** A run that saved one said a document set aside sat in
+  the Manual Review folder, where there was none, since the receipt was
+  filed where it belongs and waits only for a better name. Every receipt
+  app now reports such a receipt on its own, and the panel says it was
+  saved under a name to review and offers Review names, keeping the Manual
+  Review folder for a document really set aside.
+- **An account's Latest documents lists receipts saved by older versions.**
+  It read only records that say they were downloaded, which Target has
+  written for every receipt it saves only since 0.41.1, so an older Target
+  archive of 67 receipts said Nothing saved yet. A record from before then counts when it says it
+  was completed.
 - **An Apple purchase whose receipt Apple refused keeps its count of
   refusals through a move with `--minimal`.** Apple saves a record of the
   purchase in place of its receipt once it has refused the receipt on three

@@ -853,6 +853,9 @@ class App:
                            notes=("Low classification confidence" if review_needed else ""))
         if review_needed:
             self.stats["manual_review"] += 1
+            # Saved under a name it was unsure of, which Review Names
+            # puts right, not set aside in Manual Review.
+            self.stats["name_review"] = self.stats.get("name_review", 0) + 1
         if purchase.document_type == "Invoice":
             self.stats["invoices_downloaded"] += 1
         else:

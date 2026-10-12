@@ -181,6 +181,38 @@ def test_of_two_names_for_one_file_the_one_for_its_own_purchase_is_taken(
 
 
 @pytest.mark.parametrize("app", APPS, ids=IDS)
+def test_words_that_keep_a_name_from_the_panel_keep_it(app, tmp_path, monkeypatch, capsys):
+    """The panel's empty box once read "Keep this name", and typed into
+    four boxes on a real Target archive it renamed four receipts "... Keep
+    This Name Invoice.pdf". Words that ask to keep a name keep it, as a
+    blank box does, and both receipts stay waiting for a name."""
+    mod, inst, first, second = two_unsure(app, tmp_path, monkeypatch)
+    rows = inst.index_csv.read_all()
+    answered(inst, tmp_path, monkeypatch, [
+        {"id": str(first), "number": "ORDER-0001", "summary": "Keep this name"},
+        {"id": str(second), "number": "ORDER-0002", "summary": " same. "}])
+    assert files(inst) == sorted([FIRST, SECOND])
+    assert inst.index_csv.read_all() == rows
+    assert "No receipt was given a new name, so nothing was renamed." in capsys.readouterr().out
+    assert [r["number"] for r in listed(inst, tmp_path, monkeypatch)] == ["ORDER-0001", "ORDER-0002"]
+
+
+@pytest.mark.parametrize("app", APPS, ids=IDS)
+def test_words_that_keep_a_name_in_a_console_keep_it(app, tmp_path, monkeypatch, capsys):
+    """The same words typed at the console's question keep the name, and the
+    receipt after them is still asked about and renamed."""
+    mod, inst, first, second = two_unsure(app, tmp_path, monkeypatch)
+    typed = iter(["keep this name", "Invented Lamp"])
+    monkeypatch.setattr(mod, "ask", lambda prompt: next(typed))
+    inst.cmd_review_names()
+    names = files(inst)
+    assert FIRST in names and SECOND not in names, names
+    assert any("Invented Lamp" in n for n in names), names
+    assert "That keeps its name." in capsys.readouterr().out
+    assert rows_for(inst, "ORDER-0001")[0]["PDF Filename"] == FIRST
+
+
+@pytest.mark.parametrize("app", APPS, ids=IDS)
 def test_q_from_the_panel_is_a_name_and_never_a_stop(app, tmp_path, monkeypatch):
     """In a console q stops the review. Typed in the panel it is a summary
     like any other, and the receipt after it is renamed as well."""

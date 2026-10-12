@@ -1522,6 +1522,24 @@ class ReviewWords:
 
 WORDS = ReviewWords()
 
+# What a person types to keep a receipt's name, which is never a summary.
+# The panel's empty box once read "Keep this name", and typed into four
+# boxes it renamed four receipts "... Keep This Name Invoice.pdf". The
+# panel's own list (KEEP_WORDS in gui/static/app.js) is the same.
+KEEP_WORDS = frozenset({
+    "keep", "keep it", "keep this", "keep name", "keep the name", "keep this name",
+    "keep its name", "keep same", "keep the same", "keep the same name", "same",
+    "same name", "the same", "no change", "unchanged", "leave it", "leave as is",
+})
+
+
+def keeps_name(text) -> bool:
+    """Whether a typed summary asks to keep the name rather than give one,
+    read without case, punctuation or extra spaces."""
+    if not isinstance(text, str):
+        return False
+    return " ".join(re.sub(r"[^a-z ]+", " ", text.lower()).split()) in KEEP_WORDS
+
 # Apple and Uber, written after the rest, print the same without the colons.
 PLAIN_WORDS = ReviewWords(current="    Current file  ", items="    Items  ",
                           question="    New summary (blank=keep, q=quit) ",
@@ -1696,7 +1714,8 @@ def _panel_answers(raw: str) -> dict:
         if not (isinstance(rid, str) and isinstance(number, str) and isinstance(summary, str)):
             continue
         summary = _one_line(summary)[:SUMMARY_MAX].strip()
-        if rid and summary:
+        # Words that ask to keep the name keep it, as a blank box does.
+        if rid and summary and not keeps_name(summary):
             out[(rid, number.strip())] = summary
     return out
 
@@ -1843,6 +1862,9 @@ def review_names(app, ask, words: ReviewWords = WORDS,
                 new = ask(words.question).strip()
                 if new.lower() == "q":
                     break
+            if keeps_name(new):
+                print("    That keeps its name.\n")
+                continue
             if not new:
                 print()
                 continue
