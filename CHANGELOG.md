@@ -110,6 +110,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
   a second person's Robinhood history included. They name no person and no
   account number, and Robinhood's record keys already hold most of them.
   The skip checks of the other apps read nothing that `--minimal` leaves out.
+- **A history moved with `migrate.py --minimal` no longer downloads again a
+  statement saved under a key without the account's last four.** Until
+  0.34.0 a document's key cut its account to forty characters, and until
+  0.17.1 Chase's left out the last four of any account. The 45 apps whose
+  key carries the account move such a record to the key that keeps the
+  last four when they load, rebuilding it from the record's own date,
+  title, account and kind (and for Capital One and Schwab its place among
+  same-day statements). `--minimal` left those out, so on the new computer
+  the record stayed where it was and the statement, listed under its whole
+  key, was fetched a second time. It reached an install that no version
+  since had opened on the old computer. A record still under such a key
+  now keeps those fields, every other record carries what it did before,
+  and importing a file made now over a history an older `--minimal` file
+  already moved gives those records what they were missing.
 
 ## [0.46.0] - 2026-10-11
 

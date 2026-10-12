@@ -59,10 +59,21 @@ Robinhood those include each document's category, date, title and account,
 the parts its record keys are made of, the key a tax form was saved under
 before its year was read, which of Robinhood's four fixed statement and tax
 pages listed it, and the SHA-256 digest of the saved file, which says nothing
-of what the file holds. On a real archive that took the file from 330 KB to
-64 KB and removed every item name, order number and purchase total. Be clear
-about what it does NOT remove: the recorded PDF path stays, and filenames
-embed account labels, so a line like
+of what the file holds. A record still under a key that left out its
+account's last four, as the apps did past forty characters until 0.34.0 and
+Chase did at any length until 0.17.1, also keeps what its key is built from
+and what the app compares before moving it, the document's kind, date,
+title, account, place among same-day twins and id. The app needs them to move
+it to the key that keeps the last four when it loads, and without the move it
+downloads that document again. Its key holds most of that already. What they
+add is the account's whole label and the document's whole title, where the
+key holds the first forty and sixty characters less those a file name cannot
+hold, and for Capital One and Schwab a document's category and the
+provider's id for it. A label ends in the last four, which every key written
+since holds too. On a real archive that took the file from 330 KB to 64 KB
+and removed every item name, order number and purchase total. Be clear about
+what it does NOT remove: the recorded PDF path stays, and filenames embed
+account labels, so a line like
 "Statements\\2026-08-18 Statement - FREEDOM (...0962).pdf" survives. It is a
 much smaller and much less revealing file, not an anonymous one. The cost is
 that the new machine starts with no history to report on until it runs.
@@ -86,7 +97,9 @@ from pathlib import Path
 _CORE = Path(__file__).resolve().parents[1] / "core"
 if (_CORE / "paperpull_core").is_dir():
     sys.path.insert(0, str(_CORE))
+from paperpull_core.keys import account_component  # noqa: E402
 from paperpull_core.not_shown import DAYS_KEY, asked_again, set_aside  # noqa: E402
+from paperpull_core.storage import sanitize_component  # noqa: E402
 
 # The file this writes. Version 1 had one entry per folder and no people or
 # settings, and still imports.
@@ -116,6 +129,24 @@ SKIP_FIELDS = ("state", "downloaded_ok", "pdf_path", "discovered_at", "updated_a
 # core/tests/test_a_minimal_history_skips_what_the_app_did.py.
 PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "date",
                                       "title", "account", "pdf_sha256")}
+
+# What an app builds a document's key from, and compares with a record
+# already under the new key, to move a record off a key that cut the account
+# to forty characters as it loads (paperpull_core.keys.migrate_account_keys,
+# and Chase's own copy). Capital One, Schwab, Interactive Brokers and
+# Vanguard key a document by its type and its place among same-day twins and
+# keep its id beside the key, and Ally's key reads the account its list gave.
+# Carried only for a record still under such a key. Every app that moves one
+# is read and run through the tool by
+# core/tests/test_a_minimal_history_moves_a_cut_key.py.
+KEY_FIELDS = ("category", "doc_type", "date", "title", "account", "listed_account",
+              "occurrence", "document_id")
+
+# Chase has kept an account's last four in its key since 0.17.1 whatever its
+# length, where the other apps keep it only past forty characters, so its
+# own move takes a short account's record off an old key too
+# (chase_docs.Document.key and migrate_legacy_keys).
+LAST_FOUR_AT_ANY_LENGTH = {"Chase"}
 
 # Read out of an install's own storage.py, the same way the status report does,
 # so an install is identified by what it IS rather than what its folder is
@@ -413,6 +444,32 @@ def _reader(place: dict, places: list) -> str:
     return max(beside, key=lambda p: len(p["folder"]))["provider"] if beside else place["provider"]
 
 
+def _under_cut_key(key: str, rec: dict, provider: str = "") -> bool:
+    """Whether a record is still under a key that left out its account's
+    last four, so the app moves it to the key that keeps them as it loads.
+    Its key holds the account cut to forty characters and not the account
+    with the last four, each built as the provider's app builds them. An
+    account with no last four, or one that fits outside Chase, is the same
+    both ways and never moves."""
+    account = rec.get("account")
+    if not account or not isinstance(account, str):
+        return False
+    raw = sanitize_component(account)
+    whole = account_component(raw)
+    if provider in LAST_FOUR_AT_ANY_LENGTH:
+        # Cut to nothing, the account is its last four alone, as "-1234".
+        whole = raw[:40] + account_component(raw, limit=0)
+    return raw[:40] in key and whole not in key
+
+
+def _key_fields(key: str, rec: dict, provider: str = "") -> dict:
+    """What the app rebuilds a record's key from, for a record still under
+    a key that left out the last four, and nothing for any other."""
+    if not _under_cut_key(str(key), rec, provider):
+        return {}
+    return {f: rec[f] for f in KEY_FIELDS if f in rec}
+
+
 # -- export ------------------------------------------------------------------
 
 def build(root: Path, minimal: bool = False):
@@ -432,7 +489,8 @@ def build(root: Path, minimal: bool = False):
             recs = place["records"]
             if minimal:
                 reader = _reader(place, places)
-                recs = {k: _skip_fields(v, reader) for k, v in recs.items()}
+                recs = {k: dict(_skip_fields(v, reader), **_key_fields(k, v, reader))
+                        for k, v in recs.items()}
             name, n = place["folder"], 2
             while name.lower() in used:
                 name, n = "%s (%d)" % (place["folder"], n), n + 1
@@ -744,6 +802,15 @@ def _merge(target: dict, incoming: dict, old_bases, new_base: Path):
         if inc.get("downloaded_ok") and not cur.get("downloaded_ok"):
             cur["downloaded_ok"] = True
             changed = True
+        # A record an older --minimal brought here holds none of what its
+        # key is built from, where a record the app wrote holds all of it.
+        # It takes that from a file that carries it, so the app can move it
+        # off a key that left out the last four.
+        if not any(f in cur for f in KEY_FIELDS):
+            carried = {f: inc[f] for f in KEY_FIELDS if f in inc}
+            if carried:
+                cur.update(carried)
+                changed = True
         if _takes_the_state(cur, inc):
             cur["state"] = inc["state"]
             # The state comes with what it was written with. A receipt set

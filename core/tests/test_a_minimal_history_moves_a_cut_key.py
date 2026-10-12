@@ -1,7 +1,8 @@
 """A history moved with --minimal still moves a key cut before 0.34.0.
 
-Until 0.34.0 a document's key held its account cut to forty characters.
-Every app whose key carries the account moves a record still under the cut
+Until 0.34.0 a document's key held its account cut to forty characters, and
+until 0.17.1 Chase's left out the last four of an account of any length.
+Every app whose key carries the account moves a record still under such a
 key to the whole one as it loads its progress, through
 paperpull_core.keys.migrate_account_keys or Chase's own copy. It rebuilds
 that key from the record's own fields, its category or type, date, title,
@@ -9,20 +10,24 @@ account and, in Capital One and Schwab, its place among same-day twins, and
 compares those and the document id with a record already under the new key.
 tools/migrate.py --minimal left all of those out, so on the new computer
 such a record never moved, and the statement, listed under its whole key,
-was downloaded again. It reaches an install no version since 0.34.0 opened
-on the old computer, for an account over forty characters.
+was downloaded again. It reaches an install no version since opened on the
+old computer.
 
 The apps are found by what they do, a function their App runs over each
 store's records as it loads, and every app that calls the core's move must
-be among them. What each one's key reads is read from its Document, and a
+be among them. What each one's key reads is read from its Document, and the
+keys a record is moved from are found by running the app's own move. A
 record holding all of it goes through a real export and import and the
-app's own move and skip decision. Every name and number is invented.
+app's own move and skip decision, into a fresh install, one that listed the
+statement already, and one an older --minimal moved it to. Every name and
+number is invented.
 """
 import argparse
 import ast
 import copy
 import importlib
 import json
+import re
 import shutil
 import sys
 import zipfile
@@ -34,7 +39,6 @@ from paperpull_core import keys
 from paperpull_core import storage as core_storage
 from paperpull_core.keys import account_component
 from paperpull_core.models import State
-from paperpull_core.storage import sanitize_component
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -53,9 +57,13 @@ def entry_of(app: Path):
 APPS = sorted(d for d in (REPO / "apps").iterdir() if d.is_dir() and entry_of(d))
 
 # Long enough that the last four falls past the cut, the second with
-# characters a filename cannot hold, which the key leaves out.
-ACCOUNTS = ("Invented Cash Rewards World Elite Mastercard (...1234)",
-            'Invented Rewards: Visa Signature/Card "Household" (...5678)')
+# characters a filename cannot hold, which the key leaves out. Every app's
+# key changed for these.
+LONG = ("Invented Cash Rewards World Elite Mastercard (...1234)",
+        'Invented Rewards: Visa Signature/Card "Household" (...5678)')
+# Short enough to fit, which only Chase's key changed for, since it keeps
+# the last four of any account.
+ACCOUNTS = LONG + ("Invented Checking (...4321)",)
 
 # An invented value for every field a key reads but the account, none of
 # them empty, so a field the tool leaves out builds another key.
@@ -247,10 +255,18 @@ def document(mod, app: Path, account: str):
     return mod.Document(**fields)
 
 
-def cut_key(doc, account: str) -> str:
-    """The key an older version wrote this document under."""
-    raw = sanitize_component(account)
-    return doc.key.replace(account_component(raw), raw[:40])
+def old_keys(rebuild, doc, held: dict) -> list:
+    """Every key the app's own move takes this record from to the key it
+    has now, found by running the move on the key with each last four it
+    may have added taken back out. So nothing here builds an old key the
+    way the tool decides one."""
+    found = []
+    for added in re.finditer(r"-\d{4}", doc.key):
+        old = doc.key[:added.start()] + doc.key[added.end():]
+        trial = {old: copy.deepcopy(held)}
+        if rebuild(trial) == 1 and doc.key in trial:
+            found.append(old)
+    return found
 
 
 def moved(tmp_path: Path, app: Path, records: dict, minimal: bool, new=None) -> dict:
@@ -272,49 +288,62 @@ def moved(tmp_path: Path, app: Path, records: dict, minimal: bool, new=None) -> 
 def test_a_cut_key_moved_with_minimal_is_moved_and_skipped(app, move, loading, tmp_path):
     mod = loading(app)
     rebuild = getattr(mod, move)
+    moves = 0
     for n, account in enumerate(ACCOUNTS):
         doc = document(mod, app, account)
-        old_key = cut_key(doc, account)
-        assert old_key != doc.key, (app.name, "its key does not cut the account")
         held = dict(doc.to_dict(), state=State.COMPLETED.value, downloaded_ok=True,
                     pdf_path=str(tmp_path / "old" / app.name / "Statements" / "x.pdf"))
         # What the old computer would have done with it.
-        on_old = {old_key: copy.deepcopy(held)}
-        assert rebuild(on_old) == 1 and doc.key in on_old, (
+        found = old_keys(rebuild, doc, held)
+        assert found or account not in LONG, (
             "%s runs %s over its records as it loads and it moves no cut key. "
             "Read what it reads, and add it to OTHER_MOVES with why --minimal "
             "need not carry that, or carry it in tools/migrate.py" % (app.name, move))
+        moves += len(found)
 
         # The new computer may have listed the statement already, under its
         # whole key, and the move takes the saved record over it only when
-        # the two are the same document.
+        # the two are the same document. Or an older --minimal may have
+        # brought the record there without what its key is built from.
         listed = dict(document(mod, app, account).to_dict(),
                       state=State.DISCOVERED.value, downloaded_ok=False)
-        for minimal, new in ((False, None), (True, None), (True, {doc.key: listed})):
-            here = tmp_path / ("%d-%d-%d" % (n, minimal, bool(new)))
-            records = moved(here, app, {old_key: held}, minimal, new)
-            for loaded in LOADS[app]:
-                getattr(mod, loaded)(records)
-            assert old_key not in records and doc.key in records, (
-                "%s left a record moved %s under the key cut before 0.34.0, so "
-                "the statement listed under its whole key is downloaded again"
-                % (app.name, "with --minimal" if minimal else "whole"))
-            assert app_over(mod, here / "out", records)._already_done(doc), \
-                (app.name, account, minimal, bool(new))
+        for m, old_key in enumerate(found):
+            stripped = dict(migrate._skip_fields(held), imported_at="2031-04-01T10:00:00")
+            for v, (minimal, new) in enumerate(((False, None), (True, None),
+                                                (True, {doc.key: listed}),
+                                                (True, {old_key: stripped}))):
+                here = tmp_path / ("%d-%d-%d" % (n, m, v))
+                records = moved(here, app, {old_key: held}, minimal, new)
+                for loaded in LOADS[app]:
+                    getattr(mod, loaded)(records)
+                assert old_key not in records and doc.key in records, (
+                    "%s left a record moved %s under a key without the account's "
+                    "last four, so the statement listed under its whole key is "
+                    "downloaded again" % (app.name, "with --minimal" if minimal else "whole"),
+                    account, new and sorted(new))
+                assert app_over(mod, here / "out", records)._already_done(doc), \
+                    (app.name, account, minimal, new and sorted(new))
+    assert moves, app.name
 
 
 # -- what --minimal carries for it --------------------------------------------
 
-def _minimal_blob(tmp_path: Path, records: dict) -> dict:
-    old = tmp_path / "old" / "Bank Statements"
-    old.mkdir(parents=True)
-    (old / "storage.py").write_text('SPEC = AppSpec(provider="Bank", kind=DOCUMENT)\n',
-                                    encoding="utf-8")
-    (old / "progress.json").write_text(json.dumps(records), encoding="utf-8")
+def _install(root: Path, provider: str, records: dict) -> Path:
+    folder = root / ("%s Statements" % provider)
+    folder.mkdir(parents=True)
+    (folder / "storage.py").write_text(
+        'SPEC = AppSpec(provider="%s", kind=DOCUMENT)\n' % provider, encoding="utf-8")
+    (folder / "progress.json").write_text(json.dumps(records), encoding="utf-8")
+    return folder
+
+
+def _minimal_blob(tmp_path: Path, records: dict, provider: str = "Bank") -> dict:
+    _install(tmp_path / "old", provider, records)
     archive = tmp_path / "h.ppz"
     assert migrate.export(tmp_path / "old", archive, minimal=True) == 0
     with zipfile.ZipFile(archive) as z:
-        return json.loads(z.read("apps/Bank Statements/progress.json").decode("utf-8"))
+        blob = z.read("apps/%s Statements/progress.json" % provider)
+    return json.loads(blob.decode("utf-8"))
 
 
 HISTORY = {"total": "12.34", "items": "Garden Hose", "summary": "Invented Statement",
@@ -337,6 +366,9 @@ def test_a_cut_key_carries_only_what_its_key_is_rebuilt_from(tmp_path):
     assert not set(migrate.KEY_FIELDS) & set(got[whole]), got[whole]
 
 
+SHORT = "Statement:2031-03-31:Invented Monthly Statement:Invented Checking (...1234)"
+
+
 def test_a_key_that_never_cut_its_account_carries_none_of_it(tmp_path):
     """A short account, a long one with no last four to keep, and a key
     that is a document id, none of them is ever moved."""
@@ -345,8 +377,36 @@ def test_a_key_that_never_cut_its_account_carries_none_of_it(tmp_path):
     no_four = dict(short, account="An invented account name with no digits at its end")
     by_id = dict(short, account=ACCOUNTS[0], document_id="DOC0001")
     got = _minimal_blob(tmp_path, {
-        "Statement:2031-03-31:Invented Monthly Statement:Invented Checking (...1234)": short,
+        SHORT: short,
         "Statement:2031-03-31:Invented Monthly Statement:" + no_four["account"][:40]: no_four,
         "id:DOC0001": by_id})
     for key, rec in got.items():
         assert not set(migrate.KEY_FIELDS) & set(rec), (key, rec)
+
+
+def test_a_chase_key_without_a_short_accounts_last_four_carries_it(tmp_path):
+    """Chase keeps the last four of an account of any length, so a short
+    account's record under the key Chase wrote before 0.17.1 is moved too,
+    and the same record under the key it writes now is not."""
+    short = dict(HISTORY, category="Statement", date="2031-03-31",
+                 title="Invented Monthly Statement", account="Invented Checking (...1234)",
+                 document_id="")
+    got = _minimal_blob(tmp_path, {SHORT: short, SHORT + "-1234": dict(short)}, "Chase")
+    assert got[SHORT]["account"] == short["account"], got[SHORT]
+    assert not set(migrate.KEY_FIELDS) & set(got[SHORT + "-1234"]), got[SHORT + "-1234"]
+
+
+def test_an_import_adds_nothing_to_a_record_the_app_wrote(tmp_path, capsys):
+    """Only a record that holds none of what its key is built from takes it,
+    so a field a newer version added is not counted as a change."""
+    rec = dict(HISTORY, category="Statement", date="2031-03-31",
+               title="Invented Monthly Statement", account="Invented Checking (...1234)")
+    _install(tmp_path / "old", "Bank", {SHORT: dict(rec, listed_account=rec["account"])})
+    archive = tmp_path / "h.ppz"
+    assert migrate.export(tmp_path / "old", archive) == 0
+    folder = _install(tmp_path / "new", "Bank", {SHORT: rec})
+    capsys.readouterr()
+    assert migrate.do_import(archive, tmp_path / "new", assume_yes=True) == 0
+    assert "0 new,    0 marked done" in capsys.readouterr().out
+    got = json.loads((folder / "progress.json").read_text(encoding="utf-8"))
+    assert "listed_account" not in got[SHORT], got[SHORT]
