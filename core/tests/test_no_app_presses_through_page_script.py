@@ -108,7 +108,7 @@ REVIEWED = {
         "A link this code makes itself, to an address on the history's own origin, "
         "marked as a download, never one of the page's own controls. The page "
         "checks the origin once more before it presses.",
-    ("gui/app.py", "HTML", "click()"):
+    ("gui/static/app.js", "<script>", "click()"):
         "The control panel's own page, never a provider's. Export history makes a "
         "link to the history file the panel just handed it, marked as a download, "
         "and presses it so the browser saves the file under its own name (#67). "
@@ -129,7 +129,7 @@ def is_test(path: Path) -> bool:
             or any(p.startswith(".") for p in parts))
 
 
-def sources():
+def sources(ends=(".py",)):
     out = []
     for root in ROOTS:
         for folder, dirs, files in os.walk(REPO / root):
@@ -139,8 +139,14 @@ def sources():
             dirs[:] = sorted(d for d in dirs if d != "tests" and d not in MADE_FOLDERS
                              and not d.startswith((".", "__")) and not d.endswith(".egg-info"))
             out.extend(Path(folder) / f for f in files
-                       if f.endswith(".py") and not f.startswith("test_") and f != "conftest.py")
+                       if f.endswith(ends) and not f.startswith("test_") and f != "conftest.py")
     return sorted(p for p in out if not is_test(p))
+
+
+def page_scripts():
+    """Each file of JavaScript that ships, the panel's own page script
+    since its page moved out of gui/app.py into gui/static."""
+    return sources(ends=(".js",))
 
 
 # ---------------------------------------------------------------------------
@@ -684,6 +690,17 @@ def census(paths=None):
                     where = fn[0].name if fn and not isinstance(fn[0], ast.Lambda) else "<module>"
                     found.setdefault((mod.rel, where, kind + " put together from parts"),
                                      set()).add(call.lineno)
+    # A file of JavaScript is read whole, each press by its line, and one
+    # only the whole holds by the file's first line. The panel's page script
+    # lived in a string of gui/app.py until it moved to gui/static.
+    if paths is None:
+        for path in page_scripts():
+            rel = path.relative_to(REPO).as_posix()
+            text = path.read_text(encoding="utf-8")
+            for kind in presses_in(text):
+                lines = {n for n, line in enumerate(text.splitlines(), 1)
+                         if kind in presses_in(line)}
+                found.setdefault((rel, "<script>", kind), set()).update(lines or {1})
     return found, holes, followed
 
 
@@ -702,6 +719,8 @@ def test_the_census_reads_every_app_and_the_core():
         assert "apps/%s/%s_site.py" % (app, app) in names, app
     assert {"core/paperpull_core/pressing.py", "core/paperpull_core/capture.py",
             "gui/app.py"} <= names
+    # The panel's page script, a file of its own since the redesign.
+    assert "gui/static/app.js" in {p.relative_to(REPO).as_posix() for p in page_scripts()}
     assert not [n for n in names if "/tests/" in n or n.split("/")[-1].startswith("test_")]
 
 
