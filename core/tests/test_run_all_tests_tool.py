@@ -618,7 +618,8 @@ def test_a_failing_suite_in_a_run_prints_its_frames_and_keeps_its_output(one_sui
 # core's 11537 passed and 305 skipped tests. A test's server had written
 # socketserver's message after pytest's own last line, and the runner took
 # whatever a suite printed last as its summary. A suite's stderr is read
-# after its stdout, so anything written there comes after that line.
+# into its output as it is written, so a thread writing there once pytest
+# is done lands after that line.
 LATE = """
     import atexit, sys
 
