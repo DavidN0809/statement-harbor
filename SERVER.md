@@ -92,8 +92,9 @@ Google.
    sign-in page opens in the sign-in window, the browser on the server's
    screen, docked beside the panel. The **Sign-in window** button at the
    top opens it at any time, and Full screen gives it a tab of its own.
-   Sign in there as you would on a new computer, press **I'm signed in**,
-   then **Try the newest few first** and **Get new documents**.
+   Sign in there as you would on a new computer, press **Done** to put the
+   window aside, then **Try the newest few first** and **Get new
+   documents**.
 
 ### Coming from the desktop app
 

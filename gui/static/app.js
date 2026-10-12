@@ -132,13 +132,20 @@ function present(r) {
   switch (r.state) {
     case 'stopped': {
       const again = Boolean(r.last_run && r.last_run.redownload);
-      const why = {closed: 'stopped when its page was closed', interrupted: 'was interrupted',
+      const why = {closed: 'was stopped partway, by Stop or by closing its page', interrupted: 'was interrupted',
                    failed: 'ended with a problem'}[r.last_outcome] || 'stopped before it finished';
+      // Restore is a desktop dialog. Where it is not offered, a stopped
+      // restore's row opens the account instead of a button that does nothing.
+      const restore = SERVER || inSample() ? {label: 'Open', nav: true}
+        : {label: 'Restore the rest', dialog: 'restore', primary: true};
       return {chip: {cls: 'info', text: 'Stopped partway'},
         say: (again ? 'The restore' : 'The last run') + (lastAt ? ' on ' + lastAt : '') + ' ' + why + '. Nothing was lost.',
-        act: again ? {label: 'Restore the rest', dialog: 'restore', primary: true}
-                   : {label: 'Continue', run: 'resume', primary: true}};
+        act: again ? restore : {label: 'Continue', run: 'resume', primary: true}};
     }
+    case 'nostatus':
+      return {chip: {cls: 'plain', text: 'Status not read'},
+        say: 'PaperPull could not read how current this archive is. Getting new is still safe.',
+        act: {label: 'Get new', run: 'all'}};
     case 'attention': {
       const res = (r.last_run && r.last_run.result) || {};
       const bits = [];
@@ -261,8 +268,16 @@ async function load() {
   route();
 }
 async function loadAccounts() {
-  try { ROWS = (await getJSON('/api/accounts')).accounts || []; }
-  catch (e) { ROWS = ROWS || []; notice('Could not read the accounts. ' + e.message, 'warn'); }
+  let d;
+  try { d = await getJSON('/api/accounts'); }
+  catch (e) { ROWS = ROWS || []; notice('Could not read the accounts. ' + e.message, 'warn'); return; }
+  ROWS = d.accounts || [];
+  // Without the status reader no row can say how current it is, and saying
+  // so beats every account looking new.
+  if (d.status_available === false) {
+    notice("This copy of PaperPull could not load its status reader (tools/status.py), so how current each " +
+           'archive is cannot be shown. Getting new documents still works.', 'warn');
+  }
 }
 
 // -- every account -------------------------------------------------------------------
@@ -404,7 +419,7 @@ function renderAccount() {
     '<div class="band ' + band + '"><span class="chip ' + p.chip.cls + '">' + esc(p.chip.text) + '</span><span class="say">' +
     esc(p.say) + '</span>' + (stoppedHere ? '<button type="button" class="btn btn-p starts" data-do="run" data-action="resume" data-key="' +
     esc(keyOf(r)) + '">' + PLAY + 'Continue where it stopped</button>' : '') +
-    (r.state === 'stopped' && !stoppedHere ? '<button type="button" class="btn btn-p starts" data-do="restore" data-key="' + esc(keyOf(r)) + '">Restore the rest</button>' : '') +
+    (r.state === 'stopped' && !stoppedHere && !SERVER && !inSample() ? '<button type="button" class="btn btn-p starts" data-do="restore" data-key="' + esc(keyOf(r)) + '">Restore the rest</button>' : '') +
     '</div>' + gapList(r) +
     '<div class="steps"><h2 id="getdocs" style="margin-bottom:18px">Get your documents</h2>' +
     '<div class="step"><div class="stepnum">1</div><div class="body"><h3>Sign in to ' + esc(r.provider) + '</h3><p id="steplogin">' +
@@ -517,8 +532,8 @@ document.addEventListener('keydown', e => {
 // -- runs -------------------------------------------------------------------------
 const RUN = {state: 'idle'};
 let es = null;
-let recordingApp = null;
-let failureApp = null;
+let recordingApp = null, recordingAccount = 'primary';
+let failureApp = null, failureAccount = 'primary';
 const RUN_ACTIONS_WITH_DATES = ['pilot', 'all', 'resume', 'discover'];
 // Said when a run that downloads again ends before it is through. Continue
 // never downloads again, so it would skip the rest and call the run done,
@@ -607,9 +622,11 @@ function startRun(r, action, opts) {
   const q = new URLSearchParams({ app, account, action });
   if (s.year) q.set('year', s.year); else { if (s.start) q.set('start', s.start); if (s.end) q.set('end', s.end); }
   // A recording waits for the person, so it needs a way to say when. The
-  // app it belongs to is kept here rather than read back when Stop is
-  // pressed, so a Stop can never reach another provider's folder.
+  // app and person it belongs to are kept here rather than read back when
+  // Stop is pressed, so a Stop can never reach another folder. A second
+  // person's recording waits in their own folder.
   recordingApp = (action === 'record') ? app : null;
+  recordingAccount = account;
   es = again ? postRun(Object.assign({ app, account, action, redownload: true, confirmed: true },
                                      Object.fromEntries(q.entries())))
              : new EventSource(`/api/run?${q.toString()}`);
@@ -674,7 +691,7 @@ async function stopRecording() {
   try {
     await fetch('/api/record/stop', { method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app: recordingApp }) });
+      body: JSON.stringify({ app: recordingApp, account: recordingAccount }) });
   } catch (e) { /* the run's own end says what happened */ }
 }
 function finishRun(code, refused) {
@@ -687,7 +704,7 @@ function finishRun(code, refused) {
   if (RUN.again && !RUN.outcome.clean && RUN.sink) RUN.sink.textContent += AGAIN_LEFT + '.\n';
   const done = RUN.onDone;
   RUN.onDone = null;
-  if (RUN.code !== '0' || (RUN.result && RUN.result.attention)) checkFailure(RUN.app);
+  if (RUN.code !== '0' || (RUN.result && RUN.result.attention)) checkFailure(RUN.app, RUN.account);
   if (done) done(RUN.code);
   if (RUN.queue && QUEUE) queueStep();
   loadAccounts().then(renderAll);
@@ -748,20 +765,27 @@ function runOutcome() {
   if (res) return {tone: 'ok', title: 'Finished, no issues reported', say: '', clean: true};
   return {tone: 'warn', title: 'Finished, check the details', say: 'No run summary came back, so read the technical details.', clean: true};
 }
-async function checkFailure(app) {
+// The failure file is the account's own, a second person's in their folder.
+async function checkFailure(app, account) {
   try {
-    const r = await fetch(`/api/failure/latest?app=${encodeURIComponent(app)}`);
+    const q = new URLSearchParams({app, account});
+    const r = await fetch('/api/failure/latest?' + q.toString());
     const d = await r.json();
-    if (d.found && RUN.app === app) { failureApp = app; RUN.failure = true; renderAll(); }
+    if (d.found && RUN.app === app && RUN.account === account) {
+      failureApp = app; failureAccount = account; RUN.failure = true; renderAll();
+    }
   } catch (e) { /* nothing to offer */ }
 }
 async function revealFailure() {
   if (!failureApp) return;
-  if (SERVER) { location.href = '/api/failure/download?app=' + encodeURIComponent(failureApp); return; }
+  if (SERVER) {
+    location.href = '/api/failure/download?' + new URLSearchParams({app: failureApp, account: failureAccount}).toString();
+    return;
+  }
   try {
     await fetch('/api/failure/reveal', { method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app: failureApp }) });
+      body: JSON.stringify({ app: failureApp, account: failureAccount }) });
   } catch (e) { /* the file is still there */ }
 }
 function renderRun() {
@@ -888,7 +912,13 @@ function queueRun() {
   }
   if (QUEUE.i >= QUEUE.items.length) { QUEUE.finished = true; renderRun(); return; }
   const it = QUEUE.items[QUEUE.i];
-  startRun(rowByKey(it.key), it.action, {scope: it.scope, queue: true});
+  // Another run started in the moment before this one could, and only
+  // one goes at a time, so the round waits for the person instead of
+  // saying the next starts on its own when it never would.
+  if (!startRun(rowByKey(it.key), it.action, {scope: it.scope, queue: true})) {
+    QUEUE.held = true;
+    renderAll();
+  }
 }
 function queueStep() {
   const it = QUEUE.items[QUEUE.i];
@@ -964,8 +994,11 @@ function rsGo() {
   const err = $('rs-err');
   if (!againScoped(s)) { err.textContent = 'Choose a year, or both a From and a To date.'; err.hidden = false; return; }
   if (s.start && s.end && s.start > s.end) { err.textContent = 'The From date is after the To date.'; err.hidden = false; return; }
+  // Closed only once the run has started, so a refusal is said here.
+  if (!startRun(DLG_ROW, how, {scope: s, redownload: true})) {
+    err.textContent = 'Wait for the run going now to finish first.'; err.hidden = false; return;
+  }
   $('dlg-restore').close();
-  startRun(DLG_ROW, how, {scope: s, redownload: true});
 }
 function openPerson(r) {
   DLG_ROW = r;
@@ -982,7 +1015,9 @@ async function psGo() {
   try { d = await postJSON('/api/account', {app: DLG_ROW.app, label, owner}); }
   catch (e) { err.textContent = e.message; err.hidden = false; return; }
   $('dlg-person').close();
-  await loadAccounts();
+  // The whole list again, so the new person is in every list the page
+  // keeps, the renames File names offers among them.
+  await load();
   const r = rowFor(DLG_ROW.app, d.account);
   location.hash = r ? accountHash(r) : '#/';
   notice('Added ' + (d.owner || d.account) + ' to ' + DLG_ROW.provider + '. Their documents go to ' + d.output_dir +
@@ -1024,13 +1059,17 @@ function rnRun(apply) {
   if (apply && !RN_PREVIEWED) return;
   $('rn-state').textContent = apply ? 'Renaming…' : 'Previewing…';
   $('rn-prev').disabled = true; $('rn-apply').disabled = true;
-  startRun(DLG_ROW, apply ? 'rename_apply' : 'rename', {stay: true, sink: 'rn-log', onDone: code => {
+  const started = startRun(DLG_ROW, apply ? 'rename_apply' : 'rename', {stay: true, sink: 'rn-log', onDone: code => {
     if (code !== '0') { $('rn-state').textContent = 'That did not finish. The output above says why.'; $('rn-prev').disabled = false; return; }
     if (apply) { $('rn-state').textContent = 'Renamed. The list above names each file.'; return; }
     RN_PREVIEWED = true;
     $('rn-apply').disabled = false; $('rn-prev').disabled = false;
     $('rn-state').textContent = 'Preview done. Nothing has been changed. Read it above, then rename.';
   }});
+  if (!started) {
+    $('rn-state').textContent = 'Wait for the run going now to finish first.';
+    $('rn-prev').disabled = false; $('rn-apply').disabled = !RN_PREVIEWED;
+  }
 }
 
 // -- the server's sign-in window ---------------------------------------------------
@@ -1270,7 +1309,9 @@ async function importHistory() {
     notice(hxSaying(c, true) + ' Nothing was downloaded, and no sign-in came with the file. Open each provider and sign in, ' +
       'and Get new then downloads only what is new.', 'ok');
   } else {
-    await loadAccounts();
+    // Providers set up by the import join every list, and a panel that
+    // had none leaves its welcome.
+    await load();
   }
 }
 

@@ -165,4 +165,4 @@ def test_the_page_tells_the_tester_what_to_do_with_it():
     page = app_module.HTML
     assert "Show the file to attach" in page
     assert "no text from your account" in page
-    assert "checkFailure(app)" in page
+    assert "checkFailure(RUN.app, RUN.account)" in page

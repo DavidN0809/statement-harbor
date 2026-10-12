@@ -653,6 +653,12 @@ def output_root(install: Path, account: str) -> Path:
         out = json.loads(config.read_text(encoding="utf-8-sig")).get("output_dir") or "."
     except (OSError, ValueError, AttributeError):
         out = "."
+    # A config written by hand can hold a number or a list here, which no
+    # path can be made of. Refused rather than guessed, since the install's
+    # own folder is the first person's, and a second person's run must never
+    # be read from it or hand its files on.
+    if not isinstance(out, str):
+        raise ValueError("output_dir in %s is not text" % config.name)
     return (install / out).resolve()
 
 
@@ -663,7 +669,10 @@ def new_files(install: Path, account: str, started: float) -> list:
     stopped early leaves the last run's list in place, and its files were
     handed on then. Only files that exist inside the shared folder are
     passed on, whatever the list says."""
-    root = output_root(install, account)
+    try:
+        root = output_root(install, account)
+    except ValueError:
+        return []
     listed = root / "new-this-run.txt"
     try:
         if listed.stat().st_mtime < started:

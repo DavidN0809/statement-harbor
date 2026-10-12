@@ -194,6 +194,27 @@ def test_a_broken_log_is_no_log(root):
     assert _rows()[("Bank Statements", "primary")]["runs"] == [{"action": "all"}]
 
 
+@pytest.mark.parametrize("bad", [5, ["a"], {"x": 1}])
+def test_a_config_whose_folder_is_not_text_takes_no_row_down(root, bad):
+    """A config written by hand can hold a number or a list for output_dir.
+    That person's row says its status could not be read, every other row
+    is as before, and their folder is never taken to be the first person's."""
+    (root / "Bank Statements" / "config.second.json").write_text(
+        json.dumps({"output_dir": bad}), encoding="utf-8")
+    rows = _rows()
+    assert rows[("Bank Statements", "second")]["state"] == "nostatus"
+    assert rows[("Bank Statements", "second")]["latest"] == []
+    assert rows[("Bank Statements", "primary")]["state"] == "due"
+    assert rows[("Shop Receipts", "primary")]["state"] == "not_started"
+
+
+def test_without_the_status_reader_no_account_is_called_not_started(root, monkeypatch):
+    monkeypatch.setattr(app_module, "_status_module", lambda: None)
+    states = {(r["app"], r["account"]): r["state"] for r in app_module.account_rows()}
+    assert set(states.values()) == {"nostatus"}
+    assert app_module.api_accounts()["status_available"] is False
+
+
 def test_nothing_says_an_account_is_signed_in(root):
     for row in app_module.account_rows():
         assert not any("sign" in key for key in row)
@@ -319,6 +340,19 @@ def test_a_second_run_of_one_account_waits_for_the_first(base, root):
     assert _settled() and "Bank Statements" not in app_module._RUNNING
 
 
+def test_a_folder_that_cannot_be_read_never_leaves_a_run_claimed(base, root):
+    """The claim on an account is made only once its folder is known, so a
+    config that names no folder cannot leave the account running forever."""
+    bank = root / "Bank Statements"
+    (bank / "config.second.json").write_text(json.dumps({"output_dir": 7}), encoding="utf-8")
+    _plan(bank)
+    for _ in range(2):
+        out = run(base, {"app": "Bank Statements", "account": "second", "action": "discover"})
+        assert "already running" not in out and events(out, "done") == ["0"]
+    assert _settled() and app_module._RUNS == {}
+    assert _rows()[("Bank Statements", "second")]["running"] is None
+
+
 def test_a_page_closed_mid_run_is_logged_as_stopped(base, root):
     bank = root / "Bank Statements"
     _plan(bank, wait="--all")
@@ -369,3 +403,32 @@ def test_open_folder_shows_only_the_accounts_own_folder(root, monkeypatch):
             reveal(body)
         assert e.value.status_code == 404
     assert len(opened) == 2
+
+
+# -- a second person's Diagnostics folder -----------------------------------------
+
+def test_stop_recording_reaches_a_second_persons_own_folder(root):
+    """A second person's recording waits in their own folder, so Stop has to
+    write there, and only for an account the panel itself found."""
+    stop = lambda body: asyncio.run(app_module.api_record_stop(_Req(body)))  # noqa: E731
+    assert stop({"app": "Bank Statements", "account": "second"})["stopping"] is True
+    assert (root / "Bank Statements - second" / "Diagnostics" / ".stop-recording").is_file()
+    assert not (root / "Bank Statements" / "Diagnostics" / ".stop-recording").exists()
+    assert stop({"app": "Bank Statements"})["stopping"] is True
+    assert (root / "Bank Statements" / "Diagnostics" / ".stop-recording").is_file()
+    for account in ("nobody", "../x", "second/../../x"):
+        with pytest.raises(app_module.HTTPException) as e:
+            stop({"app": "Bank Statements", "account": account})
+        assert e.value.status_code == 404
+
+
+def test_a_second_persons_failure_file_is_offered_for_them(root):
+    diag = root / "Bank Statements - second" / "Diagnostics"
+    diag.mkdir()
+    (diag / "failure-pilot-20261012-100000.json").write_text("{}", encoding="utf-8")
+    assert app_module.api_failure_latest("Bank Statements", "second") == {
+        "found": True, "name": "failure-pilot-20261012-100000.json"}
+    assert app_module.api_failure_latest("Bank Statements") == {"found": False}
+    with pytest.raises(app_module.HTTPException) as e:
+        app_module.api_failure_latest("Bank Statements", "nobody")
+    assert e.value.status_code == 404

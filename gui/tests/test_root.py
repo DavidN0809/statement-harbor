@@ -342,9 +342,10 @@ def test_stop_uses_the_app_the_recording_started_on():
     be selected, and the recording, watching its own folder, would never
     end."""
     js = app_module.HTML
-    assert "body: JSON.stringify({ app: recordingApp })" in js
+    assert "body: JSON.stringify({ app: recordingApp, account: recordingAccount })" in js
     assert "body: JSON.stringify({ app: $('app').value })" not in js
     assert "recordingApp = (action === 'record') ? app : null;" in js
+    assert "recordingAccount = account;" in js
     # And it is cleared both ways a run can finish, so the button cannot
     # fire against a recording that is already over.
     assert js.count("recordingApp = null;") >= 3

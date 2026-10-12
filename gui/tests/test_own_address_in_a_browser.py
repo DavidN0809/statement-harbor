@@ -180,7 +180,7 @@ def test_the_sign_in_window_docks_beside_the_accounts_on_the_server(browser, por
         assert tab.is_visible("#dock") and tab.url == base + "/"
         screen = tab.frame_locator("#dockframe").locator("#screen")
         assert screen.inner_text(timeout=15000) == "the screen"
-        tab.get_by_role("button", name="I'm signed in").click()
+        tab.get_by_role("button", name="Done", exact=True).click()
         assert not tab.is_visible("#dock")
     finally:
         context.close()

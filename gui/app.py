@@ -1116,7 +1116,22 @@ def _note_run(root: Path, entry: dict) -> None:
     try:
         tmp.write_text(json.dumps(([entry] + _read_run_log(root))[:RUN_LOG_KEEP], indent=1),
                        encoding="utf-8")
-        tmp.replace(path)
+    except OSError:
+        return
+    # On Windows a reader holding the log, OneDrive's sync, a virus scanner
+    # or another tab reading the accounts, makes the swap fail for a moment.
+    # A few short tries, since this can run on the panel's own thread when a
+    # page goes away, then the leftover is cleared.
+    for attempt in range(5):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            time.sleep(0.05 * (attempt + 1))
+        except OSError:
+            break
+    try:
+        tmp.unlink()
     except OSError:
         pass
 
@@ -1201,19 +1216,20 @@ def _last_outcome(entry) -> str:
 
 # The order the home page lists accounts in, most in need first.
 STATE_ORDER = ("stopped", "attention", "unreadable", "overdue", "due", "gap",
-               "never", "not_started", "unknown", "current", "ongoing")
+               "never", "not_started", "nostatus", "unknown", "current", "ongoing")
 
 
-def _account_state(row, outcome: str, gaps: list) -> str:
+def _account_state(row, outcome: str, gaps: list, known: bool = True) -> str:
     """One word for where an account stands. A run that did not finish
     comes first, since the next step is to continue it. Then what the last
-    run left to look at, then how current the archive is, then gaps."""
+    run left to look at, then how current the archive is, then gaps. An
+    archive whose status could not be read is never called not started."""
     if outcome in ("closed", "interrupted", "failed", "stopped"):
         return "stopped"
     if outcome == "attention":
         return "attention"
     if row is None:
-        return "not_started"
+        return "not_started" if known else "nostatus"
     status = str(row.get("status") or "")
     if status in ("unreadable", "overdue", "due", "never"):
         return status
@@ -1233,8 +1249,54 @@ def _owner_of(meta: dict, account: str) -> str:
     return owner.strip()[:80] if isinstance(owner, str) else ""
 
 
+def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: str,
+                 slug: str, account: str) -> dict:
+    """One provider and person, with where they stand."""
+    root = _account_root(meta, account)
+    row, known = None, mod is not None
+    if mod is not None:
+        try:
+            row = mod.scan_install(root)
+        except Exception:
+            row, known = None, False
+    gaps = []
+    if row is not None:
+        try:
+            gaps = [_jsonable(g) for g in mod.group_gaps(row.get("gaps") or [])]
+        except Exception:
+            gaps = []
+    log = _read_run_log(root)
+    last = next((e for e in log if e.get("action") in DOWNLOAD_ACTIONS), None)
+    outcome = _last_outcome(last)
+    running = _RUNS.get((name, account))
+    return {
+        "app": name, "account": account, "provider": provider,
+        "owner": _owner_of(meta, account),
+        "gets": cards.get(slug, {}).get("documents", ""),
+        "kind": (row or {}).get("kind") or kind,
+        "state": _account_state(row, outcome, gaps, known),
+        "documents": (row or {}).get("documents") or 0,
+        "newest": _jsonable((row or {}).get("newest")),
+        # When the app last finished a run at all, from its own run
+        # summary, so a run from a terminal counts as a check too.
+        "checked": _jsonable((row or {}).get("last_run")),
+        "age_days": (row or {}).get("age_days"),
+        "cadence_days": (row or {}).get("cadence_days"),
+        "cadence": mod._fmt_cadence((row or {}).get("cadence_days")) if mod else "-",
+        "gaps": gaps,
+        "last_run": last, "last_outcome": outcome,
+        "runs": log[:5],
+        "latest": _latest_saved(root),
+        "running": dict(running) if running else None,
+        "runnable": meta.get("runnable", True),
+        "needs_setup": meta.get("needs_setup", False),
+    }
+
+
 def account_rows() -> list:
-    """Every provider and person, with where each stands."""
+    """Every provider and person, with where each stands. One account that
+    cannot be read, a config written by hand say, gets a row that says so
+    and never takes the others' rows down with it."""
     mod = _status_module()
     cards = _provider_notes()
     rows = []
@@ -1244,45 +1306,19 @@ def account_rows() -> list:
         # chase_docs.py for apps/chase, which is how its line is found.
         slug = str(meta.get("script_name") or "").rsplit("_", 1)[0]
         for account in meta["accounts"]:
-            root = _account_root(meta, account)
-            row = None
-            if mod is not None:
-                try:
-                    row = mod.scan_install(root)
-                except Exception:
-                    row = None
-            gaps = []
-            if row is not None:
-                try:
-                    gaps = [_jsonable(g) for g in mod.group_gaps(row.get("gaps") or [])]
-                except Exception:
-                    gaps = []
-            log = _read_run_log(root)
-            last = next((e for e in log if e.get("action") in DOWNLOAD_ACTIONS), None)
-            outcome = _last_outcome(last)
-            running = _RUNS.get((name, account))
-            rows.append({
-                "app": name, "account": account, "provider": provider,
-                "owner": _owner_of(meta, account),
-                "gets": cards.get(slug, {}).get("documents", ""),
-                "kind": (row or {}).get("kind") or kind,
-                "state": _account_state(row, outcome, gaps),
-                "documents": (row or {}).get("documents") or 0,
-                "newest": _jsonable((row or {}).get("newest")),
-                # When the app last finished a run at all, from its own run
-                # summary, so a run from a terminal counts as a check too.
-                "checked": _jsonable((row or {}).get("last_run")),
-                "age_days": (row or {}).get("age_days"),
-                "cadence_days": (row or {}).get("cadence_days"),
-                "cadence": mod._fmt_cadence((row or {}).get("cadence_days")) if mod else "-",
-                "gaps": gaps,
-                "last_run": last, "last_outcome": outcome,
-                "runs": log[:5],
-                "latest": _latest_saved(root),
-                "running": dict(running) if running else None,
-                "runnable": meta.get("runnable", True),
-                "needs_setup": meta.get("needs_setup", False),
-            })
+            try:
+                rows.append(_account_row(mod, cards, name, meta, provider, kind, slug, account))
+            except Exception:
+                running = _RUNS.get((name, account))
+                rows.append({
+                    "app": name, "account": account, "provider": provider, "owner": "",
+                    "gets": cards.get(slug, {}).get("documents", ""), "kind": kind,
+                    "state": "nostatus", "documents": 0, "newest": None, "checked": None,
+                    "age_days": None, "cadence_days": None, "cadence": "-", "gaps": [],
+                    "last_run": None, "last_outcome": "", "runs": [], "latest": [],
+                    "running": dict(running) if running else None,
+                    "runnable": meta.get("runnable", True),
+                    "needs_setup": meta.get("needs_setup", False)})
     order = {s: i for i, s in enumerate(STATE_ORDER)}
     rows.sort(key=lambda r: (order.get(r["state"], len(order)), -(r["age_days"] or 0),
                              r["provider"].lower(), r["account"] != "primary", r["account"]))
@@ -1312,7 +1348,10 @@ async def api_reveal(request: Request):
     apps = discover_apps()
     if name not in apps or account not in apps[name]["accounts"]:
         raise HTTPException(404, "unknown app or account")
-    folder = _account_root(apps[name], account)
+    try:
+        folder = _account_root(apps[name], account)
+    except ValueError:
+        raise HTTPException(404, "that account's config names no folder PaperPull can read")
     if not folder.is_dir():
         raise HTTPException(404, "that account has no folder yet")
     try:
@@ -2303,13 +2342,17 @@ async def api_history_import(request: Request):
 
 # -- stopping a recording -----------------------------------------------------
 
-def _diagnostics_of(meta: dict) -> Path:
-    """An app's Diagnostics folder, wherever its config sends output."""
+def _diagnostics_of(meta: dict, account: str = "primary") -> Path:
+    """An account's Diagnostics folder, wherever its config sends output. A
+    second person's config sends theirs to their own folder, which is where
+    their recording waits and their failure file is written."""
     app_dir = Path(meta["dir"])
+    config = "config.json" if account == "primary" else "config.%s.json" % account
     out = ""
     try:
-        cfg = json.loads((app_dir / "config.json").read_text(encoding="utf-8-sig"))
-        out = str(cfg.get("output_dir") or "")
+        cfg = json.loads((app_dir / config).read_text(encoding="utf-8-sig"))
+        value = cfg.get("output_dir") if isinstance(cfg, dict) else None
+        out = value if isinstance(value, str) else ""
     except (OSError, ValueError):
         pass
     base = Path(out).expanduser() if out else app_dir
@@ -2318,7 +2361,16 @@ def _diagnostics_of(meta: dict) -> Path:
     return base / "Diagnostics"
 
 
-def _latest_failure(meta: dict):
+def _account_named(meta: dict, account) -> str:
+    """The account a request names, only one the panel itself found for
+    that app, so a name from the page can never point at another folder."""
+    account = str(account or "primary")
+    if account not in (meta.get("accounts") or ["primary"]):
+        raise HTTPException(404, "unknown account")
+    return account
+
+
+def _latest_failure(meta: dict, account: str = "primary"):
     """The newest failure file an app wrote, if it wrote one recently.
 
     A run that stops early writes one of these by itself. It is the most
@@ -2330,7 +2382,7 @@ def _latest_failure(meta: dict):
     wrong failure to the right issue."""
     import time
     try:
-        found = sorted(_diagnostics_of(meta).glob("failure-*.json"))
+        found = sorted(_diagnostics_of(meta, account).glob("failure-*.json"))
     except OSError:
         return None
     for path in reversed(found):
@@ -2343,12 +2395,12 @@ def _latest_failure(meta: dict):
 
 
 @app.get("/api/failure/latest", dependencies=[Depends(_same_origin_only)])
-def api_failure_latest(app: str = ""):
+def api_failure_latest(app: str = "", account: str = "primary"):
     """Whether the run that just stopped left a file worth attaching."""
     apps = discover_apps()
     if app not in apps:
         raise HTTPException(404, "unknown app")
-    found = _latest_failure(apps[app])
+    found = _latest_failure(apps[app], _account_named(apps[app], account))
     if found is None:
         return {"found": False}
     return {"found": True, "name": found.name}
@@ -2363,7 +2415,7 @@ async def api_failure_reveal(request: Request):
     apps = discover_apps()
     if name not in apps:
         raise HTTPException(404, "unknown app")
-    found = _latest_failure(apps[name])
+    found = _latest_failure(apps[name], _account_named(apps[name], (body or {}).get("account")))
     if found is None:
         raise HTTPException(404, "no recent failure file")
     try:
@@ -2379,7 +2431,7 @@ async def api_failure_reveal(request: Request):
 
 
 @app.get("/api/failure/download", dependencies=[Depends(_same_origin_only)])
-def api_failure_download(app: str = ""):
+def api_failure_download(app: str = "", account: str = "primary"):
     """On PaperPull Server, the newest failure file of one app, handed to the
     browser to attach to an issue. Only the app's name comes from the page,
     and the file is found here the way reveal finds it."""
@@ -2388,7 +2440,7 @@ def api_failure_download(app: str = ""):
     apps = discover_apps()
     if app not in apps:
         raise HTTPException(404, "unknown app")
-    found = _latest_failure(apps[app])
+    found = _latest_failure(apps[app], _account_named(apps[app], account))
     if found is None:
         raise HTTPException(404, "no recent failure file")
     return FileResponse(found, filename=found.name)
@@ -2406,7 +2458,7 @@ async def api_record_stop(request: Request):
     apps = discover_apps()
     if name not in apps:
         raise HTTPException(404, "unknown app")
-    target = _diagnostics_of(apps[name])
+    target = _diagnostics_of(apps[name], _account_named(apps[name], (body or {}).get("account")))
     try:
         target.mkdir(parents=True, exist_ok=True)
         (target / ".stop-recording").write_text("stop\n", encoding="utf-8")
@@ -2643,19 +2695,30 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
                    "or window. Wait for it to finish there.\n\n" % app)
             yield "event: done\ndata: 1\n\n"
             return
+        # Where the run's log goes, worked out before the run is claimed, so
+        # nothing that can fail sits between the claim and the code that
+        # lets it go. A folder that cannot be worked out keeps no log.
+        try:
+            root = _account_root(meta, account)
+        except Exception:
+            root = None
         _RUNS[(app, account)] = {"action": action,
                                  "started": datetime.now().isoformat(timespec="seconds")}
-        root = _account_root(meta, account)
         noted = False
 
         def note(code, result, closed=False):
-            _note_run(root, {
-                "action": action, "account": account,
-                "started": _RUNS.get((app, account), {}).get("started", ""),
-                "ended": datetime.now().isoformat(timespec="seconds"),
-                "exit_code": code, "closed": closed, "result": result,
-                "scope": list(scope_flags), "redownload": bool(redownload),
-                "saved": _saved_this_run(root, started)})
+            if root is None:
+                return
+            try:
+                _note_run(root, {
+                    "action": action, "account": account,
+                    "started": _RUNS.get((app, account), {}).get("started", ""),
+                    "ended": datetime.now().isoformat(timespec="seconds"),
+                    "exit_code": code, "closed": closed, "result": result,
+                    "scope": list(scope_flags), "redownload": bool(redownload),
+                    "saved": _saved_this_run(root, started)})
+            except Exception:
+                pass
         try:
             _RUNNING.add(app)
             proc = subprocess.Popen(
@@ -2729,16 +2792,22 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
                 yield f"event: result\ndata: {json.dumps(result)}\n\n"
             # The files this run saved, by name, for the page to list under
             # its one-line outcome. The log below keeps them for the home page.
-            yield f"event: saved\ndata: {json.dumps(_saved_this_run(root, started))}\n\n"
+            yield f"event: saved\ndata: {json.dumps(_saved_this_run(root, started) if root else [])}\n\n"
             await to_thread.run_sync(note, code, result)
             noted = True
             yield "data: \n\n"
             yield f"event: done\ndata: {code}\n\n"
         finally:
             if not noted:
-                # The page went away before the run ended, which stops it.
-                # The account's row then says it stopped partway.
-                note(None, result, True)
+                # The page went away before the run was noted. A run that had
+                # already ended by itself, say while the Paperless copy ran,
+                # is noted with its own code. One still going is stopped by
+                # this, and its account's row says it stopped partway.
+                ended = proc.poll()
+                if ended is not None:
+                    note(ended, result)
+                else:
+                    note(None, result, True)
             _RUNS.pop((app, account), None)
             # Another person's run of the same app may still be going.
             if not any(a == app for a, _ in _RUNS):

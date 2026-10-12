@@ -341,7 +341,10 @@ def test_it_is_a_dialog_of_its_own_never_a_box_on_the_everyday_path():
     script = body[body.index("<script>"):]
     # Asked for in one place, the dialog's own button, and sent in one.
     assert script.count("redownload: true") == 2
-    assert "startRun(DLG_ROW, how, {scope: s, redownload: true});" in function("rsGo")
+    go = function("rsGo")
+    assert "if (!startRun(DLG_ROW, how, {scope: s, redownload: true})) {" in go
+    # The dialog closes only once the run started, so a refusal is said in it.
+    assert go.index("startRun(") < go.index("$('dlg-restore').close();")
     assert "const again = opts.redownload === true;" in function("startRun")
 
 
@@ -418,9 +421,15 @@ def test_a_restore_that_ends_early_says_continue_will_not_download_again():
     assert "if (RUN.again && !RUN.outcome.clean && RUN.sink)" in function("finishRun")
     # A row whose last run was a restore that stopped offers the rest of the
     # restore, never Continue, and a round of Get new for all leaves it out.
-    assert ("again ? {label: 'Restore the rest', dialog: 'restore', primary: true}"
-            in " ".join(function("present").split()))
+    # Where Restore is not offered, the server and the sample, the row opens
+    # the account rather than show a button that would do nothing.
+    present = " ".join(function("present").split())
+    assert ("const restore = SERVER || inSample() ? {label: 'Open', nav: true} : "
+            "{label: 'Restore the rest', dialog: 'restore', primary: true};") in present
+    assert "act: again ? restore : {label: 'Continue', run: 'resume', primary: true}" in present
     assert "!(r.last_run && r.last_run.redownload)" in function("queueTargets")
+    account = " ".join(function("renderAccount").split())
+    assert "r.state === 'stopped' && !stoppedHere && !SERVER && !inSample() ?" in account
 
 
 def test_a_refusal_is_shown_rather_than_a_lost_connection():
