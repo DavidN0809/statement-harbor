@@ -7,14 +7,18 @@ so a store_info that was a number in a record marked store_read stopped its
 Rename and its Review Names with an AttributeError. Chase handed a record's
 title and account to sanitize_component when it upgraded its old keys on
 loading, so a title that was a number stopped every Chase command, Rename
-included, before anything ran.
+included, before anything ran. AT&T made a key of a saved bill's account
+and kind as it loaded, so an account that was a list stopped every AT&T
+command.
 
 The fields are found by what each app does, every key its own code reads
-from a mapping, and each is damaged in a record of its own, so no damaged
-field keeps the app from reaching another. Each record holds every other
-field empty, as text, or as a value the app's code compares it with, so a
-field read only beside a marker (Kroger's store_read) or in one kind of
-record (Robinhood's tax forms) is reached. Each app runs its own Rename
+from a mapping and every field of the record class it builds from one, and
+each is damaged in a record of its own, so no damaged field keeps the app
+from reaching another. Each record holds every other field empty, as text,
+as a value the app's code compares it with, or that and what a finished
+download writes, so a field read only beside a marker (Kroger's
+store_read), in one kind of record (Robinhood's tax forms) or in a saved
+one (AT&T's bills) is reached. Each app runs its own Rename
 through its own main, and each receipt app its own Review Names, over a
 file the app holds whose own record is damaged as well. Every name, number
 and file is invented.
@@ -27,6 +31,7 @@ from pathlib import Path
 import pytest
 
 from paperpull_core import doc_types
+from paperpull_core import renaming
 from paperpull_core import storage as core_storage
 from paperpull_core.models import Purchase, State
 
@@ -49,6 +54,9 @@ DAMAGED = {"a number": 5, "a list": ["Invented"], "a mapping": {"k": "Invented"}
 # test_every_app_renames_past_a_damaged_record.py damages them there. The
 # held file's record keeps naming it here.
 NAMING = {"pdf_path", "pdf_filename", "invoices", "items", "summary"}
+# What a finished download writes in its record.
+SAVED = {"date": "2026-05-14", "downloaded_ok": True, "state": State.COMPLETED.value,
+         "pdf_size": 2000, "pdf_pages": 1}
 
 
 def _code(app: Path):
@@ -88,6 +96,18 @@ def _strings(node) -> list:
     return []
 
 
+def _built_from_a_record(node) -> list:
+    """The fields of a class the app builds from a record, one with a
+    from_dict, by its __init__."""
+    if not isinstance(node, ast.ClassDef):
+        return []
+    methods = {m.name: m for m in node.body if isinstance(m, ast.FunctionDef)}
+    if "from_dict" not in methods or "__init__" not in methods:
+        return []
+    args = methods["__init__"].args
+    return [a.arg for a in args.args[1:] + args.kwonlyargs]
+
+
 def fields_of(app: Path) -> dict:
     """Every key the app's code reads that could name a record's field, a
     CSV column aside, with the first text its code compares it with, or
@@ -98,6 +118,7 @@ def fields_of(app: Path) -> dict:
             key = _key(node)
             if key:
                 keys.add(key)
+            keys.update(_built_from_a_record(node))
             if isinstance(node, ast.Compare) and _key(node.left):
                 for value in (v for c in node.comparators for v in _strings(c)):
                     compared.setdefault(_key(node.left), value)
@@ -106,11 +127,13 @@ def fields_of(app: Path) -> dict:
 
 
 def records(fields: dict) -> dict:
-    """Each way a record can hold the fields, empty, as text and as the app
-    compares them."""
+    """Each way a record can hold the fields, empty, as text, as the app
+    compares them, and that as a finished download left it."""
+    compared = {f: v if v is not None else "Invented" for f, v in fields.items()}
     return {"empty": {f: "" for f in fields},
             "text": {f: "Invented" for f in fields},
-            "compared": {f: v if v is not None else "Invented" for f, v in fields.items()}}
+            "compared": compared,
+            "saved": dict(compared, **SAVED)}
 
 
 def damaged_records(fields: dict) -> dict:
@@ -148,7 +171,8 @@ def test_every_app_is_covered():
     kroger = fields_of(renames.REPO / "apps" / "kroger")
     assert {"store_info", "store_read"} <= set(kroger)
     chase = fields_of(renames.REPO / "apps" / "chase")
-    assert {"title", "account", "document_id"} <= set(chase)
+    assert {"title", "account", "document_id", "period", "date_text"} <= set(chase)
+    assert {"account", "category", "pdf_size"} <= set(fields_of(renames.REPO / "apps" / "att"))
     robinhood = fields_of(renames.REPO / "apps" / "robinhood")
     assert robinhood["category"] == doc_types.TAX
 
@@ -159,9 +183,9 @@ def home(request, tmp_path, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("home", renames.APPS, ids=renames.IDS, indirect=True)
-def test_rename_finishes_past_a_record_value_that_is_not_text(home):
-    """--apply loads the records and finishes, its index naming files that
-    are there. Each file the app holds has its own record with every field
+def test_rename_finishes_past_a_record_value_that_is_not_text(home, monkeypatch):
+    """--apply loads the records, reaches the rename and finishes, its index
+    naming files that are there. Each file the app holds has its own record with every field
     damaged, and beside them is a record for each field damaged alone. A
     file whose record is so damaged may keep its name, as some apps name a
     file from its record."""
@@ -175,10 +199,13 @@ def test_rename_finishes_past_a_record_value_that_is_not_text(home):
         app.index_csv.append_rows([renames.a_row(app.index_csv.columns, i, path)])
         recs["Invented:held %d" % i] = dict(rec, pdf_path=str(path), pdf_filename=path.name)
     write(app, recs)
+    ran, run_for = [], renaming.run_for
+    monkeypatch.setattr(renaming, "run_for", lambda *a, **kw: ran.append(1) or run_for(*a, **kw))
 
     said, error = home.rename("--apply")
 
     assert error is None, "%s's Rename ended with %r\n%s" % (home.app.name, error, said[-1500:])
+    assert ran, "%s's Rename stopped before renaming\n%s" % (home.app.name, said[-1500:])
     index = [Path(r["PDF Full Path"]) for r in home.build().index_csv.read_all()]
     assert len(index) == len(held) and all(p.is_file() for p in index), home.app.name
 
