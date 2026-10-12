@@ -7,7 +7,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.47.0] - 2026-10-12
+
+Your providers and download history can move to another computer or to
+PaperPull Server, and PaperPull Server now runs each provider's code from
+the image rather than the writable data folder. The release also repairs
+renaming past a damaged record, Resume keeping to its year or dates, and
+several providers.
 
 ### Added
 - **Your providers and download history move to another computer, or to
@@ -27,6 +33,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   name begins the same way.
 
 ### Fixed
+- **PaperPull Server runs each provider's code from the image, not the data
+  folder.** The server ran a provider's entry script, its interpreter and
+  the modules it imported from the install folder in the data share, which
+  anyone who can write to the share can fill, so what was placed there ran
+  inside the container that holds the signed-in browser profiles. The
+  server now runs the shipped copy from the image, with the data folder
+  holding only configuration, rules, documents and records. The desktop app
+  is unchanged.
 - **Rename and Review Names finish past a damaged record in progress.json.**
   A record whose file path or file name was a number, a list or a mapping,
   from a hand edit or a damaged file, stopped Rename after it had moved the
