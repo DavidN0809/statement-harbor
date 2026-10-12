@@ -12,24 +12,24 @@ key through the page that listed it, and --minimal carried neither.
 So it is asked two ways. By reading, every record field each app's
 _already_done reads, followed through what it calls in the app's own
 modules and in the core, is one the tool carries for that app's provider.
-So is every field read off a record a method of the app's App walks to in
-a loop over the saved records' items or values, since American Family looks
-there for another bill's statement with the very bytes it just took, and
-with nothing to compare saved a statement of one bill as another's. That
-walk census does not see the store handed to a module function, a getattr
-spelling, a loop over keys alone or a record read through from_dict, and
-Optum's hold_known_forms is such a walk. By running, each app's own
-_already_done answers the same for a record and for that record as
---minimal cuts it, over every state, marker, note, day and review copy a
-record holds, and Robinhood's records go through a real export and import,
-as American Family's do in its own suite. Every name and number is
-invented.
+So is every field read off a saved record wherever the app goes through
+its saved records, found by what the code does however it reaches them
+(Walks says what it follows and what it does not). American Family looks
+there for another bill's statement with the very bytes it just took,
+Optum for the tax form saved under the key of its title, and AT&T for a
+bill 0.34.0 saved under the wrong year, and after a --minimal move each
+found nothing. A walk that decides no download says why. By running, each
+app's own _already_done answers the same for a record and for that record
+as --minimal cuts it, over every state, marker, note, day and review copy
+a record holds, and Robinhood's records go through a real export and
+import, as American Family's, Optum's and AT&T's do in their own suites.
+Every name and number is invented.
 """
 import argparse
 import ast
+import functools
 import importlib
 import json
-import re
 import shutil
 import sys
 from pathlib import Path
@@ -64,14 +64,73 @@ DECIDES_NOTHING = {
     },
 }
 
-# Methods that walk the saved records only to put right what Rename reads,
-# never to decide a download, each with why. A record without the fields
-# matches nothing there and changes nothing. One that no longer walks fails.
+# Walks of the saved records that decide no download, each with why, by the
+# module and function that read the record (Walks). One no longer found
+# fails, so the list cannot outlive its reason. These put right only what
+# Rename reads, and a record without the fields matches nothing there and
+# changes nothing.
 WALKS_FOR_RENAME = {
     "golden1": {
-        "_carry_index_rows": "gives an index row the title its record was carried to, "
-                             "and the index does not move with a history",
+        "golden1_docs.App._carry_index_rows":
+            "gives an index row the title its record was carried to, and the index "
+            "does not move with a history",
     },
+    "kroger": {
+        "kroger_receipts.App._settle_stores":
+            "gives each purchase the store its receipt names, before Rename builds names "
+            "from them",
+        "kroger_receipts.App._store_kept": "the store _settle_stores keeps for a purchase",
+    },
+    "newrez": {
+        "newrez_docs._DatedByStatement.__init__":
+            "dates a saved statement's row by the day it prints, in Rename's view alone",
+    },
+}
+
+CUT_KEY = ("moves a record off a key cut before 0.34.0, and --minimal carries what it reads "
+           "for such a record (KEY_FIELDS, test_a_minimal_history_moves_a_cut_key.py)")
+
+# And these decide no download for another reason.
+WALKS_DECIDE_NOTHING = {
+    "aafmaa": {
+        "aafmaa_docs.forget_postback_names":
+            "takes out of a record an id that --minimal never carries",
+    },
+    "amazon": {
+        "amazon_receipts.App.cmd_reparse_items":
+            "reads item prices off receipts already on disk into the record, offline",
+        "amazon_receipts.App._replace_history_rows":
+            "rewrites the order history's rows for cmd_reparse_items",
+    },
+    "apple": {
+        "apple_receipts.App._oldest_given":
+            "dates the oldest receipt Apple gave an account, to learn where this run stops "
+            "asking its refused purchases. Without the moved dates it learns from this run's "
+            "receipts alone, as on the account's first run, and a purchase left unasked is "
+            "asked on the run that would make its record",
+    },
+    "chase": {"chase_docs.migrate_legacy_keys": CUT_KEY},
+    "newrez": {
+        "newrez_docs._statement_months":
+            "the months of the statements discovery and the saved records know, to tell a "
+            "capture of another listed statement. Discovery holds every statement the list "
+            "gives, and a capture is only ever of one of them",
+    },
+    "optum": {
+        "optum_docs.adopt_product_keys":
+            "moves a record off a key without its product, which no released version wrote, "
+            "since Optum first shipped in 0.46.0 with this move",
+    },
+}
+
+# Walks in the core, met by every app that hands its records there.
+CORE_WALKS = {
+    "keys._identity": CUT_KEY,
+    "keys.told_apart":
+        "reads a saved record's id only under a key discovery holds, and discovery never "
+        "moves with a history, whole or minimal. So the first run after a move numbers "
+        "same-day twins by place either way, and from then on discovery holds the id each "
+        "was listed under, which it asks after the saved record's",
 }
 
 
@@ -103,14 +162,19 @@ class Module:
         self.name = name
         tree = ast.parse(path.read_text(encoding="utf-8-sig"))
         self.funcs, self.consts, self.aliases, self.imported = {}, {}, {}, {}
+        # Each function's name as the module spells it, "f" or "Class.f".
+        self.qual, self.classes = {}, {}
         for node in tree.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 self.funcs[node.name] = node
+                self.qual[id(node)] = node.name
             elif isinstance(node, ast.ClassDef):
+                self.classes[node.name] = node
                 for sub in node.body:
                     if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
                         self.funcs.setdefault("self." + sub.name, sub)
                         self.funcs["%s.%s" % (node.name, sub.name)] = sub
+                        self.qual[id(sub)] = "%s.%s" % (node.name, sub.name)
             elif (isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
                     and isinstance(node.value.value, str)):
                 for target in node.targets:
@@ -264,99 +328,410 @@ def test_every_field_a_skip_decision_reads_goes_with_minimal(app):
 
 # -- every walk of the saved records ------------------------------------------
 
-# A loop or comprehension over every saved record, by its records or by its
-# keys and records, however the progress store is spelled around it.
-WALK = re.compile(r"self\.progress\.data(?: or \{\}\))?\.(items|values)\(\)")
+# What a name holds of the saved records. The store, its records by key, one
+# key, one record, a key and its record from items(), and many of any of
+# them, a list, a tuple or a loop's worth. A document made from a record is
+# MADE and its class, and a name a function is handed a fixed word in holds
+# that word after "=".
+STORE, RECORDS, KEY, RECORD, PAIR = "store", "records", "key", "record", "pair"
+MANY, MADE = "many ", "made "
+COPIES = ("list", "tuple", "set", "frozenset", "sorted", "reversed")
+_FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 
 
-def _record_reads(scope, names, mod: Module, modules: dict):
-    """Each field read off a record bound to one of `names` in `scope`. A
-    field written is not read."""
-    for obj, key in _reads(scope, mod, modules):
-        if obj in names:
-            yield key
-
-
-def _walks(fn):
-    """(the loop or comprehension's scope, the name it binds to each record)
-    for each walk of the saved records in `fn`."""
-    parents = {child: node for node in ast.walk(fn) for child in ast.iter_child_nodes(node)}
-    for node in ast.walk(fn):
-        if not isinstance(node, (ast.For, ast.comprehension)):
+def _split(starts):
+    """(the nodes of one scope, the functions and comprehensions at its
+    edge, each a scope of its own)."""
+    own, inner, todo = [], [], list(starts)
+    while todo:
+        node = todo.pop()
+        if isinstance(node, _FUNCTIONS + _COMPREHENSIONS):
+            inner.append(node)
             continue
-        found = WALK.search(ast.unparse(node.iter))
-        target = node.target
-        if found and found.group(1) == "items" and isinstance(target, ast.Tuple):
-            target = target.elts[-1]
-        if found and isinstance(target, ast.Name):
-            yield (node if isinstance(node, ast.For) else parents[node]), target.id
+        own.append(node)
+        todo.extend(ast.iter_child_nodes(node))
+    return own, inner
+
+
+class Walks:
+    """Every field read off a saved record where an app goes through its
+    saved records, found by what the code does, not by how it is spelled.
+
+    The store is self.progress, app.progress or getattr of either, and its
+    records its data, however either is reached. Kept in a name, put in a
+    tuple or list and looped over, as (self.progress, self.discovery) is,
+    copied with dict(), list(), set() or a comprehension, or handed to a
+    function of the app or the core by place, by keyword or among *args.
+    A record is one taken from the records' values or items, one looked up
+    in them by any key, as keys.told_apart looks up what it is handed as
+    saved=, or one looked up in the store by a key from a loop over the
+    records' keys. A field is read off a record by get, by index or by
+    "in", and off a document made from one by from_dict or Class(**record),
+    by each attribute asked of it, a property such as key by every field it
+    reads. A field named by a word handed to the function, or by a loop over
+    fixed words, is that word, and one named by nothing it can read is
+    "?" and what names it. A comprehension, or a function inside another,
+    binds names of its own.
+
+    What it does not follow is said here, so the list cannot be taken for
+    more. A record handed back by a function, a function handed in as a
+    value or written as a lambda, a document's attribute that is not its
+    own field's name, and a record the store's get gives under a key not
+    taken from the records, which is how an app reads the one document it
+    is on. fields_read above reads those of _already_done and the methods
+    that find a saved record for it, and no census reads the others."""
+
+    def __init__(self, app: Path):
+        self.modules = modules_of(app)
+        self.found, self.seen = {}, set()
+        for name, mod in self.modules.items():
+            if not name.startswith("paperpull_core."):
+                for qual, fn in mod.funcs.items():
+                    if not qual.startswith("self."):
+                        self.run(mod, fn, {})
+
+    # -- what an expression holds
+
+    def kind(self, expr, env, mod):
+        def k(e):
+            return self.kind(e, env, mod)
+        if isinstance(expr, ast.Name):
+            return env.get(expr.id)
+        if isinstance(expr, ast.Attribute):
+            if expr.attr == "progress" and isinstance(expr.value, ast.Name):
+                return STORE
+            return RECORDS if expr.attr == "data" and k(expr.value) == STORE else None
+        if isinstance(expr, ast.Subscript):
+            return RECORD if k(expr.value) == RECORDS else None
+        if isinstance(expr, ast.BoolOp):
+            return next((x for x in map(k, expr.values) if x), None)
+        if isinstance(expr, ast.IfExp):
+            return k(expr.body) or k(expr.orelse)
+        if isinstance(expr, ast.BinOp):
+            return MANY + KEY if MANY + KEY in (k(expr.left), k(expr.right)) else None
+        if isinstance(expr, (ast.Tuple, ast.List, ast.Set)):
+            if expr.elts and all(isinstance(e, ast.Constant) and isinstance(e.value, str)
+                                 for e in expr.elts):
+                return "=" + "\0".join(e.value for e in expr.elts)
+            found = next((x for x in map(k, expr.elts) if x), None)
+            return MANY + found if found else None
+        if isinstance(expr, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            found = self.kind(expr.elt, self.comp_env(expr, env, mod), mod)
+            return MANY + found if found else None
+        if isinstance(expr, ast.DictComp):
+            found = self.kind(expr.value, self.comp_env(expr, env, mod), mod)
+            return RECORDS if found == RECORD else None
+        if isinstance(expr, ast.Call):
+            return self.called(expr, env, mod)
+        return None
+
+    def called(self, call, env, mod):
+        def k(e):
+            return self.kind(e, env, mod)
+        f, args = call.func, call.args
+        if isinstance(f, ast.Name):
+            if f.id == "getattr" and len(args) >= 2:
+                attr = _string(args[1], mod, self.modules)
+                if attr == "progress":
+                    return STORE
+                if attr == "data" and k(args[0]) == STORE:
+                    return RECORDS
+            if f.id in COPIES and args:
+                each = self.each(args[0], env, mod)
+                return MANY + each if each else None
+            if f.id == "dict" and args and k(args[0]) == RECORDS:
+                return RECORDS
+        if isinstance(f, ast.Attribute):
+            base = k(f.value)
+            if f.attr in ("get", "pop", "setdefault") and args:
+                if base == RECORDS or (base == STORE and k(args[0]) == KEY):
+                    return RECORD
+            if base == RECORDS and f.attr in ("values", "items", "keys"):
+                return MANY + {"values": RECORD, "items": PAIR, "keys": KEY}[f.attr]
+            if f.attr == "from_dict" and args and k(args[0]) == RECORD:
+                made = self.class_of(f.value, mod)
+                return MADE + made if made else None
+        if any(kw.arg is None and k(kw.value) == RECORD for kw in call.keywords):
+            made = self.class_of(f, mod)
+            return MADE + made if made else None
+        return None
+
+    def each(self, expr, env, mod):
+        """What each turn of a loop over `expr` holds. A loop over fixed
+        words holds one of them."""
+        kind = self.kind(expr, env, mod)
+        if kind == RECORDS:
+            return KEY
+        if kind and kind.startswith("="):
+            return kind
+        return kind[len(MANY):] if kind and kind.startswith(MANY) else None
+
+    def comp_env(self, comp, env, mod) -> dict:
+        """What the names hold inside a comprehension, whose own names hide
+        the function's."""
+        inner = dict(env)
+        for gen in comp.generators:
+            kind = self.each(gen.iter, inner, mod)
+            for name in ast.walk(gen.target):
+                if isinstance(name, ast.Name):
+                    inner.pop(name.id, None)
+            self.bind(gen.target, kind, inner)
+        return inner
+
+    def class_of(self, expr, mod):
+        """"module:Class" for a class of the app's or the core's, or None."""
+        if isinstance(expr, ast.Name):
+            if expr.id in mod.classes:
+                return "%s:%s" % (mod.name, expr.id)
+            source = mod.imported.get(expr.id)
+            if source and source[1] in getattr(self.modules.get(source[0]), "classes", {}):
+                return "%s:%s" % source
+        if isinstance(expr, ast.Attribute) and isinstance(expr.value, ast.Name):
+            other = self.modules.get(mod.aliases.get(expr.value.id, ""))
+            if other is not None and expr.attr in other.classes:
+                return "%s:%s" % (other.name, expr.attr)
+        return None
+
+    # -- what a function reads
+
+    @staticmethod
+    def bind(target, kind, env):
+        if kind is None:
+            return
+        if isinstance(target, ast.Name):
+            env.setdefault(target.id, kind)
+        elif isinstance(target, (ast.Tuple, ast.List)) and kind == PAIR and len(target.elts) == 2:
+            Walks.bind(target.elts[0], KEY, env)
+            Walks.bind(target.elts[1], RECORD, env)
+
+    def run(self, mod, fn, env: dict):
+        mark = (id(fn), frozenset(env.items()))
+        if mark in self.seen:
+            return
+        self.seen.add(mark)
+        where = "%s.%s" % (mod.name.rsplit(".", 1)[-1], mod.qual.get(id(fn), fn.name))
+        self.scope(mod, fn.body, dict(env), where)
+
+    def scope(self, mod, starts, env: dict, where: str):
+        """Bind what one scope's names hold, then read and follow with them.
+        A function or lambda inside it, or a comprehension, is a scope of
+        its own, whose names hide these."""
+        own, inner = _split(starts)
+        for _ in range(8):
+            before = dict(env)
+            for node in own:
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        self.bind(target, self.kind(node.value, env, mod), env)
+                elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+                    self.bind(node.target, self.kind(node.value, env, mod), env)
+                elif isinstance(node, (ast.For, ast.AsyncFor)):
+                    self.bind(node.target, self.each(node.iter, env, mod), env)
+            if env == before:
+                break
+        fields = set(self.reads(own, env, mod))
+        if fields:
+            self.found.setdefault(where, set()).update(fields)
+        for node in own:
+            if isinstance(node, ast.Call):
+                self.follow(node, env, mod)
+        for node in inner:
+            if isinstance(node, _COMPREHENSIONS):
+                parts = [node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]
+                parts += [part for gen in node.generators for part in [gen.iter] + gen.ifs]
+                self.scope(mod, parts, self.comp_env(node, env, mod), where)
+            else:
+                args = node.args
+                hidden = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs
+                          + [args.vararg, args.kwarg] if a is not None}
+                body = node.body if isinstance(node.body, list) else [node.body]
+                self.scope(mod, body, {n: v for n, v in env.items() if n not in hidden}, where)
+
+    def reads(self, own, env, mod):
+        def k(e):
+            return self.kind(e, env, mod)
+        for node in own:
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ("get", "pop", "setdefault") and node.args
+                    and k(node.func.value) == RECORD):
+                yield from self.named(node.args[0], env, mod)
+            elif (isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load)
+                    and k(node.value) == RECORD):
+                yield from self.named(node.slice, env, mod)
+            elif (isinstance(node, ast.Compare) and node.comparators
+                    and any(isinstance(op, (ast.In, ast.NotIn)) for op in node.ops)
+                    and k(node.comparators[0]) == RECORD):
+                yield from self.named(node.left, env, mod)
+            elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+                made = k(node.value)
+                if made and made.startswith(MADE):
+                    yield from self.made_reads(made[len(MADE):], node.attr)
+
+    def named(self, node, env, mod):
+        """The field a key expression names."""
+        word = _string(node, mod, self.modules)
+        if word is not None:
+            return [word]
+        if isinstance(node, ast.Name) and str(env.get(node.id, "")).startswith("="):
+            return env[node.id][1:].split("\0")
+        return ["?" + ast.unparse(node)]
+
+    def made_reads(self, made: str, attr: str) -> set:
+        """The fields an attribute of a document made from a record reads,
+        the field of that name, or every one a property or method of its
+        class reads of itself."""
+        source, name = made.split(":")
+        methods = {f.name: f for f in self.modules[source].classes[name].body
+                   if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        if attr not in methods:
+            return {attr}
+        todo, seen, fields = [attr], set(), set()
+        while todo:
+            name = todo.pop()
+            if name in seen or name not in methods:
+                continue
+            seen.add(name)
+            for n in ast.walk(methods[name]):
+                if (isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
+                        and n.value.id == "self"):
+                    if n.attr in methods:
+                        todo.append(n.attr)
+                    else:
+                        fields.add(n.attr)
+        return fields
+
+    def follow(self, call, env, mod):
+        """Into an app's or the core's function, with what each of its
+        parameters is handed."""
+        reached = _callee(call, mod, self.modules)
+        if reached is None:
+            return
+        cmod, cfn = reached
+        a = cfn.args
+        params = [p.arg for p in a.posonlyargs + a.args]
+        if params and params[0] in ("self", "cls") and "." in cmod.qual.get(id(cfn), ""):
+            params = params[1:]
+        bound = {}
+        for p, d in list(zip(params[len(params) - len(a.defaults):], a.defaults)) + \
+                [(p.arg, d) for p, d in zip(a.kwonlyargs, a.kw_defaults)]:
+            if isinstance(d, ast.Constant) and isinstance(d.value, str):
+                bound[p] = "=" + d.value
+        extra = []
+        for i, arg in enumerate(call.args):
+            if isinstance(arg, ast.Starred):
+                break
+            kind = self.kind(arg, env, mod) or self.word(arg)
+            if i < len(params):
+                bound.pop(params[i], None)
+                if kind:
+                    bound[params[i]] = kind
+            elif kind and not kind.startswith("="):
+                extra.append(kind)
+        if extra and a.vararg:
+            bound[a.vararg.arg] = MANY + extra[0]
+        for kw in call.keywords:
+            if kw.arg:
+                bound.pop(kw.arg, None)
+                kind = self.kind(kw.value, env, mod) or self.word(kw.value)
+                if kind:
+                    bound[kw.arg] = kind
+        if any(not v.startswith("=") for v in bound.values()):
+            self.run(cmod, cfn, bound)
+
+    @staticmethod
+    def word(node):
+        return "=" + node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+            else None
 
 
 def walk_reads(app: Path) -> dict:
-    """{field: {method}} for every field read off a saved record that a
-    method of the app's App walks to, followed into what it hands that
-    record to in the app's own modules and the core. By what the code does,
-    whatever the method is called, as American Family's download_one looks
-    for another bill's statement with the very bytes just taken."""
-    modules = modules_of(app)
-    mod = modules[entry_of(app).stem]
-    todo = [(name[len("App."):], mod, scope, frozenset([bound]))
-            for name, fn in sorted(mod.funcs.items()) if name.startswith("App.")
-            for scope, bound in _walks(fn)]
-    found, seen = {}, set()
-    while todo:
-        start, mod, scope, names = todo.pop()
-        if (id(scope), names) in seen:
-            continue
-        seen.add((id(scope), names))
-        for key in _record_reads(scope, names, mod, modules):
-            found.setdefault(key, set()).add(start)
-        for call in ast.walk(scope):
-            if not isinstance(call, ast.Call):
-                continue
-            at = [i for i, a in enumerate(call.args) if isinstance(a, ast.Name) and a.id in names]
-            named = {k.arg for k in call.keywords
-                     if k.arg and isinstance(k.value, ast.Name) and k.value.id in names}
-            reached = _callee(call, mod, modules) if (at or named) else None
-            if reached is None:
-                continue
-            cmod, cfn = reached
-            params = [a.arg for a in cfn.args.args]
-            if params and params[0] in ("self", "cls"):
-                params = params[1:]
-            bound = {params[i] for i in at if i < len(params)} | named
-            if bound:
-                todo.append((start, cmod, cfn, frozenset(bound)))
-    return found
+    """{where: fields} for every walk of the app's saved records."""
+    return Walks(app).found
+
+
+@functools.lru_cache(maxsize=None)
+def walks_of(app: Path) -> dict:
+    return walk_reads(app)
+
+
+def carried_for(provider: str) -> set:
+    """Every field --minimal carries for a provider, some of them for one
+    kind of its records alone."""
+    return (set(migrate.skip_fields_of(provider))
+            | set(migrate.PROVIDER_KIND_FIELDS.get(provider, (None, ()))[1]))
 
 
 @pytest.mark.parametrize("app", APPS, ids=IDS)
 def test_every_walk_of_the_saved_records_reads_what_minimal_carries(app):
-    read = walk_reads(app)
-    idle = WALKS_FOR_RENAME.get(app.name, {})
-    walking = {start for starts in read.values() for start in starts}
-    assert set(idle) <= walking, (app.name, "no longer walks", set(idle) - walking)
-    idle_fields = DECIDES_NOTHING.get(app.name, {})
-    carried = set(migrate.skip_fields_of(provider_of(app)))
-    left_out = {k: sorted(v) for k, v in read.items()
-                if k not in carried and k not in idle_fields and not v <= set(idle)}
+    read = walks_of(app)
+    why = dict(WALKS_FOR_RENAME.get(app.name, {}), **WALKS_DECIDE_NOTHING.get(app.name, {}))
+    assert set(why) <= set(read), (app.name, "no longer found", sorted(set(why) - set(read)))
+    carried = carried_for(provider_of(app)) | set(DECIDES_NOTHING.get(app.name, {}))
+    left_out = {where: sorted(read[where] - carried) for where in sorted(read)
+                if where not in why and where not in CORE_WALKS and read[where] - carried}
     assert not left_out, (
-        "%s walks its saved records and reads %s, which --minimal leaves out, "
-        "so on a new computer that check finds nothing. Carry it in "
-        "tools/migrate.py (PROVIDER_SKIP_FIELDS) if it names no person or "
-        "account, and say so in the tool's docstring" % (app.name, left_out))
+        "%s goes through its saved records and reads %s, which --minimal leaves out, "
+        "so on a new computer that check finds nothing. Carry it in tools/migrate.py "
+        "(PROVIDER_SKIP_FIELDS, or PROVIDER_KIND_FIELDS for one kind of record) and say "
+        "in the tool's docstring what it then carries, or say here why it decides no "
+        "download" % (app.name, left_out))
 
 
-def test_the_walk_census_reads_american_familys_twin_check():
-    """Not a census of nothing. The check that found American Family's
-    statement with another bill's bytes, and Robinhood's of a crypto
-    statement with the individual one's."""
-    amfam = walk_reads(REPO / "apps" / "amfam")
-    assert {"pdf_sha256", "date", "account"} <= {k for k, v in amfam.items()
-                                                 if "download_one" in v}, amfam
-    robinhood = walk_reads(REPO / "apps" / "robinhood")
-    assert {"pdf_sha256", "source_url"} <= {k for k, v in robinhood.items()
-                                            if "_other_accounts_statement" in v}, robinhood
+def test_every_core_walk_is_still_met():
+    met = {where for app in APPS for where in walks_of(app)}
+    assert set(CORE_WALKS) <= met, sorted(set(CORE_WALKS) - met)
+
+
+@pytest.mark.parametrize("app, where, fields", [
+    ("amfam", "amfam_docs.App.download_one", {"pdf_sha256", "date", "account"}),
+    ("robinhood", "robinhood_docs.App._account_of", {"source_url"}),
+    ("optum", "optum_docs.hold_known_forms", {"href", "account", "title", "document_id"}),
+    ("apple", "apple_receipts.App._oldest_given", {"purchase_date", "purchase_type"}),
+    ("kroger", "kroger_receipts.App._settle_stores", {"store_info"}),
+    ("kroger", "kroger_receipts.App._store_kept", {"store_read"}),
+    ("capitalone", "keys.told_apart", {"document_id", "downloaded_ok"}),
+    ("att", "att_docs.find_wrong_year_copies", {"date", "account", "category", "pdf_pages"}),
+    ("att", "att_docs._saved_size", {"pdf_size"}),
+    ("newrez", "newrez_docs._statement_months", {"category", "date"}),
+    ("optum", "optum_docs.adopt_product_keys", {"category", "date"}),
+    ("amazon", "amazon_receipts.App._replace_history_rows", {"items", "order_number"}),
+    ("aafmaa", "keys._identity", {"category", "date", "title", "account", "document_id"}),
+], ids=["a loop over items", "a record handed to a method", "among *args",
+        "getattr of the store", "a loop over keys alone", "the store's get under such a key",
+        "saved= and a word by default", "handed on again", "a function of one record",
+        "the store among *args", "from_dict and its key", "a document handed on",
+        "a loop over fixed words"])
+def test_the_walk_census_follows_each_way_an_app_reaches_its_records(app, where, fields):
+    """Not a census of nothing. Each way an app reaches its saved records,
+    and what the census reads there."""
+    read = walks_of(REPO / "apps" / app)
+    assert fields <= read.get(where, set()), (where, sorted(read.get(where, ())), sorted(read))
+
+
+SHADOWS = '''
+class App:
+    def comprehension(self):
+        record = self.progress.data.get("k")
+        titles = [record.get("title") for record in self.discovery.data.values()]
+        return record.get("pdf_path"), titles
+
+    def inner(self):
+        record = self.progress.data.get("k")
+
+        def other(record):
+            return record.get("summary")
+        return other({}), record.get("state")
+'''
+
+
+def test_a_name_bound_again_in_a_comprehension_or_an_inner_function_is_its_own(tmp_path):
+    """A comprehension or a function inside one binds its own names, so a
+    record of discovery there, or one handed in, is not the saved record of
+    the same name outside."""
+    (tmp_path / "invented_docs.py").write_text(SHADOWS, encoding="utf-8")
+    assert walk_reads(tmp_path) == {"invented_docs.App.comprehension": {"pdf_path"},
+                                    "invented_docs.App.inner": {"state"}}
 
 
 def test_a_provider_list_carries_only_what_that_app_reads():
@@ -365,11 +740,12 @@ def test_a_provider_list_carries_only_what_that_app_reads():
     app's, or a name nobody uses would carry nothing and a field nobody
     reads would carry for nothing."""
     by_provider = {provider_of(app): app for app in APPS}
-    for provider, fields in migrate.PROVIDER_SKIP_FIELDS.items():
+    for provider in set(migrate.PROVIDER_SKIP_FIELDS) | set(migrate.PROVIDER_KIND_FIELDS):
         assert provider in by_provider, provider
         app = by_provider[provider]
-        read = set(fields_read(app)) | set(walk_reads(app))
-        assert set(fields) <= read, (provider, set(fields) - read)
+        read = set(fields_read(app)).union(*walks_of(app).values())
+        own = carried_for(provider) - set(migrate.SKIP_FIELDS)
+        assert own <= read, (provider, own - read)
 
 
 def test_every_app_is_read():
@@ -672,12 +1048,30 @@ def test_a_second_persons_robinhood_history_carries_the_same(loading, tmp_path, 
     assert "summary" not in got[old_doc.key]
 
 
-def test_another_app_does_not_carry_robinhoods_fields():
-    """The same field can hold more in another app, so only Robinhood's
-    records carry them."""
-    rec = dict(HISTORY, state=State.COMPLETED.value, downloaded_ok=True)
-    own = set(migrate.PROVIDER_SKIP_FIELDS["Robinhood"])
-    assert own <= set(migrate._skip_fields(rec, "Robinhood"))
+def test_another_app_does_not_carry_a_providers_own_fields():
+    """The same field can hold more in another app, so only the records of
+    the provider that reads it carry it."""
+    rec = dict(HISTORY, state=State.COMPLETED.value, downloaded_ok=True, pdf_pages="2",
+               href="/account/products/12345678/tax_documents/777.pdf")
+    own = {provider: set(fields) for provider, fields in migrate.PROVIDER_SKIP_FIELDS.items()}
+    for provider, (_which, fields) in migrate.PROVIDER_KIND_FIELDS.items():
+        own.setdefault(provider, set()).update(fields)
+    assert {"Robinhood", "American Family", "AT&T", "Optum Bank"} <= set(own)
+    for provider, fields in own.items():
+        assert fields <= set(migrate._skip_fields(rec, provider)), provider
+    every = set().union(*own.values())
     for provider in ("", "Chase", "Target"):
         cut = migrate._skip_fields(rec, provider)
-        assert not own & set(cut), (provider, cut)
+        assert not every & set(cut), (provider, cut)
+
+
+def test_an_optum_statement_carries_none_of_a_forms_fields():
+    """Optum's statements are never read where a form's address is, so a
+    statement keeps no address, product, title or id, and a form does."""
+    form = dict(HISTORY, href="/account/products/12345678/tax_documents/777.pdf",
+                account="12345678", category="Tax Document", document_id="")
+    statement = dict(form, href="/account/products/12345678/statements/900001.pdf",
+                     category="Statement")
+    fields = set(migrate.PROVIDER_KIND_FIELDS["Optum Bank"][1])
+    assert fields <= set(migrate._skip_fields(form, "Optum Bank"))
+    assert not fields & set(migrate._skip_fields(statement, "Optum Bank"))

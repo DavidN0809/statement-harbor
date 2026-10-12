@@ -62,9 +62,17 @@ pages listed it, and the SHA-256 digest of the saved file, which says nothing
 of what the file holds. For American Family they include each document's
 date, the masked last four of the account or policy its bill is told by and
 the saved file's digest, so a statement with the bytes of another bill's is
-still caught. A record still under a key that left out its
-account's last four, as the apps did past forty characters until 0.34.0 and
-Chase did at any length until 0.17.1, also keeps what its key is built from
+still caught. For AT&T they include each bill's kind, date and account,
+which is only Wireless or Internet, all three in its key already, and the
+saved file's size and page count, so a bill 0.34.0 saved under the wrong
+year is still found and fetched again. For Optum Bank a tax form, and
+never a statement, keeps its product, title and id, which its key holds
+already (a title to sixty characters), and the address of its file on
+Optum's site. That address adds Optum's own number for a form saved under
+the key of its title, so a corrected form listed under the same title is
+still told from it. A record still under a key that left out its account's
+last four, as the apps did past forty characters until 0.34.0 and Chase did
+at any length until 0.17.1, also keeps what its key is built from
 and what the app compares before moving it, the document's kind, date,
 title, account, place among same-day twins and id. The app needs them to move
 it to the key that keeps the last four when it loads, and without the move it
@@ -131,12 +139,33 @@ SKIP_FIELDS = ("state", "downloaded_ok", "pdf_path", "discovered_at", "updated_a
 # neither copy when a statement it takes has the very bytes of another bill's
 # statement of that date, found by each saved one's digest, date and account
 # part, the masked last four of the bill's account or policy, which its key
-# and file name hold too (download_one).
+# and file name hold too (download_one). AT&T clears the marker of a bill
+# 0.34.0 saved under the wrong year as it loads, one found by the same date
+# a year later on a bill of the same kind and account, Wireless or
+# Internet, saved with the same size and page count (#26,
+# clear_wrong_year_copies).
 # Every app's skip decisions, and every walk of its saved records, are read
 # against these by core/tests/test_a_minimal_history_skips_what_the_app_did.py.
 PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "date",
                                       "title", "account", "pdf_sha256"),
-                        "American Family": ("pdf_sha256", "date", "account")}
+                        "American Family": ("pdf_sha256", "date", "account"),
+                        "AT&T": ("category", "date", "account", "pdf_size", "pdf_pages")}
+
+
+def _optum_form(rec: dict) -> bool:
+    """An Optum Bank tax form, by the address of its file on Optum's site
+    that its record keeps."""
+    return "/tax_documents/" in str(rec.get("href") or "")
+
+
+# Fields one provider reads off one kind of its records alone, carried for
+# that kind alone, with what tells it. When Optum Bank lists a corrected
+# tax form under the title of the one it corrects, the form already saved
+# under the key of that title keeps it. It is found by having no id of its
+# own and by its product, title and the address of its file on Optum's
+# site (optum_docs.hold_known_forms), and no statement is read there.
+PROVIDER_KIND_FIELDS = {"Optum Bank": (_optum_form, ("href", "account", "title",
+                                                     "document_id"))}
 
 # What an app builds a document's key from, and compares with a record
 # already under the new key, to move a record off a key that cut the account
@@ -425,10 +454,14 @@ def skip_fields_of(provider: str) -> tuple:
 
 
 def _skip_fields(rec: dict, provider: str = "") -> dict:
-    """The fields a skip decision reads, the provider's own among them. For
-    a record asked for again that is its last note too, one of the fixed
-    words an older version wrote, which says nothing of the purchase."""
+    """The fields a skip decision reads, the provider's own among them, and
+    those of the provider's kind of record this one is. For a record asked
+    for again that is its last note too, one of the fixed words an older
+    version wrote, which says nothing of the purchase."""
     out = {f: rec[f] for f in skip_fields_of(provider) if f in rec}
+    which, fields = PROVIDER_KIND_FIELDS.get(provider, (None, ()))
+    if fields and which(rec):
+        out.update((f, rec[f]) for f in fields if f in rec)
     if asked_again(rec):
         out["notes"] = str(rec.get("notes") or "").rsplit("; ", 1)[-1].strip()
     return out

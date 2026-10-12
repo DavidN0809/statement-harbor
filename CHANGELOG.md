@@ -31,6 +31,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
   under the wrong bill. The export now carries those three for American
   Family. The account part is the masked last four of the bill's account
   or policy, which its record keys and file names already hold.
+- **An Optum Bank history moved with `--minimal` still tells a corrected
+  tax form from the one it corrects.** Optum can list a corrected 5498-SA
+  under the title of the form it corrects, and the form saved first keeps
+  its key. It is found by the address of its file on Optum's site, its
+  product and its title, which `--minimal` left out. So on the new computer
+  a page that listed the corrected form first gave it the saved form's key,
+  the corrected form was never fetched, and the saved one was fetched
+  again. The export now carries those, with the form's id, for Optum
+  Bank's tax forms alone. Its key holds the product, title and id already,
+  and the address adds Optum's own number for the form.
+- **An AT&T history moved with `--minimal` still has a bill 0.34.0 saved
+  under the wrong year fetched again.** AT&T clears such a copy as it
+  starts (#26), finding it by its date, kind, account, size and page count
+  beside the next year's bill, which `--minimal` left out. It mattered only
+  for an install that had not opened AT&T since 0.34.2 when its history
+  moved. The export now carries those five for AT&T. Its key holds the
+  date, kind and account, which is only Wireless or Internet.
 
 ## [0.47.0] - 2026-10-12
 
