@@ -108,6 +108,11 @@ REVIEWED = {
         "A link this code makes itself, to an address on the history's own origin, "
         "marked as a download, never one of the page's own controls. The page "
         "checks the origin once more before it presses.",
+    ("gui/app.py", "HTML", "click()"):
+        "The control panel's own page, never a provider's. Export history makes a "
+        "link to the history file the panel just handed it, marked as a download, "
+        "and presses it so the browser saves the file under its own name (#67). "
+        "Nothing a site drew is pressed.",
 }
 
 # Parts of a script that are not followed back, each a value put into a
