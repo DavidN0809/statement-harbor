@@ -762,12 +762,16 @@ function runOutcome() {
     const says = [];
     if (named) says.push((named === 1 ? 'A receipt was' : named + ' receipts were') + ' saved under a name ' +
       'PaperPull was unsure of. Review names gives each a better one.');
-    if (aside) says.push('A document set aside sits in the Manual Review folder, where PaperPull kept it ' +
+    // An invoice that failed its check is put aside in Manual Review and
+    // counted in validation_failures, while its order may count as one
+    // saved under a name to review.
+    const asideToo = aside > 0 || (res.validation_failures || 0) > 0;
+    if (asideToo) says.push('A document set aside sits in the Manual Review folder, where PaperPull kept it ' +
       'rather than file it under the wrong name.');
     if (!says.length) says.push('The technical details below say what happened.');
     return {tone: 'warn', title: saved.length ? many(saved.length, 'new ' + n) + ' saved, some need a look' : 'Finished, needs attention',
       say: 'Finished, needs attention (' + details.join(', ') + '). ' + says.join(' '), clean: true, attention: true,
-      names: named > 0, aside: aside > 0};
+      names: named > 0, aside: asideToo};
   }
   if (res && ['pilot', 'all', 'resume'].includes(RUN.action)) {
     return saved.length ? {tone: 'ok', title: many(saved.length, 'new ' + n) + ' saved', say: 'Finished, no issues reported.', clean: true}
@@ -1153,7 +1157,8 @@ function rvRenamed(lines) {
 // same list as KEEP_WORDS in core renaming.py, which reads them again.
 const KEEP_WORDS = new Set(['keep', 'keep it', 'keep this', 'keep name', 'keep the name', 'keep this name',
   'keep its name', 'keep same', 'keep the same', 'keep the same name', 'same',
-  'same name', 'the same', 'no change', 'unchanged', 'leave it', 'leave as is']);
+  'same name', 'the same', 'no change', 'unchanged', 'leave it', 'leave as is',
+  'leave blank', 'leave it blank', 'leave blank to keep this name']);
 function keepsName(text) {
   return KEEP_WORDS.has(String(text || '').toLowerCase().replace(/[^a-z ]+/g, ' ').split(/\s+/).filter(Boolean).join(' '));
 }

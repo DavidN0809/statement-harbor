@@ -1530,6 +1530,7 @@ KEEP_WORDS = frozenset({
     "keep", "keep it", "keep this", "keep name", "keep the name", "keep this name",
     "keep its name", "keep same", "keep the same", "keep the same name", "same",
     "same name", "the same", "no change", "unchanged", "leave it", "leave as is",
+    "leave blank", "leave it blank", "leave blank to keep this name",
 })
 
 

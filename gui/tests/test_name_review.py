@@ -58,6 +58,7 @@ def test_an_empty_box_says_blank_keeps_the_name_and_never_reads_like_one():
 
 @pytest.mark.parametrize("typed, keeps", [
     ("Keep this name", True), ("keep this name.", True), ("  KEEP  ", True), ("Same", True),
+    ("Leave blank to keep this name", True), ("leave blank", True),
     ("No change!", True), ("leave as is", True), ("Garden Hose", False), ("Keepsake Box", False),
     ("keeper", False), ("Same Day Delivery", False), ("q", False), ("", False), (None, False)])
 def test_the_core_reads_words_that_keep_a_name(typed, keeps):
@@ -144,6 +145,15 @@ def test_one_set_aside_still_points_to_the_manual_review_folder(page):
     assert both["names"] and both["aside"]
     assert "2 receipts were saved under a name" in both["say"] and "Manual Review folder" in both["say"]
     assert "(2 saved under a name to review, 1 set aside)" in both["say"]
+
+
+def test_an_invoice_put_aside_beside_a_name_to_review_still_points_to_the_folder(page):
+    """Target sets aside an invoice that failed its check and counts it in
+    validation_failures, while its order counts as saved under a name to
+    review. The folder is offered as well as Review names."""
+    o = outcome(page, manual_review=1, name_review=1, validation_failures=1)
+    assert o["names"] and o["aside"]
+    assert "Review names gives each a better one." in o["say"] and "Manual Review folder" in o["say"]
 
 
 def test_a_failure_alone_sends_nobody_to_a_folder(page):
