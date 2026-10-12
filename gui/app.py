@@ -1069,6 +1069,240 @@ def api_status():
     return {"available": True, "root": str(apps_root()), "rows": out, "gaps": gaps}
 
 
+# -- every account at a glance ---------------------------------------------------
+#
+# The home page answers "what needs me" with one row per provider and person.
+# A row comes from three things, the status reporter run on that account's
+# own folder, the panel's own record of the runs it started there, and
+# whether one of them is running now. Nothing here says an account is signed
+# in, since nothing short of a run can know that (a page with no sign-in
+# challenge on it is not a session).
+
+RUN_LOG = "panel-runs.json"
+RUN_LOG_KEEP = 20
+# (app name, account) -> {"action", "started"} for each run streaming now.
+_RUNS: dict = {}
+# The runs that download, whose ending decides whether an account was left
+# partway. A Login, a Discover or a Verify that stops leaves nothing to
+# continue, so it never makes a row say Continue.
+DOWNLOAD_ACTIONS = ("pilot", "all", "resume")
+# The files a row lists as the newest it saved.
+LATEST_SHOWN = 4
+
+
+def _account_root(meta: dict, account: str) -> Path:
+    """The folder an account's documents and records are written to."""
+    return server_mode.output_root(Path(meta["dir"]), account)
+
+
+def _read_run_log(root: Path) -> list:
+    try:
+        raw = json.loads((root / RUN_LOG).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [e for e in raw if isinstance(e, dict)] if isinstance(raw, list) else []
+
+
+def _note_run(root: Path, entry: dict) -> None:
+    """Put a run's outcome first in its account's run log, keeping the
+    newest RUN_LOG_KEEP. Best effort. A folder that cannot be written keeps
+    no log, and a run is never failed for it."""
+    path = root / RUN_LOG
+    tmp = root / (RUN_LOG + ".tmp")
+    try:
+        tmp.write_text(json.dumps(([entry] + _read_run_log(root))[:RUN_LOG_KEEP], indent=1),
+                       encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
+def _saved_this_run(root: Path, started: float) -> list:
+    """The names of the files a run saved, from the new-this-run.txt it
+    wrote, for the page to list. A list older than the run is the last
+    run's, left in place by a run that stopped before writing its own."""
+    listed = root / "new-this-run.txt"
+    try:
+        if listed.stat().st_mtime < started:
+            return []
+        lines = listed.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    names = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name = re.split(r"[\\/]", line)[-1]
+        if name and name not in names:
+            names.append(name)
+    return names[:500]
+
+
+def _latest_saved(root: Path) -> list:
+    """The newest files an account saved, as {"name", "date"}, read from its
+    own records. Names only, so nothing here ever names a path to open."""
+    try:
+        raw = json.loads((root / "progress.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return []
+    found = []
+    for rec in raw.values() if isinstance(raw, dict) else ():
+        if not isinstance(rec, dict) or not rec.get("downloaded_ok"):
+            continue
+        name = rec.get("pdf_filename")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        when = rec.get("date") or rec.get("purchase_date") or ""
+        found.append({"name": re.split(r"[\\/]", name)[-1],
+                      "date": when if isinstance(when, str) else ""})
+    found.sort(key=lambda f: f["date"], reverse=True)
+    return found[:LATEST_SHOWN]
+
+
+def _provider_of(meta: dict) -> tuple:
+    """(provider name, kind) for an install, from its own storage.py, the
+    way the welcome list reads a template."""
+    try:
+        src = (Path(meta["dir"]) / "storage.py").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        src = ""
+    p, k = _PROVIDER_RE.search(src), _KIND_RE.search(src)
+    name = meta["name"]
+    for tail in (" Statements", " Receipts"):
+        if name.endswith(tail):
+            name = name[:-len(tail)]
+    return (p.group(1) if p else name), (k.group(1) if k else "")
+
+
+def _last_outcome(entry) -> str:
+    """How a logged run ended, in one word the page turns into a sentence.
+    "" for a run that finished cleanly or no run at all."""
+    if not entry:
+        return ""
+    if entry.get("closed"):
+        return "closed"
+    code = entry.get("exit_code")
+    result = entry.get("result") if isinstance(entry.get("result"), dict) else None
+    if code == 130:
+        return "interrupted"
+    if code not in (0, None):
+        return "failed"
+    if result and result.get("stopped"):
+        return "stopped"
+    if result and result.get("attention"):
+        return "attention"
+    return ""
+
+
+# The order the home page lists accounts in, most in need first.
+STATE_ORDER = ("stopped", "attention", "unreadable", "overdue", "due", "gap",
+               "never", "not_started", "unknown", "current", "ongoing")
+
+
+def _account_state(row, outcome: str, gaps: list) -> str:
+    """One word for where an account stands. A run that did not finish
+    comes first, since the next step is to continue it. Then what the last
+    run left to look at, then how current the archive is, then gaps."""
+    if outcome in ("closed", "interrupted", "failed", "stopped"):
+        return "stopped"
+    if outcome == "attention":
+        return "attention"
+    if row is None:
+        return "not_started"
+    status = str(row.get("status") or "")
+    if status in ("unreadable", "overdue", "due", "never"):
+        return status
+    if gaps:
+        return "gap"
+    return status if status in STATE_ORDER else "unknown"
+
+
+def account_rows() -> list:
+    """Every provider and person, with where each stands."""
+    mod = _status_module()
+    rows = []
+    for name, meta in discover_apps().items():
+        provider, kind = _provider_of(meta)
+        for account in meta["accounts"]:
+            root = _account_root(meta, account)
+            row = None
+            if mod is not None:
+                try:
+                    row = mod.scan_install(root)
+                except Exception:
+                    row = None
+            gaps = []
+            if row is not None:
+                try:
+                    gaps = [_jsonable(g) for g in mod.group_gaps(row.get("gaps") or [])]
+                except Exception:
+                    gaps = []
+            log = _read_run_log(root)
+            last = next((e for e in log if e.get("action") in DOWNLOAD_ACTIONS), None)
+            outcome = _last_outcome(last)
+            running = _RUNS.get((name, account))
+            rows.append({
+                "app": name, "account": account, "provider": provider,
+                "kind": (row or {}).get("kind") or kind,
+                "state": _account_state(row, outcome, gaps),
+                "documents": (row or {}).get("documents") or 0,
+                "newest": _jsonable((row or {}).get("newest")),
+                "age_days": (row or {}).get("age_days"),
+                "cadence_days": (row or {}).get("cadence_days"),
+                "cadence": mod._fmt_cadence((row or {}).get("cadence_days")) if mod else "-",
+                "gaps": gaps,
+                "last_run": last, "last_outcome": outcome,
+                "runs": log[:5],
+                "latest": _latest_saved(root),
+                "running": dict(running) if running else None,
+                "runnable": meta.get("runnable", True),
+                "needs_setup": meta.get("needs_setup", False),
+            })
+    order = {s: i for i, s in enumerate(STATE_ORDER)}
+    rows.sort(key=lambda r: (order.get(r["state"], len(order)), -(r["age_days"] or 0),
+                             r["provider"].lower(), r["account"] != "primary", r["account"]))
+    return rows
+
+
+@app.get("/api/accounts", dependencies=[Depends(_same_origin_only)])
+def api_accounts():
+    """The home page's rows. A plain def, so the folder walk runs in a
+    worker thread and a download streaming meanwhile is not held up."""
+    return {"root": str(apps_root()), "root_source": root_source(),
+            "status_available": _status_module() is not None,
+            "accounts": account_rows()}
+
+
+@app.post("/api/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+async def api_reveal(request: Request):
+    """Show one account's folder in the file manager. Takes the app's name
+    and the account, both checked against what the panel itself found, and
+    never a path."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    name = str((body or {}).get("app") or "")
+    account = str((body or {}).get("account") or "primary")
+    apps = discover_apps()
+    if name not in apps or account not in apps[name]["accounts"]:
+        raise HTTPException(404, "unknown app or account")
+    folder = _account_root(apps[name], account)
+    if not folder.is_dir():
+        raise HTTPException(404, "that account has no folder yet")
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", str(folder)])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(folder)])
+        else:
+            subprocess.Popen(["xdg-open", str(folder)])
+    except Exception as e:
+        raise HTTPException(500, "could not open the folder, %s" % e)
+    return {"ok": True}
+
+
 
 @app.post("/api/sample", dependencies=[Depends(_same_origin_only)])
 async def api_sample(request: Request):
@@ -2376,6 +2610,28 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             yield "data: A history file is being imported. Run this once it has finished.\n\n"
             yield "event: done\ndata: 1\n\n"
             return
+        # One run per account. A second, from another tab, would put two
+        # downloaders on one progress.json, one browser and one folder.
+        # Checked and claimed with nothing awaited between, so two requests
+        # cannot both get through.
+        if (app, account) in _RUNS:
+            yield ("data: %s is already running for this account, in another tab "
+                   "or window. Wait for it to finish there.\n\n" % app)
+            yield "event: done\ndata: 1\n\n"
+            return
+        _RUNS[(app, account)] = {"action": action,
+                                 "started": datetime.now().isoformat(timespec="seconds")}
+        root = _account_root(meta, account)
+        noted = False
+
+        def note(code, result, closed=False):
+            _note_run(root, {
+                "action": action, "account": account,
+                "started": _RUNS.get((app, account), {}).get("started", ""),
+                "ended": datetime.now().isoformat(timespec="seconds"),
+                "exit_code": code, "closed": closed, "result": result,
+                "scope": list(scope_flags), "redownload": bool(redownload),
+                "saved": _saved_this_run(root, started)})
         try:
             _RUNNING.add(app)
             proc = subprocess.Popen(
@@ -2411,6 +2667,9 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             except OSError:
                 pass
         except Exception as e:
+            _RUNS.pop((app, account), None)
+            if not any(a == app for a, _ in _RUNS):
+                _RUNNING.discard(app)
             yield f"data: [failed to start] {e}\n\n"
             yield "event: done\ndata: 1\n\n"
             return
@@ -2444,10 +2703,22 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
                     yield f"data: {told}\n\n"
             if result is not None:
                 yield f"event: result\ndata: {json.dumps(result)}\n\n"
+            # The files this run saved, by name, for the page to list under
+            # its one-line outcome. The log below keeps them for the home page.
+            yield f"event: saved\ndata: {json.dumps(_saved_this_run(root, started))}\n\n"
+            await to_thread.run_sync(note, code, result)
+            noted = True
             yield "data: \n\n"
             yield f"event: done\ndata: {code}\n\n"
         finally:
-            _RUNNING.discard(app)
+            if not noted:
+                # The page went away before the run ended, which stops it.
+                # The account's row then says it stopped partway.
+                note(None, result, True)
+            _RUNS.pop((app, account), None)
+            # Another person's run of the same app may still be going.
+            if not any(a == app for a, _ in _RUNS):
+                _RUNNING.discard(app)
             if proc.poll() is None:
                 proc.terminate()
                 try:
