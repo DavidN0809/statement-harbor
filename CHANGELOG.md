@@ -7,7 +7,69 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.48.0] - 2026-10-12
+
+A new control panel, on the desktop and on PaperPull Server, built around
+what needs you. Every account shows one plain status and one button for
+the next step, Get new for all runs every account that may have something
+new, and each account remembers its last runs. The release also stops a
+link from another program starting a run, keeps the index and every
+ledger in step when Rename or Review Names cannot write one, carries what
+American Family, AT&T and Optum Bank check in a history moved with
+`--minimal`, and repairs several apps that stopped on a damaged record.
+
+### Added
+- **Get new for all.** When several accounts may have something new, one
+  button runs them one after another, and pauses at one that does not
+  finish so you can sign in again, try once more or skip it.
+- **Each account remembers its last runs.** The panel notes every run it
+  starts in `panel-runs.json` in the account's folder, how it ended and
+  which files it saved, so a row can say a run stopped partway and an
+  account shows its recent runs. A run closed with its page counts as
+  stopped.
+
+### Changed
+- **A new control panel, built around what needs you.** The home page,
+  Accounts, lists every provider and person, most in need first, each with
+  one plain status (Overdue, New one likely, Possible gap, Stopped partway,
+  Needs a look, Up to date, Not started) and one button for the next step.
+  Each account has a page of its own with two steps, Open sign-in window
+  and Get new documents, and Which dates as one choice of all dates, one
+  year or a range. Try the newest few first and Only check what's there sit
+  beside the main button, Continue appears after a run that stopped, and
+  everything rarer is under More, each item saying in a line what it does.
+  A run leads with its outcome and the files it saved, keeps the full
+  output under Technical details, and offers a problem report where it
+  ended, and a bar follows you to other pages while it goes. The panel's
+  words follow, Login is Sign in, Pilot is Try the newest few first,
+  Discover is Only check what's there, Run All is Get new documents and
+  Resume is Continue, while the terminal's commands keep their names.
+  Spreadsheets, File names and Settings are pages of their own. Light by
+  default, dark when the system or Settings asks, and it fits a phone. It
+  is set in Atkinson Hyperlegible, made for legibility, which ships inside
+  the app under the SIL Open Font License, so no font is fetched from the
+  web.
+- **Download again is Restore deleted files**, a dialog of its own under
+  More. It still needs a year or both a From and a To date, says what
+  happens to files you still have and applies to one run, and it is never
+  a box that changes what the next run does.
+- **The welcome is three steps**, where to save, which providers and whose
+  documents they are. Providers can be searched and grouped, and the
+  account holder's name is asked on the page instead of in a browser
+  prompt.
+- **File names shows the name first.** Its parts are chips you add, remove
+  and move, separator and date style are chosen by example, and the
+  pattern can still be written by hand under Edit as text.
+- **On PaperPull Server the sign-in window docks beside the page** when a
+  sign-in starts, and the Browser Screen button is now Sign-in window. The
+  header says when new files go to Paperless.
+- **The welcome list says what each provider downloads in one plain line.**
+  It showed the provider table from PROVIDERS.md, which is written for
+  GitHub, so someone choosing their bank read who tested it, issue numbers
+  and how it reads the site. Each provider now has a short line of its own
+  in `gui/providers.json`, a provider not yet run on a real account says
+  so, and a few carry a short note, such as Discover cards moving to
+  Capital One.
 
 ### Fixed
 - **A copy put aside for review stays in review after a history is moved
@@ -56,7 +118,117 @@ All notable changes to PaperPull are recorded here. Versioning follows
   in their saved records, whatever file came after. A newer file, minimal
   or whole, now fills in each of those a record lacks, and never one it
   holds.
+- **Rename no longer leaves the index naming files by their old names.**
+  Apply renames, and Rename them on the File names page, renamed the files
+  first and then wrote the index, the order history and the run state.
+  With the index open in Excel, that write waited its minute and gave up
+  after the files had moved, so the index and progress.json still named
+  every renamed file by its old name. Verify then reported each one
+  missing, and the next rename said every file was already named the way
+  the app names it, so nothing pointed the index at them again. Now each
+  of them is checked before anything is renamed, waiting the same minute
+  while one is open in another program, and nothing is renamed while one
+  stays open. A write that still fails after the files moved puts every
+  file back under its old name, where the index and the run state still
+  find it, and a file that cannot be put back is listed with its new name
+  and its old one. Either way the rename says what happened and stops as
+  a run that did not finish, so the panel no longer reports the files
+  renamed. It also no longer says that Resume carries on from where it
+  stopped, since Resume has nothing of a rename's to carry on with.
+- **A run state open in another program no longer ends a run with a
+  traceback.** Every app saves its run state, progress.json, on its way
+  out, and only then writes the result the panel reads. With progress.json
+  open in another program, that save waited its minute and stopped with a
+  traceback, so the panel never got the run's result. A Rename that had
+  just stopped because progress.json was open waited a second minute for
+  it and then showed the traceback over its own clean stop. Now that save
+  says in one line that the file could not be written and where it is,
+  the run ends as it would have, and a file the run has already waited for
+  is not waited for again. The list of what was found, discovery.json, is
+  saved on the way out the same way.
+- **Review Names no longer leaves the index naming a receipt by its old
+  name.** Review Names, which renames the receipts a receipt app was unsure
+  how to name, renamed each file and then wrote its new name into the
+  index, the order history and progress.json. With the index or the order
+  history open in Excel, the rename was done, the write waited its minute
+  and gave up, and the index kept the old name, so Verify reported the
+  file missing. Now each of them is checked before the first question,
+  waiting the same minute while one is open in another program, and
+  nothing is asked or renamed while one stays open. A write that still
+  fails after a receipt was renamed puts that receipt back under its old
+  name, never over another file, writes back what was written for it, and
+  stops the review with a message saying so. Receipts renamed before it
+  keep their new names.
+- **Rename counts and lists a file once when two rows of the index name it.**
+  Download again can leave two rows of one purchase naming one file. Rename
+  preview, and the File names page, gave the second row a name of its own
+  beside the first's, so the file was counted twice and listed with two new
+  names, though it was renamed once. That second name was still kept from
+  every other file, so another document wanting the same name could take
+  " (3)" with " (2)" free, and the next Rename moved it again. A file
+  already told apart from another by its number was moved on to " (2)" for
+  its second row, and the next Rename moved it back. Each file now takes
+  one name, and every row naming it follows it.
+- **A Target order's list of invoices follows its files when Review Names
+  or Rename renames them.** Target keeps every invoice of an order split
+  into several in the order's record, and only one of them as the order's
+  file. Both renames corrected the index rows and that one file and left
+  the list naming the old names. A later file given such a freed name was
+  then taken for this order's too, so Review Names left it out of the
+  review and Rename kept its name. Each invoice in the list now names its
+  file as it is, whichever invoice was renamed. A list an earlier rename
+  left behind is mended when Review Names or Rename next runs, each entry
+  following the order's own file that says it is that invoice, and Download
+  again no longer counts another order's file under such a name as this
+  order's, an invoice whose number did not read included. A file another
+  order holds is taken for this order's only by an invoice number both
+  carry, a later order's tip named only in its list holds its file too,
+  and a renamed invoice deleted since is no longer followed onto a later
+  order's file under its freed name. An invoice deleted once it was
+  imported elsewhere keeps its entry, so it is not downloaded again.
+- **Kroger, Chase, AT&T, Robinhood and NewRez no longer stop on a record
+  holding a number or a list where text belongs.** progress.json can be
+  edited by hand or left damaged by a crash. A store that was not text
+  stopped Kroger's Rename and Review Names, a title or account that was not
+  text stopped every Chase command as its records loaded, a saved bill's
+  account or kind that was a list did the same in AT&T, and a title or
+  date that was not text stopped the Rename of Robinhood's tax forms and of
+  NewRez's statements. Such a value now reads as none, as an empty one
+  does, and AT&T leaves such a bill out of its check for a bill saved under
+  the wrong year.
+- **The panel says when a Discover stopped.** In every app, Discover told
+  the panel nothing about how it ended, so one that stopped, with its list
+  cut short or never coming, read "finished, check output" just as one
+  that read the whole list did, and its failure file was never offered.
+  Discover now tells the panel how it ended. One that stopped reads as
+  stopped, offers its failure file and offers Check again rather than
+  Continue, which downloads. Discover still downloads nothing and leaves
+  new-this-run.txt as the last download run wrote it.
+- **A second run of the same account is refused while one is going.** Two
+  tabs could start two downloaders on one account's records, browser and
+  folder at once.
+- **PaperPull Server's footer no longer says it runs locally or offers the
+  Store edition.** It names PaperPull Server and its version, says it runs
+  on your own server, and keeps the Ko-fi link.
 
+### Security
+- **A link opened from an email, a chat or a PDF no longer starts a run in
+  the control panel.** The panel's page asks for everything it does by
+  script, and the browser marks each such request as coming from the
+  panel's own page. A link opened from another program is marked instead
+  as an address the browser opened by itself, as one typed into the
+  address bar is, and the panel answered that, since nothing about it
+  pointed to another site. A run starts from a plain address, so a link to
+  that address opened while the panel was running started the run, on
+  PaperPull Server too in a browser signed in to it. Every address of the
+  panel's API now refuses a request the browser opened by itself, on the
+  desktop and on PaperPull Server, and so do the server's sign-in, its
+  sign-out and its Browser Screen connection, which only its own pages ask
+  for. The panel itself still opens from a link, a bookmark or the address
+  bar. An address of the API typed in by hand is refused with a note
+  saying only the panel's own page asks for it. A tool such as curl, which
+  says nothing about where a request came from, is answered as before, and
+  so is a browser too old to say, Safari before 16.4 among them.
 ## [0.47.0] - 2026-10-12
 
 Your providers and download history can move to another computer or to
@@ -188,25 +360,6 @@ several providers.
   now keeps those fields, every other record carries what it did before,
   and importing a file made now over a history an older `--minimal` file
   already moved gives those records what they were missing.
-
-### Security
-- **A link opened from an email, a chat or a PDF no longer starts a run in
-  the control panel.** The panel's page asks for everything it does by
-  script, and the browser marks each such request as coming from the
-  panel's own page. A link opened from another program is marked instead
-  as an address the browser opened by itself, as one typed into the
-  address bar is, and the panel answered that, since nothing about it
-  pointed to another site. A run starts from a plain address, so a link to
-  that address opened while the panel was running started the run, on
-  PaperPull Server too in a browser signed in to it. Every address of the
-  panel's API now refuses a request the browser opened by itself, on the
-  desktop and on PaperPull Server, and so do the server's sign-in, its
-  sign-out and its Browser Screen connection, which only its own pages ask
-  for. The panel itself still opens from a link, a bookmark or the address
-  bar. An address of the API typed in by hand is refused with a note
-  saying only the panel's own page asks for it. A tool such as curl, which
-  says nothing about where a request came from, is answered as before, and
-  so is a browser too old to say, Safari before 16.4 among them.
 
 ## [0.46.0] - 2026-10-11
 
