@@ -1165,7 +1165,7 @@ def test_the_mend_reads_the_index_once(tmp_path, monkeypatch):
                         lambda self: reads.append(self.path) or real(self))
     mended = app._mend_invoice_lists(save=True)
     assert reads.count(app.index_csv.path) == 1, len(reads)
-    assert mended == (0, {}), "a deleted invoice is not followed anywhere"
+    assert mended == 0, "a deleted invoice is not followed anywhere"
 
 
 def test_an_invoice_deleted_after_import_keeps_its_entry(tmp_path, monkeypatch):
@@ -1209,3 +1209,37 @@ def test_download_again_fetches_an_invoice_whose_own_file_is_gone_too(tmp_path):
     assert [e["file"] for e in app._invoices_on_file(purchase)] == [entries[0]["file"]]
     assert [e["number"] for e in an_app(tmp_path)._invoices_on_file(purchase)] == [
         "10000000000000042", "10000000000000041"]
+
+
+def test_an_entry_that_cannot_be_asked_about_stops_nothing(tmp_path, monkeypatch, capsys):
+    """An entry naming a file in a folder the person may not read made
+    asking whether it is there raise, which stopped Review Names and Rename
+    before they did anything, on every try, and a preview stopped that way
+    left what it had mended so far to be saved. Such an entry is left as it
+    is, the stale entry before it is mended, and a preview writes nothing."""
+    app = an_app(tmp_path)
+    purchase, _, renamed, entries = left_stale(app, taken=False)
+    locked = app.paths.invoices / "locked" / "Toys (1 of 1).pdf"
+    later = Purchase(purchase_type=ONLINE, purchase_date=TIPPED.iso, order_number=OTHER)
+    app.progress.update(later.key, dict(later.to_dict(), invoices=[
+        {"file": str(locked), "part": "1 of 1", "number": "10000000000000099", "kept": True}]))
+    real = Path.exists
+
+    def exists(self, *args, **kwargs):
+        if self.name == locked.name:
+            raise PermissionError(13, "Access is denied", str(self))
+        return real(self, *args, **kwargs)
+    monkeypatch.setattr(Path, "exists", exists)
+    before = json.loads(app.paths.progress_json.read_text(encoding="utf-8"))
+
+    assert run(tmp_path, "http://127.0.0.1:9", "--rename") == 0
+    assert json.loads(app.paths.progress_json.read_text(encoding="utf-8")) == before
+
+    monkeypatch.setattr(app_mod, "ask", lambda prompt: "")
+    capsys.readouterr()
+    app.cmd_review_names()
+    said = " ".join(capsys.readouterr().out.split())
+    assert "1 invoice(s) in the order records named a file" in said, said
+    assert saved_record(app, purchase)["invoices"] == [
+        entries[0], dict(entries[1], file=str(renamed))]
+    assert saved_record(app, later)["invoices"][0]["file"] == str(locked)

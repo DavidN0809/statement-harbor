@@ -1543,20 +1543,26 @@ class App:
         """Whether an entry of the order's list no longer names its invoice.
         Its file is gone, or another order's rows or record name that file
         and the file does not say it is this invoice. A file both orders'
-        lists name stays with the order whose invoice it says it is."""
+        lists name stays with the order whose invoice it says it is. A file
+        that cannot be asked about, in a folder the person may not read for
+        instance, is left as it is, and so is its entry."""
         path = Path(entry["file"])
-        if not path.exists():
-            return True
+        try:
+            if not path.exists():
+                return True
+        except OSError:
+            return False
         if not another(entry["file"], purchase.order_number):
             return False
         part, number = site.invoice_identity(receipt_pdf.pdf_text(path))
         return not self._on_file({"saved": [entry]}, part, number)
 
-    def _mend_invoice_lists(self, save: bool):
+    def _mend_invoice_lists(self, save: bool, before: Optional[dict] = None) -> int:
         """Point each order's list of invoices at its files as they are now,
         before Review Names or Rename reads it, and write it down when
-        `save`. How many entries moved, and each mended record as it was,
-        by its key, for a preview to put back.
+        `save`. How many entries moved. Each mended record is kept in
+        `before` as it was, by its key, as it is mended, for a preview to put
+        back however the mend or the rename after it ends.
 
         An earlier Review Names or Rename left the list naming the old file
         of each invoice it renamed. Review Names and Rename read the list as
@@ -1574,7 +1580,8 @@ class App:
         for row in rows:
             orders.setdefault((row.get("Purchase Type"), row.get("Order or Receipt Number")),
                               []).append(row)
-        mended, before = 0, {}
+        mended = 0
+        before = {} if before is None else before
         for key, rec in list(data.items()):
             invoices = rec.get("invoices") if isinstance(rec, dict) else None
             if not isinstance(invoices, list):
@@ -1598,7 +1605,7 @@ class App:
                 mended += moved
         if mended and save:
             self.progress.save()
-        return mended, before
+        return mended
 
     def _on_file(self, walk: dict, part, number: str) -> bool:
         """Whether this invoice is one of the order's already saved. By its
@@ -1797,14 +1804,16 @@ class App:
         unless --apply is given."""
         self.stats["mode"] = "rename"
         apply = bool(getattr(self.args, "apply", False))
-        mended, before = self._mend_invoice_lists(save=apply)
-        if mended and apply:
-            print("%d invoice(s) in the order records named a file an earlier rename "
-                  "moved, and now name it as it is." % mended)
-        elif mended:
-            print("%d invoice(s) in the order records name a file an earlier rename "
-                  "moved, and Rename with --apply writes down where each is now." % mended)
+        before = {}
         try:
+            mended = self._mend_invoice_lists(save=apply, before=before)
+            if mended and apply:
+                print("%d invoice(s) in the order records named a file an earlier rename "
+                      "moved, and now name it as it is." % mended)
+            elif mended:
+                print("%d invoice(s) in the order records name a file an earlier rename "
+                      "moved, and Rename with --apply writes down where each is now."
+                      % mended)
             renaming.run_for(self, apply_changes=apply)
         finally:
             if not apply:
@@ -1842,7 +1851,7 @@ class App:
                 print(f"  {k}: {c} rows")
 
     def cmd_review_names(self):
-        mended, _ = self._mend_invoice_lists(save=True)
+        mended = self._mend_invoice_lists(save=True)
         if mended:
             print("%d invoice(s) in the order records named a file an earlier rename "
                   "moved, and now name it as it is." % mended)
