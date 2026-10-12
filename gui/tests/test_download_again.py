@@ -408,7 +408,13 @@ def test_a_restore_that_ends_early_says_continue_will_not_download_again():
                   "so choose the dates that are left"):
         assert words in left, words
     outcome = " ".join(function("runOutcome").split())
-    assert outcome.count("AGAIN_LEFT") >= 4 and outcome.count("resume: !RUN.again") >= 4
+    # Every way a run can end without finishing says it, and offers Continue
+    # only to a run that downloads and was not a restore.
+    assert "const next = RUN.again ? AGAIN_LEFT :" in outcome
+    assert "const downloads = ['pilot', 'all', 'resume'].includes(RUN.action) && !RUN.again;" in outcome
+    assert outcome.count("+ next + '.'") + outcome.count("say: next + '.'") >= 4
+    assert outcome.count("resume: downloads") == 5 and "resume: !RUN.again" not in outcome
+    assert "say: RUN.again ? AGAIN_LEFT + '.'" in outcome
     assert "if (RUN.again && !RUN.outcome.clean && RUN.sink)" in function("finishRun")
     # A row whose last run was a restore that stopped offers the rest of the
     # restore, never Continue, and a round of Get new for all leaves it out.

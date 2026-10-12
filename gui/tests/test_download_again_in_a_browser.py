@@ -220,6 +220,20 @@ def test_a_restore_that_stops_partway_says_continue_will_not_download_again(pane
     assert tab.locator("#view-run [data-action=resume]").count() == 1
 
 
+def test_a_discover_that_stops_offers_to_check_again_never_continue(panel, shop):
+    """Continue downloads, and somebody who pressed Only check what's there
+    asked only to see what the provider has."""
+    (shop / "stop").write_text("", encoding="utf-8")
+    tab = panel.tab
+    tab.get_by_role("button", name="Only check what's there").click()
+    finished(tab)
+    assert started(shop) == [["--discover"]]
+    assert tab.inner_text("#r-title") == "Stopped before finishing"
+    assert tab.inner_text("#statustext").endswith("Sign in again, then check again.")
+    assert tab.locator("#view-run [data-action=resume]").count() == 0
+    assert tab.locator("#view-run [data-action=discover]").count() == 1
+
+
 def test_one_end_of_a_range_stops_it_in_the_dialog(panel, shop):
     tab = panel.tab
     open_restore(tab)

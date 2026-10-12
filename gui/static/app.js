@@ -698,19 +698,27 @@ function finishRun(code, refused) {
 function runOutcome() {
   const res = RUN.result, code = RUN.code, n = noun(RUN), saved = RUN.saved || [];
   const who = RUN.provider;
+  // Continue picks up a run that downloads. A Discover that stopped is
+  // pressed again, since it was asked only to see what is there, and a
+  // restore that stopped is chosen again for the dates it did not reach.
+  const downloads = ['pilot', 'all', 'resume'].includes(RUN.action) && !RUN.again;
+  const recheck = RUN.action === 'discover';
+  const next = RUN.again ? AGAIN_LEFT : downloads ? 'Continue picks up where it stopped'
+    : recheck ? 'Check again when you are ready' : 'Nothing was lost';
   if (RUN.refused) return {tone: 'bad', title: 'This run did not start', say: RUN.refused, clean: false};
   if (code === 'stopped') return {tone: 'info', title: 'You stopped this run',
-    say: 'Nothing already saved is lost, and Continue picks up where it stopped.', clean: false, resume: !RUN.again};
+    say: 'Nothing already saved is lost. ' + next + '.', clean: false, resume: downloads, recheck};
   if (code === 'lost') return {tone: 'bad', title: 'Lost touch with this run',
-    say: 'Progress is saved. Check the account, then continue.' + (RUN.again ? ' ' + AGAIN_LEFT + '.' : ''), clean: false, resume: !RUN.again};
+    say: 'Progress is saved. Check the account. ' + next + '.', clean: false, resume: downloads, recheck};
   if (code === '130') return {tone: 'info', title: 'Interrupted, progress saved',
-    say: (RUN.again ? AGAIN_LEFT : 'Continue picks up where it stopped') + '.', clean: false, resume: !RUN.again};
+    say: next + '.', clean: false, resume: downloads, recheck};
   if (code !== '0') return {tone: 'bad', title: 'This run ended with a problem',
-    say: 'It exited with code ' + code + '. Progress is saved, and the technical details below say what happened.' +
-      (RUN.again ? ' ' + AGAIN_LEFT + '.' : ''), clean: false, resume: !RUN.again};
+    say: 'It exited with code ' + code + '. Progress is saved, and the technical details below say what happened. ' +
+      next + '.', clean: false, resume: downloads, recheck};
   if (res && res.stopped) return {tone: 'info', title: 'Stopped before finishing',
-    say: RUN.again ? AGAIN_LEFT + '.' : who + ' may have signed you out partway. Nothing is lost. Sign in again, then continue.',
-    clean: false, resume: !RUN.again, signin: true};
+    say: RUN.again ? AGAIN_LEFT + '.' : who + ' may have signed you out partway. Nothing is lost. Sign in again, then ' +
+      (downloads ? 'continue.' : recheck ? 'check again.' : 'run it again.'),
+    clean: false, resume: downloads, recheck, signin: true};
   if (res && res.attention) {
     const details = [];
     if (res.wrong_document) details.push(`${res.wrong_document} refused as the wrong document`);
@@ -798,12 +806,15 @@ function renderRun() {
       html += '<ul class="saved" aria-label="Saved this run">' + RUN.saved.slice(0, 50).map(n => '<li>' + sv(P.check, 16, 3) +
         '<span>' + esc(n) + '</span></li>').join('') + (RUN.saved.length > 50 ? '<li>and ' + (RUN.saved.length - 50) + ' more</li>' : '') + '</ul>';
     }
-    if (r && (o.resume || o.signin)) {
+    if (r && (o.resume || o.recheck || o.signin)) {
       html += '<ol class="nextsteps">' +
         '<li><div class="stepnum">1</div><div class="body"><b>Sign in to ' + esc(RUN.provider) + ' again</b><span>In its window, or open a new one</span></div>' +
         '<button type="button" class="btn btn-s starts" data-do="run" data-action="login" data-key="' + key + '">Open sign-in window</button></li>' +
         (o.resume ? '<li><div class="stepnum on">2</div><div class="body"><b>Continue where it stopped</b><span>Picks up what is left, without asking again for what is already saved</span></div>' +
-          '<button type="button" class="btn btn-p starts" data-do="run" data-action="resume" data-key="' + key + '">' + PLAY + 'Continue</button></li>' : '') + '</ol>';
+          '<button type="button" class="btn btn-p starts" data-do="run" data-action="resume" data-key="' + key + '">' + PLAY + 'Continue</button></li>' : '') +
+        (o.recheck ? '<li><div class="stepnum on">2</div><div class="body"><b>Check again</b><span>Lists what ' + esc(RUN.provider) +
+          ' has once more. Nothing is downloaded</span></div><button type="button" class="btn btn-p starts" data-do="run" data-action="discover" data-key="' +
+          key + '">Check again</button></li>' : '') + '</ol>';
     }
     if (!SERVER && r && ['diagnose', 'record'].includes(RUN.action) && o.clean) {
       html += '<div class="keepopen"><p>The file holds counts and states and no text from your account.</p>' +
