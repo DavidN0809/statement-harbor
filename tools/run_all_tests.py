@@ -768,7 +768,8 @@ PYTEST_SUMMARY = re.compile(r"(?:=+ )?(?:no tests ran|\d+ \w[\w -]*(?:, \d+ \w[\
 def summary_of(output: str, returncode: int) -> str:
     """The line that says how a suite ended, whose counts go into the run's.
     pytest's own last line, wherever it sits, since a suite's stderr is read
-    after its stdout and a thread can still write once pytest is done. On
+    into its output as it comes and a thread can still write once pytest is
+    done. On
     2026-10-07 a test's server in the core suite wrote socketserver's
     message about a request after it, and the run printed that message as
     the core's summary and counted none of its 11537 passed and 305 skipped
