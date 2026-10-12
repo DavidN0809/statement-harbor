@@ -36,8 +36,17 @@ def report_run_result(stats):
               "asked for. Nothing was saved under their names. That is a "
               "wrong document arriving, not a missing one, so it is worth "
               "reporting." % wrong, flush=True)
-    result["stopped"] = int(stopped_early())
-    if result["stopped"] and stats.get("mode") == "rename":
+    # A run state the save on the way out could not write holds none of
+    # what this run did, so the next run may fetch it all again. Such a run
+    # is not one that finished, whatever else it did.
+    from .storage import unsaved_on_leaving
+    unsaved = unsaved_on_leaving()
+    result["stopped"] = int(stopped_early() or bool(unsaved))
+    if unsaved and not stopped_early():
+        print("\nThis run did its work, but its run state could not be written, so "
+              "the next run may download again what this one saved. Close the "
+              "program that has it open before running again.", flush=True)
+    elif result["stopped"] and stats.get("mode") == "rename":
         # Rename downloads nothing for Resume to carry on with, and when it
         # stops it has just said what it put back and what to do instead.
         print("\nThis run stopped before it finished.", flush=True)

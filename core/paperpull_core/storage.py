@@ -469,6 +469,15 @@ _LOCKED_PAUSE_S = 2
 # (JsonStore.save).
 _HELD = set()
 
+# Each file the save on the way out could not write, which report_run_result
+# reads, so a run whose run state was not saved never reads as finished.
+_UNSAVED = []
+
+
+def unsaved_on_leaving() -> list:
+    """The files the save on the way out could not write, in this run."""
+    return list(_UNSAVED)
+
 
 def _held_key(path) -> str:
     return os.path.normcase(os.path.abspath(str(path)))
@@ -699,6 +708,7 @@ class JsonStore:
             else:
                 atomic_write_json(self.path, self.data)
         except PermissionError:
+            _UNSAVED.append(str(self.path))
             print("  ! %s could not be written, so it keeps what was last saved in it. "
                   "Close any program that has it open before the next run." % self.path,
                   flush=True)

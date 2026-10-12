@@ -187,3 +187,28 @@ def test_a_save_on_the_way_out_keeps_its_backup(tmp_path):
     store.save(backup=True, leaving=True)
     assert [b.name.split(".")[0] for b in (tmp_path / "Backups").iterdir()] == ["progress"]
     assert _saved_keys(store) == ["Online:1", "Online:2"]
+
+
+def test_a_run_whose_run_state_was_not_written_is_not_reported_finished(tmp_path, monkeypatch,
+                                                                       capsys):
+    """The run finished, but the save on the way out could not write
+    progress.json, so it holds none of what the run did. The panel is told
+    the run stopped, never that it finished clean, and nothing points to
+    Resume."""
+    import json as _json
+    from paperpull_core import run_reporting, storage
+    monkeypatch.setattr(storage, "_UNSAVED", [])
+    monkeypatch.setattr(storage, "_HELD", {storage._held_key(tmp_path / "progress.json")})
+
+    def refused(*args, **kwargs):
+        raise PermissionError(13, "held", str(tmp_path / "progress.json"))
+    monkeypatch.setattr(storage, "atomic_write_json", refused)
+    store = storage.JsonStore(tmp_path / "progress.json")
+    store.data = {"k": {"state": "Completed"}}
+    store._loaded = True
+    store.save(leaving=True)
+    run_reporting.report_run_result({"new_files": ["a.pdf"]})
+    out = capsys.readouterr().out
+    line = [ln for ln in out.splitlines() if ln.startswith(run_reporting.PREFIX)][-1]
+    assert _json.loads(line[len(run_reporting.PREFIX):])["stopped"] == 1, out
+    assert "run state could not be written" in out and "Resume" not in out, out
