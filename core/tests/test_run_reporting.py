@@ -181,4 +181,6 @@ def test_each_provider_tells_the_panel_how_a_discover_ended(entry, capsys):
     out = capsys.readouterr().out
     assert _result(out)["stopped"] == 1
     assert "stopped before it finished" in out
+    assert "press Discover again" in out and "Resume carries on" not in out, (
+        "the console sends a stopped Discover to Discover, as the panel does")
     assert did == ["discover as 'discover'"], "and nothing writes the run summary"

@@ -78,6 +78,15 @@ def test_the_newest_wins_when_a_run_failed_twice(install):
         "174903.json")
 
 
+def test_the_newest_wins_whatever_command_wrote_it(install):
+    """A Pilot stopped at 10:00 and a Discover at 10:20. The names start
+    with the command, so sorted by name the Pilot's older file came last
+    and was offered for the Discover."""
+    wrote(install, "failure-pilot-20260922-100000.json")
+    wrote(install, "failure-discover-20260922-102000.json")
+    assert app_module.api_failure_latest("costco")["name"] == "failure-discover-20260922-102000.json"
+
+
 def test_yesterdays_failure_is_not_offered_as_this_ones(install):
     """The one that would have somebody attach the wrong failure to the
     right issue, and never know."""

@@ -38,7 +38,12 @@ def report_run_result(stats):
               "reporting." % wrong, flush=True)
     result["stopped"] = int(stopped_early())
     if result["stopped"]:
-        print("\nThis run stopped before it finished. Whatever it saved is kept, "
-              "and Resume carries on from where it stopped.", flush=True)
+        if stats.get("mode") == "discover":
+            # Resume downloads, and Discover was run only to see what is there.
+            print("\nThis run stopped before it finished. Discover downloads nothing, "
+                  "so press Discover again rather than Resume.", flush=True)
+        else:
+            print("\nThis run stopped before it finished. Whatever it saved is kept, "
+                  "and Resume carries on from where it stopped.", flush=True)
     # Never include account labels, paths, or provider response text.
     print(PREFIX + json.dumps(result), flush=True)
