@@ -48,6 +48,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   a run that did not finish, so the panel no longer reports the files
   renamed. It also no longer says that Resume carries on from where it
   stopped, since Resume has nothing of a rename's to carry on with.
+- **Rename counts and lists a file once when two rows of the index name it.**
+  Download again can leave two rows of one purchase naming one file. Rename
+  preview, and the File names page, gave the second row a name of its own
+  beside the first's, so the file was counted twice and listed with two new
+  names, though it was renamed once. That second name was still kept from
+  every other file, so another document wanting the same name could take
+  " (3)" with " (2)" free, and the next Rename moved it again. A file
+  already told apart from another by its number was moved on to " (2)" for
+  its second row, and the next Rename moved it back. Each file now takes
+  one name, and every row naming it follows it.
 
 ## [0.46.0] - 2026-10-11
 

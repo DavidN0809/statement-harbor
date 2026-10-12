@@ -210,6 +210,45 @@ def test_a_file_two_changes_name_is_renamed_once(tmp_path):
     assert (result.renamed, result.failed, result.skipped) == (2, 0, 1)
 
 
+def test_a_file_two_rows_name_is_offered_once(tmp_path):
+    """Two rows of one purchase naming one file, as Download again can leave
+    them. The second row was given a name of its own beside the first's, so
+    the preview said two files would be renamed where one would, and listed
+    the one file twice with two new names."""
+    r = row(tmp_path, "2026-09-23 Testco Widget Receipt.pdf", order="A1")
+    changes = renaming.plan([r, dict(r)], by_order, folders=[tmp_path])
+    said = []
+    renaming.describe(changes, say=said.append)
+    assert said == ["1 file(s) would be renamed.", "  2026-09-23 Testco Widget Receipt.pdf",
+                    "    -> 2026-09-23 Testco A1 Receipt.pdf"]
+    assert [c.reason for c in changes] == ["", "renamed for another row of the index"]
+    assert [c.new_name for c in changes] == ["2026-09-23 Testco A1 Receipt.pdf"] * 2
+
+
+def test_a_file_two_rows_name_holds_one_name(tmp_path):
+    """The name given to the second row was held from every other file, so a
+    second file wanting the same name, a document with no id to tell it
+    apart, took " (3)" with " (2)" free, and the next Rename moved it to
+    " (2)"."""
+    first = row(tmp_path, "first.pdf")
+    rows = [first, dict(first), row(tmp_path, "second.pdf")]
+
+    def rename():
+        return renaming.plan(rows, lambda r: "2026-09-12 Testco Statement.pdf",
+                             folders=[tmp_path])
+
+    changes = rename()
+    assert [(c.old_name, c.new_name) for c in changes if c.renaming] == [
+        ("first.pdf", "2026-09-12 Testco Statement.pdf"),
+        ("second.pdf", "2026-09-12 Testco Statement (2).pdf")]
+    result = renaming.apply(changes, say=lambda *a: None)
+    assert result.renamed == 2
+    assert renaming.update_rows(rows, result) == 3
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "2026-09-12 Testco Statement (2).pdf", "2026-09-12 Testco Statement.pdf"]
+    assert not [c.new_name for c in rename() if c.renaming], "it took a second Rename to settle"
+
+
 @pytest.fixture
 def _held_from(monkeypatch):
     """A program opening the file the k-th rename of apply is about to move,
@@ -1140,6 +1179,21 @@ def test_a_file_already_told_apart_by_its_number_stays_put(tmp_path):
     assert [c.renaming for c in changes] == [False, False], [(c.old_name, c.new_name, c.reason) for c in changes]
 
 
+def test_a_file_already_told_apart_that_two_rows_name_stays_put(tmp_path):
+    """The same with a second row naming the second return's file, as
+    Download again can leave one. The first of its rows left the file its
+    name, and the second found that name held, by the file itself, so the
+    file was moved on to " (2)", and the next Rename moved it back."""
+    first = row(tmp_path, "2022-08-10 Testco Return.pdf", order="A1")
+    second = row(tmp_path, "2022-08-10 Testco Return A2.pdf", order="A2")
+    changes = renaming.plan([first, second, dict(second)],
+                            lambda r: "2022-08-10 Testco Return.pdf",
+                            folders=[tmp_path], distinguisher=lambda r: r["order"])
+    assert [c.renaming for c in changes] == [False, False, False], [
+        (c.old_name, c.new_name, c.reason) for c in changes]
+    assert [c.new_name for c in changes] == [first[NAME], second[NAME], second[NAME]]
+
+
 def test_unique_path_can_leave_a_files_own_name_free(tmp_path):
     from paperpull_core.storage import unique_path
     (tmp_path / "a.pdf").write_bytes(b"x")
@@ -1341,6 +1395,34 @@ def test_a_file_whose_record_has_another_order_number_keeps_its_name(tmp_path, m
     renaming.run_for(_App(tmp_path, rows, progress=records), apply_changes=True,
                      say=lambda *a: None)
     assert [p.name for p in tmp_path.glob("*.pdf")] == [RECEIPT]
+
+
+@pytest.mark.parametrize("spelled", [pytest.param(str, id="the same path"), *SPELLINGS])
+def test_both_rows_of_one_purchase_naming_its_file_follow_it(tmp_path, monkeypatch, spelled):
+    """Two rows of purchase 1001 name its one file, as Download again can
+    leave them, the second perhaps spelling the path its own way. Rename
+    said two files would be renamed and renamed one. The preview now counts
+    the file once, and both rows and the record name it under its new name
+    afterwards, so the next Rename has nothing to do."""
+    monkeypatch.setattr(storage, "_FILENAME_PATTERN", "{date} {provider} {number} {summary}")
+    monkeypatch.chdir(tmp_path)
+    f = tmp_path / RECEIPT
+    f.write_bytes(b"%PDF- the receipt of 1001")
+    rows, records = _receipt_rows_and_records(f, "1001", "1001")
+    rows[1]["PDF Full Path"] = spelled(f)
+    app = _App(tmp_path, rows, progress=records)
+    said = []
+    renaming.run_for(app, apply_changes=True, say=said.append)
+    text = "\n".join(said)
+    assert "1 file(s) would be renamed." in said and "Renamed 1 file(s)." in text, text
+    renamed = tmp_path / "2026-09-05 Testco 1001 Household Goods.pdf"
+    assert [p.name for p in tmp_path.glob("*.pdf")] == [renamed.name]
+    assert [(r["PDF Full Path"], r["PDF Filename"]) for r in rows] == [
+        (str(renamed), renamed.name)] * 2, rows
+    assert records["In-Store:1001"]["pdf_path"] == str(renamed)
+    said.clear()
+    renaming.run_for(app, say=said.append)
+    assert said == ["Every file is already named the way this app names them."], said
 
 
 def _bills_whose_names_read_alike(folder, first, second):
