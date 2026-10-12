@@ -219,7 +219,8 @@ def write_xlsx(path: Path, purchases: List[dict], orders: List[dict], summary: L
 
 def export(root: Path, out: Optional[Path] = None, provider: Optional[str] = None,
            as_csv: bool = False) -> dict:
-    """Build the workbook. Returns what was written, for the panel and the CLI."""
+    """Build the workbook. Returns what was written, for the panel and the
+    CLI, with path None when no order history was found to write from."""
     histories = find_histories(root)
     if provider:
         histories = [(p, f) for p, f in histories if p.lower() == provider.lower()]
@@ -247,19 +248,25 @@ def export(root: Path, out: Optional[Path] = None, provider: Optional[str] = Non
         out = root / (stem + (".csv" if as_csv else ".xlsx"))
     elif as_csv and out.suffix.lower() == ".xlsx":
         out = out.with_suffix(".csv")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        if as_csv:
-            write_csv(out, purchases)
-        else:
-            write_xlsx(out, purchases, orders, summary)
-    except PermissionError:
-        # Excel holds the file open with an exclusive lock, and this is the
-        # one error a person can fix in a second, so say exactly that.
-        raise PermissionError(f"{out.name} is open in another program, Excel most likely. "
-                              "Close it and build again.") from None
+    # With no order history there is nothing to build, so nothing is
+    # written. An empty spreadsheet was left behind every time the answer
+    # was that there was nothing to export, in place of the last one built.
+    written = None
+    if histories:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if as_csv:
+                write_csv(out, purchases)
+            else:
+                write_xlsx(out, purchases, orders, summary)
+        except PermissionError:
+            # Excel holds the file open with an exclusive lock, and this is the
+            # one error a person can fix in a second, so say exactly that.
+            raise PermissionError(f"{out.name} is open in another program, Excel most likely. "
+                                  "Close it and build again.") from None
+        written = str(out)
     return {
-        "path": str(out),
+        "path": written,
         "format": "csv" if as_csv else "xlsx",
         "purchases": len(purchases),
         "orders": len(orders),

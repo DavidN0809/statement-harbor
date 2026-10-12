@@ -210,6 +210,26 @@ def test_the_export_caches_each_reading_and_writes_the_sheets(tmp_path, monkeypa
     assert (tmp_path / xt.CACHE_NAME).is_file()
 
 
+def test_with_no_statement_on_disk_nothing_is_written(tmp_path):
+    """Every build that found no statement wrote an empty workbook and then
+    said there was nothing to export, so the one a person had built before
+    was replaced by an empty one."""
+    pytest.importorskip("pdfplumber")
+    (tmp_path / "Gone Bank").mkdir()
+    with open(tmp_path / "Gone Bank" / "Gone Bank Document Index.csv", "w", newline="", encoding="utf-8-sig") as fh:
+        w = csv.DictWriter(fh, fieldnames=["Document Date", "PDF Full Path"]); w.writeheader()
+        w.writerow({"Document Date": "2026-01-01", "PDF Full Path": str(tmp_path / "gone.pdf")})
+    last = tmp_path / "All Transactions.csv"
+    last.write_text("the workbook built last time\n", encoding="utf-8")
+
+    r = xt.export(tmp_path, as_csv=True, log=lambda *_: None)
+    assert r["statements"] == 0 and r["missing"] == 1 and r["path"] is None
+    assert xt.main(["--root", str(tmp_path), "--csv"]) == 1
+    assert xt.main(["--root", str(tmp_path)]) == 1
+    assert last.read_text(encoding="utf-8") == "the workbook built last time\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["All Transactions.csv", "Gone Bank"]
+
+
 # -- #29, the closing month dated a year early --------------------------------
 
 CHASE_CARD = """Opening/Closing Date 07/27/26 - 08/26/26

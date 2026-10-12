@@ -759,16 +759,22 @@ def export(root: Path, out: Optional[Path] = None, provider: Optional[str] = Non
         out = root / (stem + (".csv" if as_csv else ".xlsx"))
     elif as_csv and out.suffix.lower() == ".xlsx":
         out = out.with_suffix(".csv")
-    try:
-        if as_csv:
-            _write_csv(out, txn_rows)
-        else:
-            _write_xlsx(out, txn_rows, stmt_rows)
-    except PermissionError:
-        raise PermissionError(f"{out.name} is open in another program, Excel most likely. "
-                              "Close it and build again.") from None
+    # With no statement on disk there is nothing to build, so nothing is
+    # written. An empty workbook was left behind every time the answer was
+    # that there was nothing to export, in place of the last one built.
+    written = None
+    if stmt_rows:
+        try:
+            if as_csv:
+                _write_csv(out, txn_rows)
+            else:
+                _write_xlsx(out, txn_rows, stmt_rows)
+        except PermissionError:
+            raise PermissionError(f"{out.name} is open in another program, Excel most likely. "
+                                  "Close it and build again.") from None
+        written = str(out)
     reconciled = sum(1 for s in stmt_rows if s["Status"].startswith("reconciled"))
-    return {"path": str(out), "format": "csv" if as_csv else "xlsx", "transactions": len(txn_rows),
+    return {"path": written, "format": "csv" if as_csv else "xlsx", "transactions": len(txn_rows),
             "statements": len(stmt_rows), "reconciled": reconciled, "providers": per_provider,
             "read": read, "cached": len(stmt_rows) - read, "missing": missing,
             "openpyxl_missing": not have_openpyxl,

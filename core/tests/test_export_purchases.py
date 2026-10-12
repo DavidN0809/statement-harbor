@@ -140,8 +140,24 @@ def test_the_workbook_has_three_sheets_and_numeric_money(root):
 def test_no_sources_is_reported_not_faked(tmp_path):
     (tmp_path / "Chase Statements").mkdir()
     r = xp.export(tmp_path, as_csv=True)
-    assert r["sources"] == [] and r["purchases"] == 0
+    assert r["sources"] == [] and r["purchases"] == 0 and r["path"] is None
     assert xp.main(["--root", str(tmp_path), "--csv"]) == 1
+    assert xp.main(["--root", str(tmp_path)]) == 1
+    assert xp.main(["--root", str(tmp_path), "--provider", "Amazon"]) == 1
+    assert [p.name for p in tmp_path.iterdir()] == ["Chase Statements"]
+
+
+def test_a_build_that_finds_nothing_leaves_the_last_spreadsheet_as_it_was(root):
+    """Every build that found no order history wrote an empty spreadsheet
+    and then said there was nothing to export, so the one a person had
+    built before was replaced by an empty one."""
+    built = Path(xp.export(root, as_csv=True)["path"])
+    before = built.read_bytes()
+    for history in root.glob("*/* Order History.csv"):
+        history.unlink()
+    r = xp.export(root, as_csv=True)
+    assert r["sources"] == [] and r["path"] is None
+    assert built.read_bytes() == before
 
 
 def test_the_cli_writes_beside_the_installs(root, capsys):

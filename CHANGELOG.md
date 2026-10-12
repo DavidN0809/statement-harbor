@@ -89,6 +89,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   there inside the container. On the server it now looks only beside the
   panel. The desktop still looks beside the installs too, where older
   layouts kept them.
+- **A spreadsheet with nothing to put in it is no longer written.** Asked
+  for the purchases spreadsheet with no order history, or the transactions
+  workbook with no statement on disk, the panel and both export commands
+  wrote an empty file and then said there was nothing to export. That
+  empty file took the place of the last spreadsheet built. Now nothing is
+  written, and the last one stays as it was.
 
 ## [0.46.0] - 2026-10-11
 
