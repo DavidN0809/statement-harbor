@@ -156,8 +156,9 @@ def _held(text: str, real_folders: List[Path], staged: bool = False,
           aside: bool = False) -> Optional[Path]:
     """held_document, with the folders already found where they really are,
     with `staged` a PDF under its staging name as well, and with `aside` one
-    under Rename's temporary name."""
-    text = (text or "").strip()
+    under Rename's temporary name. Kroger hands it a record's path, and one
+    that is not text holds nothing (_text)."""
+    text = _text(text)
     if not text:
         return None
     ends = (".pdf", ".pdf.delivering") if staged else (".pdf",)
@@ -597,14 +598,14 @@ def update_progress(progress, result: Result, *,
     for key, rec in list(data.items()):
         if not isinstance(rec, dict):
             continue
-        recorded = (rec.get(path_field) or "").strip()
+        recorded = _text(rec.get(path_field))
         if recorded:
             new_path = moved(recorded)
             if not new_path:
                 continue
             patch = {path_field: new_path, filename_field: Path(new_path).name}
         else:
-            new_name = result.names.get((rec.get(filename_field) or "").strip())
+            new_name = result.names.get(_text(rec.get(filename_field)))
             if not new_name:
                 continue
             patch = {filename_field: new_name}
@@ -613,6 +614,15 @@ def update_progress(progress, result: Result, *,
     if touched:
         progress.save()
     return touched
+
+
+def _text(value) -> str:
+    """A path or name a record holds, and "" for anything but text.
+    progress.json can be edited by hand or left damaged, and a number, a
+    list or a mapping where a path belongs names no file. Read as text it
+    stopped a Rename after its files had moved, with progress.json not
+    saved, so every record went on naming a file that was gone."""
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _moved(result: Result):
@@ -764,7 +774,7 @@ def run_for(app, apply_changes: bool = False, say=print,
         # Ally names a statement from what its PDF says.
         saved = current.record_for(row, saved=True) or {}
         record = dict(record, **{k: saved.get(k, "") for k in (*_AS_SAVED, *as_saved)})
-        summary = (record.get("summary") or "").strip() or _first(row, _SUMMARY_KEYS)
+        summary = _text(record.get("summary")) or _first(row, _SUMMARY_KEYS)
         return build_pdf_filename(_first(row, _DATE_KEYS), summary,
                                   _first(row, _TYPE_KEYS), part=_part_of(row),
                                   record=record)
@@ -1004,13 +1014,13 @@ class _Known:
                     continue
                 merged = self.records.setdefault(name, {})
                 merged.update({k: v for k, v in rec.items() if v not in (None, "")})
-                raw = str(rec.get("pdf_path") or "").strip()
+                raw = _text(rec.get("pdf_path"))
                 where = self._file(raw)
                 # Target keeps each invoice of an order split into several in
                 # the record's invoices, and only one of them in pdf_path.
                 invoices = rec.get("invoices")
                 for e in (invoices if isinstance(invoices, list) else ()):
-                    file = str(e.get("file") or "").strip() if isinstance(e, dict) else ""
+                    file = _text(e.get("file")) if isinstance(e, dict) else ""
                     if self._file(file):
                         self._claims.setdefault(self._file(file), {}).setdefault(
                             name, set()).add(file)
@@ -1161,7 +1171,7 @@ class _Known:
                 old = str(c.old_path)
                 moving.setdefault(self._file(old), []).append(old)
         raws = [(r.get("PDF Full Path") or "").strip() for r in rows]
-        raws += [str(rec.get("pdf_path") or "").strip() for rec in records.values()
+        raws += [_text(rec.get("pdf_path")) for rec in records.values()
                  if isinstance(rec, dict)]
         out = {}
         for raw in raws:
@@ -1259,7 +1269,7 @@ def _numbers_naming(rows: Iterable[dict], records: dict) -> dict:
         invoices = rec.get("invoices")
         files = [rec.get("pdf_path")] + [e.get("file") for e in (
             invoices if isinstance(invoices, list) else ()) if isinstance(e, dict)]
-        named += [(str(f or "").strip(), number) for f in files]
+        named += [(_text(f), number) for f in files]
     for raw, number in named:
         where = _same_file(raw) if raw else ""
         if where:
@@ -1410,7 +1420,12 @@ def review_names(app, ask, words: ReviewWords = WORDS,
             # receipt or put aside a newer copy, keeps rows of its own, and
             # only those take its new name. Written into the record, it moved
             # the record off the copy the last run left.
-            ours = not prog or str(Path(prog.get("pdf_path") or "")) == str(old_path)
+            # A record whose path is not text names no file, as an empty one
+            # names none (_text). Handed to Path, it stopped the review with
+            # the receipt renamed and its record never written.
+            recorded = prog.get("pdf_path")
+            ours = not prog or str(Path(recorded if isinstance(recorded, str) else "")) \
+                == str(old_path)
             # Completed is for a receipt that was saved and marked for review
             # for its name alone, which its record says with downloaded_ok. A
             # receipt put aside in Manual Review because its PDF failed its
