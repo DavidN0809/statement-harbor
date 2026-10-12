@@ -667,12 +667,13 @@ def setup_needed(meta: dict) -> str:
         return ("This is the sample archive, so there is nothing to sign in "
                 "to and nothing to download.\n\n"
                 "Everything already in it was invented to show what a real "
-                "archive looks like. The Status tab and both spreadsheets "
+                "archive looks like. Accounts and both spreadsheets "
                 "work on it exactly as they would on yours.\n\n"
                 "To see the sign-in step, leave the sample, add a provider, "
-                "and press Login. Your own browser opens on that provider's "
-                "sign-in page. Nothing is downloaded until you have signed "
-                "in there yourself, and PaperPull never sees what you type.")
+                "open it and press Open sign-in window. Your own browser opens "
+                "on that provider's sign-in page. Nothing is downloaded until "
+                "you have signed in there yourself, and PaperPull never sees "
+                "what you type.")
     if _is_packaged() or _venv_python(Path(meta["dir"])) is not None or _runs_apps():
         return ""
     script = "setup-all.command" if sys.platform != "win32" else "setup-all.bat"
@@ -770,7 +771,10 @@ def api_apps():
     apps = discover_apps()
     return {"apps_root": str(apps_root()), "root_source": root_source(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
             "more_actions": list(MORE_ACTIONS), "redownload_actions": list(REDOWNLOAD_ACTIONS),
-            "apps": apps, "refreshed": refreshed}
+            "apps": apps, "refreshed": refreshed,
+            # What the server's header says about where new documents go.
+            "server": ({"paperless": server_mode.paperless_connected()}
+                       if server_mode.enabled() else None)}
 
 
 # -- the panel's tools ---------------------------------------------------------
@@ -1218,12 +1222,27 @@ def _account_state(row, outcome: str, gaps: list) -> str:
     return status if status in STATE_ORDER else "unknown"
 
 
+def _owner_of(meta: dict, account: str) -> str:
+    """The account holder's name as the account's config gives it, or ""."""
+    config = Path(meta["dir"]) / ("config.json" if account == "primary"
+                                  else "config.%s.json" % account)
+    try:
+        owner = json.loads(config.read_text(encoding="utf-8-sig")).get("owner")
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return owner.strip()[:80] if isinstance(owner, str) else ""
+
+
 def account_rows() -> list:
     """Every provider and person, with where each stands."""
     mod = _status_module()
+    cards = _provider_notes()
     rows = []
     for name, meta in discover_apps().items():
         provider, kind = _provider_of(meta)
+        # The template an install came from is named for its entry script,
+        # chase_docs.py for apps/chase, which is how its line is found.
+        slug = str(meta.get("script_name") or "").rsplit("_", 1)[0]
         for account in meta["accounts"]:
             root = _account_root(meta, account)
             row = None
@@ -1244,10 +1263,15 @@ def account_rows() -> list:
             running = _RUNS.get((name, account))
             rows.append({
                 "app": name, "account": account, "provider": provider,
+                "owner": _owner_of(meta, account),
+                "gets": cards.get(slug, {}).get("documents", ""),
                 "kind": (row or {}).get("kind") or kind,
                 "state": _account_state(row, outcome, gaps),
                 "documents": (row or {}).get("documents") or 0,
                 "newest": _jsonable((row or {}).get("newest")),
+                # When the app last finished a run at all, from its own run
+                # summary, so a run from a terminal counts as a check too.
+                "checked": _jsonable((row or {}).get("last_run")),
                 "age_days": (row or {}).get("age_days"),
                 "cadence_days": (row or {}).get("cadence_days"),
                 "cadence": mod._fmt_cadence((row or {}).get("cadence_days")) if mod else "-",

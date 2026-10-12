@@ -587,44 +587,50 @@ def test_the_welcome_page_says_where_the_data_folder_is_on_the_server(base, on_s
     for it on the NAS finds a folder named data beside compose.yaml, so the
     page says so, on the server and nowhere else."""
     page = ask(base + "/", session=signed_in(base))[2]
-    start = page.index('<p class="hint" id="serverroot" style="display:none;')
+    start = page.index('<p class="hint" id="serverroot" hidden>')
     note = page[start:page.index("</p>", start)]
     assert "<b>data</b>" in note and "compose.yaml" in note
-    server_page = page.split("function serverPage() {", 1)[1].split("\n}\n", 1)[0]
-    assert server_page.strip().splitlines()[0] == "if (!SERVER) return;"
-    assert "$('serverroot').style.display = 'block';" in server_page
-    assert "the data folder beside compose.yaml" in page
+    welcome = page.split("async function openWelcome(add) {", 1)[1].split("\n}\n", 1)[0]
+    shown = welcome[welcome.index("if (SERVER) {"):]
+    assert "$('serverroot').hidden = false;" in shown and "$('newroot').readOnly = true;" in shown
+    assert "the data folder beside compose.yaml" in page.lower()
 
 
-def test_the_browser_screen_is_a_button_at_the_top_that_says_what_it_is_for(base, on_server):
-    """Every sign-in on the server happens on the browser screen, so it is
-    a button, not a small link, and Login's step points to it."""
+def test_the_sign_in_window_is_a_button_at_the_top_and_docks_on_sign_in(base, on_server):
+    """Every sign-in on the server happens on the server's own screen, so it
+    is a button at the top, not a small link. Open sign-in window docks it
+    beside the page, and the step that offers it says where it opens."""
     page = ask(base + "/", session=signed_in(base))[2]
     bar = page[page.index('<div class="serverbar">'):]
-    bar = bar[:bar.index("</div>")]
-    assert '<a class="screenbtn" href="/screen"' in bar and "Browser Screen</a>" in bar
-    assert "sign-in windows open" in bar and 'action="/logout"' in bar
-    assert "header .serverbar a.screenbtn" in page
-    login_step = page.split("$('steplogin').innerHTML = ", 1)[1].split(";\n", 1)[0]
-    assert "Browser Screen" in login_step and "the button at the top" in login_step
+    bar = bar[:bar.index("</form></div>") + len("</form></div>")]
+    assert '<a id="screenbtn" class="btn btn-s screenbtn" href="/screen"' in bar
+    assert "Sign-in window</a>" in bar and "sign-in pages open" in bar
+    assert 'action="/logout"' in bar and "Sign out</button>" in bar
+    assert "if (SERVER && action === 'login') openDock(r.provider);" in page
+    login = " ".join(page.split("const loginSay = SERVER", 1)[1].split(";\n", 1)[0].split())
+    assert "in the sign-in window, docked beside this page" in login
+    assert "frame.src = '/screen/novnc/vnc.html?" in page
 
 
 def test_both_editions_say_what_discover_is_for(base, on_server, monkeypatch):
-    """The four buttons a normal day needs are Login, Discover, Pilot and
-    Run All, and the steps under them named three."""
+    """Get new documents is the one main button. Pilot and Discover are links
+    beside it, named for what they do, and Discover says it downloaded
+    nothing when it ends."""
     server_page = ask(base + "/", session=signed_in(base))[2]
     monkeypatch.delenv("PAPERPULL_SERVER")
     desktop_page = ask(base + "/")[2]
     for page in (server_page, desktop_page):
-        steps = page[page.index('1. <span id="steplogin">'):]
-        steps = " ".join(steps[:steps.index("</p>")].split())
-        assert "2. <b>Discover</b> shows what the provider has for you and downloads nothing." in steps
-        assert "It is optional, since Pilot and Run All look too." in steps
-        assert steps.index("2. <b>Discover") < steps.index("3. <b>Pilot") < steps.index("4. <b>Run All")
+        account = page[page.index("function renderAccount()"):]
+        account = account[:account.index("\nfunction ")]
+        main = account.index('data-action="all"')
+        assert main < account.index('data-action="pilot"') < account.index('data-action="discover"')
+        assert "Try the newest few first</button>" in account
+        assert "Only check what\\'s there</button>" in account
+        assert "discover: ['Checked ' + who" in page and "Nothing was downloaded." in page
 
 
 def _footer(page):
-    return " ".join(page[page.index("<footer>"):page.index("</footer>")].split())
+    return " ".join(page[page.index("<footer"):page.index("</footer>")].split())
 
 
 def test_each_edition_says_only_what_is_true_of_it_at_the_bottom(base, on_server, monkeypatch):

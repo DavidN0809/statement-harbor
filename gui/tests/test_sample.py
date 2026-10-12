@@ -139,7 +139,7 @@ def test_the_refusal_says_where_the_sign_in_step_can_be_seen(panel):
     _sample(True)
     why = app_module.setup_needed({"dir": str(app_module._sample_dest() / "Chase Statements")})
     assert "leave the sample" in why.lower()
-    assert "Login" in why
+    assert "Open sign-in window" in why
     assert "never sees what you type" in why
 
 

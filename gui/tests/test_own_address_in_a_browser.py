@@ -107,13 +107,13 @@ def test_the_panel_works_at_its_own_addresses(browser, port, shop, name):
         base = "http://%s:%d" % (name, port)
         tab.goto(base + "/")
         assert tab.title() == "PaperPull"
-        tab.wait_for_function("() => document.getElementById('app').options.length > 0")
-        assert tab.input_value("#app") == "Shop Receipts"
+        tab.wait_for_selector("#view-home .acct .who a")
+        assert tab.inner_text("#view-home .acct .who a") == "Shop"
 
-        tab.get_by_role("button", name="Pilot", exact=True).click()
-        tab.wait_for_function("() => !document.getElementById('dot').classList.contains('run')",
-                              timeout=60000)
-        assert tab.inner_text("#statustext") == "finished, no issues reported"
+        tab.click("#view-home .acct .who a")
+        tab.get_by_role("button", name="Try the newest few first").click()
+        tab.wait_for_function("() => RUN.state === 'done'", timeout=60000)
+        assert tab.inner_text("#r-title") == "Nothing new"
         assert (shop / "ran.txt").is_file(), "the run reached the app"
 
         sent = tab.evaluate("""async () => {
@@ -150,6 +150,38 @@ def test_the_browser_screen_still_shows_novnc_in_its_frame(browser, port, shop, 
         assert tab.title() == "PaperPull Browser Screen"
         screen = tab.frame_locator("iframe").locator("#screen")
         assert screen.inner_text(timeout=15000) == "the screen"
+    finally:
+        context.close()
+    assert json.dumps(server_mode._FAILS) == "{}"
+
+
+def test_the_sign_in_window_docks_beside_the_accounts_on_the_server(browser, port, shop, tmp_path,
+                                                                     monkeypatch):
+    """On the server every sign-in happens on the server's screen. The page
+    shows it in a panel of its own when a sign-in starts, and the header's
+    Sign-in window button opens it at any time, so nobody hunts for a tab.
+    That works only because noVNC's page may be framed by the panel's own."""
+    (tmp_path / "novnc").mkdir()
+    (tmp_path / "novnc" / "vnc.html").write_text(
+        "<!doctype html><title>noVNC</title><p id=screen>the screen</p>", encoding="utf-8")
+    monkeypatch.setenv("PAPERPULL_NOVNC", str(tmp_path / "novnc"))
+    monkeypatch.setenv("PAPERPULL_SERVER", "1")
+    server_mode.set_password(PASSWORD)
+    base = "http://127.0.0.1:%d" % port
+    context = browser.new_context()
+    context.add_cookies([{"name": server_mode.SESSION_COOKIE, "value": server_mode.new_session(),
+                          "url": base}])
+    try:
+        tab = context.new_page()
+        tab.goto(base + "/")
+        tab.wait_for_selector("#view-home .acct")
+        assert not tab.is_visible("#dock")
+        tab.click("#screenbtn")
+        assert tab.is_visible("#dock") and tab.url == base + "/"
+        screen = tab.frame_locator("#dockframe").locator("#screen")
+        assert screen.inner_text(timeout=15000) == "the screen"
+        tab.get_by_role("button", name="I'm signed in").click()
+        assert not tab.is_visible("#dock")
     finally:
         context.close()
     assert json.dumps(server_mode._FAILS) == "{}"

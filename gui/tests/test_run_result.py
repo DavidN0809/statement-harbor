@@ -183,4 +183,4 @@ def test_a_run_that_stopped_needs_attention_and_is_named():
     assert run_result.parse(line(stopped=1))["attention"]
     assert run_result.parse(line())["stopped"] == 0
     assert run_result.parse(line(stopped=-1)) is None
-    assert "stopped before finishing" in app.HTML
+    assert "Stopped before finishing" in app.HTML

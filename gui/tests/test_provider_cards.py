@@ -94,7 +94,7 @@ def test_a_broken_file_means_no_line_never_another_documents_text(content, tmp_p
 
 def test_the_page_says_when_a_provider_has_not_been_run_on_a_real_account():
     page = app_module.HTML
-    row = page[page.index("box.innerHTML = rows.map(p =>"):]
-    row = row[:row.index(".join('')")]
+    row = page[page.index("function renderTiles()"):]
+    row = row[:row.index("\nfunction ")]
     assert "p.tested === false" in row and "Not run on a real account yet" in row
     assert "esc(p.note)" in row and "esc(p.documents)" in row

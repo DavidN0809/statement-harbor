@@ -1,12 +1,13 @@
-"""Download again, run by the page itself in a real browser.
+"""Restore deleted files, the panel's Download again, run by the page itself.
 
 test_download_again.py reads the page's script. These run it, in
 Playwright's own headless Chromium, against the real panel served on a free
-local port, so what is tested is what run() and postRun() do rather than
-how they read. Every setting is under a temp folder, and the one app is a
-script that writes down the arguments it was started with, and reports a
-run that stopped partway when a file named stop sits beside it. No browser
-of the person's is started, and nothing of theirs is read or written.
+local port, so what is tested is what the dialog, startRun() and postRun()
+do rather than how they read. Every setting is under a temp folder, and the
+one app is a script that writes down the arguments it was started with, and
+reports a run that stopped partway when a file named stop sits beside it.
+No browser of the person's is started, and nothing of theirs is read or
+written.
 """
 import json
 import socket
@@ -24,6 +25,7 @@ uvicorn = pytest.importorskip("uvicorn")
 sync_api = pytest.importorskip("playwright.sync_api")
 
 FLAG = "--redownload"
+ACCOUNT = "/#/a/Shop%20Docs/primary"
 
 APP = '''
 import json, sys
@@ -85,6 +87,7 @@ def shop(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "_SAMPLE", None)
     # Run with this Python, the way the packaged build runs every app.
     monkeypatch.setattr(app_module, "_is_packaged", lambda: True)
+    app_module._RUNS.clear()
     folder = tmp_path / "apps" / "Shop Docs"
     folder.mkdir(parents=True)
     (folder / "shop_docs.py").write_text(APP, encoding="utf-8")
@@ -93,20 +96,21 @@ def shop(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def panel(browser, base, shop):
-    """The panel's page in a browser context of its own, so nothing the page
-    keeps in the browser is left from another test, with every question it
-    asks answered yes and kept."""
+    """The account's page in a browser context of its own, so nothing the
+    page keeps in the browser is left from another test. Any question the
+    browser itself is asked is noted and refused, since the panel asks its
+    questions on the page now."""
     context = browser.new_context()
     tab = context.new_page()
     asked = []
 
     def answer(dialog):
         asked.append(dialog.message)
-        dialog.accept()
+        dialog.dismiss()
     tab.on("dialog", answer)
-    tab.goto(base + "/")
-    tab.wait_for_function("() => document.getElementById('app').options.length > 0")
-    yield SimpleNamespace(tab=tab, asked=asked)
+    tab.goto(base + ACCOUNT)
+    tab.wait_for_selector("#view-account [data-do=run][data-action=all]")
+    yield SimpleNamespace(tab=tab, asked=asked, base=base)
     context.close()
 
 
@@ -118,88 +122,114 @@ def started(folder) -> list:
     return [json.loads(line) for line in listed.read_text(encoding="utf-8").splitlines()]
 
 
-def press(tab, name):
-    """Press one of the panel's buttons and wait for the run it starts to end."""
-    tab.get_by_role("button", name=name, exact=True).click()
-    tab.wait_for_function("() => !document.getElementById('dot').classList.contains('run')",
-                          timeout=60000)
+def finished(tab):
+    tab.wait_for_function("() => RUN.state === 'done'", timeout=60000)
 
 
-def status(tab) -> str:
-    return tab.inner_text("#statustext")
+def back(panel):
+    panel.tab.evaluate("location.hash = %r" % ACCOUNT[1:])
+    panel.tab.wait_for_selector("#view-account [data-do=run][data-action=all]")
 
 
-def test_a_run_that_downloads_again_reaches_the_app_with_the_flag_once(panel, shop):
+def open_restore(tab):
+    tab.click("#view-account [data-do=menu]")
+    tab.click(".menu [data-do=restore]")
+    tab.wait_for_selector("#dlg-restore[open]")
+
+
+def range_of(tab, start, end):
+    tab.check("input[name=rsby][value=range]")
+    if start:
+        tab.fill("#rs-start", start)
+    if end:
+        tab.fill("#rs-end", end)
+
+
+def test_a_restore_reaches_the_app_with_the_flag_once(panel, shop):
     tab = panel.tab
-    tab.select_option("#year", "2024")
-    tab.check("#again")
-    press(tab, "Run All")
+    open_restore(tab)
+    tab.select_option("#rs-year", "2024")
+    assert tab.inner_text("#rs-go") == "Restore missing files from 2024"
+    tab.click("#rs-go")
+    finished(tab)
     assert started(shop) == [["--all", "--yes", "--year", "2024", FLAG]]
-    assert len(panel.asked) == 1, panel.asked
-    assert "Run All goes through every document dated 2024 again" in panel.asked[0]
-    assert "Nothing is overwritten." in panel.asked[0]
-    assert status(tab) == "finished, no issues reported"
-    assert not tab.is_checked("#again")
-    assert FLAG in tab.inner_text("#console")
+    assert panel.asked == []
+    assert tab.inner_text("#r-title") == "Nothing new"
+    assert FLAG in tab.text_content("#console")
+    assert not tab.is_visible("#dlg-restore")
 
 
 def test_a_refusal_from_the_panel_is_shown_and_nothing_starts(panel, shop):
     tab = panel.tab
-    tab.select_option("#year", "2024")
-    tab.check("#again")
+    open_restore(tab)
+    tab.select_option("#rs-year", "2024")
     # The provider's folder goes after the page listed it, so the panel no
     # longer knows the app the page asks it to run.
     gone = shop.with_name("Shop Docs, moved away")
     shop.rename(gone)
-    press(tab, "Run All")
-    assert len(panel.asked) == 1
-    assert status(tab) == "unknown app"
-    assert "unknown app" in tab.inner_text("#console")
-    assert started(gone) == []
+    tab.click("#rs-go")
+    finished(tab)
+    assert tab.inner_text("#r-title") == "This run did not start"
+    assert tab.inner_text("#statustext") == "unknown app"
+    assert started(gone) == [] and panel.asked == []
 
 
-def test_another_button_leaves_the_box_ticked_and_says_so(panel, shop):
-    """Tick, Login, then Run All, the order somebody signing in first takes."""
+def test_get_new_never_downloads_again_after_a_restore(panel, shop):
+    """The old box stayed ticked across other buttons. Now nothing carries
+    over, and every other run is an ordinary one."""
     tab = panel.tab
-    tab.select_option("#year", "2024")
-    tab.check("#again")
-    press(tab, "Login")
-    assert started(shop) == [["--login"]]
-    assert panel.asked == []
-    assert tab.is_checked("#again")
-    assert ("Download again stays ticked. It applies only to Pilot and Run All, "
-            "so this Login runs as usual.") in tab.inner_text("#console")
-    press(tab, "Run All")
-    assert started(shop)[-1] == ["--all", "--yes", "--year", "2024", FLAG]
-    assert len(panel.asked) == 1
-    assert not tab.is_checked("#again")
+    open_restore(tab)
+    tab.select_option("#rs-year", "2024")
+    tab.click("#rs-go")
+    finished(tab)
+    back(panel)
+    tab.get_by_role("button", name="Open sign-in window").click()
+    finished(tab)
+    back(panel)
+    tab.get_by_role("button", name="Get new documents").click()
+    finished(tab)
+    assert started(shop) == [["--all", "--yes", "--year", "2024", FLAG], ["--login"], ["--all", "--yes"]]
+    back(panel)
+    open_restore(tab)
+    # It opens fresh, last year chosen and nothing of the last restore kept.
+    assert tab.input_value("#rs-year") == str(time.localtime().tm_year - 1)
+    assert tab.is_checked("input[name=rsby][value=year]") and tab.is_checked("input[name=rshow][value=all]")
 
 
-def test_a_run_that_stops_partway_says_resume_will_not_download_again(panel, shop):
+def test_a_restore_that_stops_partway_says_continue_will_not_download_again(panel, shop):
     (shop / "stop").write_text("", encoding="utf-8")
     tab = panel.tab
-    tab.fill("#start", "2023-01-01")
-    tab.fill("#end", "2023-12-31")
-    tab.dispatch_event("#end", "change")
-    tab.check("#again")
-    press(tab, "Pilot")
+    open_restore(tab)
+    range_of(tab, "2023-01-01", "2023-12-31")
+    tab.check("input[name=rshow][value=pilot]")
+    tab.click("#rs-go")
+    finished(tab)
     assert started(shop) == [["--pilot", "--start-date", "2023-01-01",
                               "--end-date", "2023-12-31", FLAG]]
-    said = status(tab)
-    assert said.startswith("stopped before finishing. Resume will not download again"), said
-    assert "fetches again what this run already restored, so choose the range that is left" in said
-    assert "This download again ended before it was through." in tab.inner_text("#console")
-    # An ordinary run that stops still points at Resume, which is right for it.
-    press(tab, "Pilot")
-    assert status(tab) == "stopped before finishing, see the output, then press Resume"
+    assert tab.inner_text("#r-title") == "Stopped before finishing"
+    said = tab.inner_text("#statustext")
+    assert said.startswith("Continue will not download again"), said
+    assert "fetches again what this run already restored, so choose the dates that are left" in said
+    assert tab.locator("#view-run [data-action=resume]").count() == 0
+    # An ordinary run that stops still offers Continue, which is right for it.
+    back(panel)
+    tab.get_by_role("button", name="Try the newest few first").click()
+    finished(tab)
+    assert tab.inner_text("#r-title") == "Stopped before finishing"
+    assert "may have signed you out" in tab.inner_text("#statustext")
+    assert tab.locator("#view-run [data-action=resume]").count() == 1
 
 
-def test_one_end_of_a_range_stops_it_on_the_page(panel, shop):
+def test_one_end_of_a_range_stops_it_in_the_dialog(panel, shop):
     tab = panel.tab
-    tab.fill("#end", "2026-10-06")
-    tab.dispatch_event("#end", "change")
-    tab.check("#again")
-    press(tab, "Run All")
-    assert "a year, or both a From and a To date" in status(tab)
+    open_restore(tab)
+    range_of(tab, "", "2026-10-06")
+    tab.click("#rs-go")
+    assert tab.is_visible("#rs-err")
+    assert tab.inner_text("#rs-err") == "Choose a year, or both a From and a To date."
+    assert tab.is_visible("#dlg-restore")
     assert started(shop) == [] and panel.asked == []
-    assert tab.is_checked("#again")
+    tab.fill("#rs-start", "2026-12-01")
+    tab.click("#rs-go")
+    assert tab.inner_text("#rs-err") == "The From date is after the To date."
+    assert started(shop) == []
