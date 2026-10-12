@@ -612,7 +612,8 @@ class App:
 
     def process_purchases(self, purchases: List[Purchase], dry_run: bool = False,
                           limits: Optional[dict] = None,
-                          by_dates: bool = False) -> List[Purchase]:
+                          by_dates: bool = False,
+                          limit: Optional[int] = None) -> List[Purchase]:
         """Take each purchase in turn, and return the ones taken or tried.
 
         `limits` caps how many of each kind of purchase are taken. A
@@ -620,6 +621,8 @@ class App:
         it already taken, and never when its order page places it outside
         the dates the run is limited to or shows no date at all, so one
         opened only to learn its date does not use up a place (#63).
+        `limit` caps how many purchases of every kind together are taken,
+        counted the same way, which is what Resume's --max-purchases means.
         `by_dates` is whether the run is limited to some dates, and only
         then is a purchase placed by the date its order page shows. Pages
         opened only to learn a date stop at DATES_LEARNED_PER_RUN, and an
@@ -627,6 +630,7 @@ class App:
         page = self.page()
         counted: dict = {}
         left: dict = {}
+        over = 0
         reached: List[Purchase] = []
         learned = 0
         # The purchases the run looks at, numbered as it reaches them. One
@@ -634,6 +638,9 @@ class App:
         i = 0
         for purchase in purchases:
             kind = purchase.purchase_type
+            if limit and sum(counted.values()) >= limit:
+                over += 1
+                continue
             cap = (limits or {}).get(kind)
             if cap and counted.get(kind, 0) >= cap:
                 left[kind] = left.get(kind, 0) + 1
@@ -697,6 +704,10 @@ class App:
             else:
                 counted[kind] = counted.get(kind, 0) + 1
             self._delay()
+        if over:
+            print(f"\nThis run's limit of {limit} was reached, so "
+                  f"{over} purchase{'' if over == 1 else 's'} not looked at "
+                  f"{'is' if over == 1 else 'are'} left for another run.")
         for kind, more in left.items():
             print(f"\n{kind}: this run's limit of {limits[kind]} was reached, so "
                   f"{more} purchase{'' if more == 1 else 's'} not looked at "
@@ -1324,8 +1335,6 @@ class App:
             elif self._put_aside(p):
                 aside.append(p)
         pend.sort(key=lambda p: p.purchase_date or "0000", reverse=True)
-        if self.args.max_purchases:
-            pend = pend[:self.args.max_purchases]
         # Copies put aside count as done, and Resume used to leave them out
         # and then call every purchase complete.
         if aside:
@@ -1342,7 +1351,10 @@ class App:
         # in Run All, so one outside the scope is left alone.
         by_dates = self._dates_asked()
         self._about_undated(pend, by_dates)
-        self.process_purchases(pend, dry_run=self.args.dry_run, by_dates=by_dates)
+        # The limit is counted as the run takes them, as in Run All, so an
+        # order opened only to learn it is outside the dates takes no place.
+        self.process_purchases(pend, dry_run=self.args.dry_run, by_dates=by_dates,
+                               limit=self.args.max_purchases)
         self._say_left_alone()
 
     def _say_put_aside(self, aside: List[Purchase]) -> None:

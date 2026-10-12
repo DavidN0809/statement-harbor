@@ -75,7 +75,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Resume with a scope or a start date in every app but Walmart, and
   Walmart places such an online order by its order page, all as Run All
   does. A scoped Resume with nothing to do now says everything in scope is
-  complete, not every purchase.
+  complete, not every purchase. Walmart's Resume also counts
+  `--max-purchases` as its Run All counts a limit. It cut its list before
+  any order page was open, so an online order whose page placed it outside
+  the dates used a place and the orders inside them were left. Now such an
+  order takes no place, and the run says how many the limit left.
 - **PaperPull Server's Status tab, both spreadsheets and the sample work.**
   The server image carried only one of the scripts the panel runs from its
   tools folder, so the Status tab said status.py was not found, neither

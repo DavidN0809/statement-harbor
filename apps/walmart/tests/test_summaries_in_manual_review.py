@@ -612,7 +612,7 @@ def test_resume_takes_the_rest_and_still_says_what_it_skips(tmp_path, capsys, mo
         "state": "Needs Manual Review", "pdf_path": str(aside), "pdf_filename": aside.name}
     taken = []
     monkeypatch.setattr(app, "process_purchases",
-                        lambda pend, dry_run=False, limits=None, by_dates=False:
+                        lambda pend, dry_run=False, limits=None, by_dates=False, limit=None:
                         taken.extend(p.key for p in pend))
     app.cmd_resume()
 
