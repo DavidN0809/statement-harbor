@@ -428,4 +428,5 @@ def test_resume_without_dates_takes_as_many_as_its_limit(tmp_path, site_pages, c
     assert site_pages.opened == [OUTSIDE], site_pages.opened
     assert progress[key(OUTSIDE)]["downloaded_ok"] is True, progress.get(key(OUTSIDE))
     assert len(progress) == 1, progress
-    capsys.readouterr()
+    out = printed(capsys)
+    assert "Resuming: 1 incomplete purchase(s)." in out and "[1/1]" in out, out

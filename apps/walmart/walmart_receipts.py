@@ -1335,6 +1335,13 @@ class App:
             elif self._put_aside(p):
                 aside.append(p)
         pend.sort(key=lambda p: p.purchase_date or "0000", reverse=True)
+        # An order whose card shows no date is placed by its order page, as
+        # in Run All, so one outside the scope is left alone.
+        by_dates = self._dates_asked()
+        if self.args.max_purchases and not by_dates:
+            # Without dates every order opened counts, so the list is cut
+            # here as it always was.
+            pend = pend[:self.args.max_purchases]
         # Copies put aside count as done, and Resume used to leave them out
         # and then call every purchase complete.
         if aside:
@@ -1347,9 +1354,6 @@ class App:
                   "Nothing to resume - all discovered purchases are complete.")
             return
         print(f"Resuming: {len(pend)} incomplete purchase(s).")
-        # An order whose card shows no date is placed by its order page, as
-        # in Run All, so one outside the scope is left alone.
-        by_dates = self._dates_asked()
         self._about_undated(pend, by_dates)
         # The limit is counted as the run takes them, as in Run All, so an
         # order opened only to learn it is outside the dates takes no place.
