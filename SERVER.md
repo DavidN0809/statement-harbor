@@ -225,6 +225,20 @@ docker exec paperpull python /opt/paperpull/server/selftest.py
   `compose.yaml`, then recreate the container, with `docker compose up -d`
   or from your NAS's Docker app, as when updating.
 
+## Where the provider code runs
+
+On PaperPull Server the provider code comes from the image. When you add a
+provider, its folder in the data folder holds your configuration, your
+rules file, the documents it downloads and its records, but not the code
+that runs. The code, the Python interpreter and the modules a run imports
+all come from the read-only application folder inside the container. So
+editing a provider's script under the data folder, or putting a Python
+virtual environment in its folder, changes nothing on the server, since the
+server runs the image's copy. This keeps the code the server runs as you
+out of reach of anyone who can write to a shared data folder. See
+[SECURITY-SERVER.md](SECURITY-SERVER.md) for the trust boundary and why
+write access to the data share should be yours alone.
+
 ## What is in the image
 
 Debian's slim Python image, the virtual screen (Xvfb), a window manager

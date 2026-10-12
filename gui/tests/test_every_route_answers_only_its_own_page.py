@@ -256,9 +256,12 @@ ROUTES = {
                                            desktop="reads", server="reads"),
     ("POST", "/api/record/stop"): dict(body={"app": SHOP}, desktop="changes", server="changes"),
     ("POST", "/api/remove"): dict(body={"app": SHOP}, desktop="changes", server="changes"),
-    ("GET", "/api/run"): dict(ask="/api/run?app=Shop%20Receipts&action=pilot",
+    # A real provider, because the server runs only the code the image ships
+    # and refuses a folder that maps to no shipped provider, so a made-up name
+    # would change nothing there and the refusals would prove nothing.
+    ("GET", "/api/run"): dict(ask="/api/run?app=Kroger%20Receipts&action=pilot",
                               desktop="changes", server="changes"),
-    ("POST", "/api/run"): dict(body={"app": SHOP, "action": "pilot"},
+    ("POST", "/api/run"): dict(body={"app": "Kroger Receipts", "action": "pilot"},
                                desktop="changes", server="changes"),
     ("GET", "/api/naming"): dict(ask="/api/naming?app=Shop%20Receipts",
                                  desktop="reads", server="reads"),

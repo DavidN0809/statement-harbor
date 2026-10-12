@@ -555,6 +555,35 @@ def _entry_script(app_dir: Path):
     return None
 
 
+def _server_template_for(install_dir: Path):
+    """On PaperPull Server, the one shipped template an install runs, or None.
+
+    Provider code on the server comes from the image, never from the data
+    folder. An install is tied to its template by its single entry-shaped
+    script's name, the same signal refresh_installs matches on. This is fail
+    closed. The install must hold exactly one entry-shaped script, and that
+    name must be the entry script of exactly one template the image ships,
+    or the install does not map and nothing is run for it. A renamed
+    provider folder still resolves, since its entry script keeps its name. A
+    second, added or renamed script, or a name no template ships, does not,
+    so a writable data folder cannot steer the server onto an unintended
+    provider's code.
+    """
+    root = _templates_root()
+    if root is None:
+        return None
+    entries = [p for p in sorted(install_dir.glob("*.py")) if ENTRY_RE.match(p.name)]
+    if len(entries) != 1:
+        return None
+    name = entries[0].name
+    matches = [d for d in root.iterdir()
+               if d.is_dir() and (d / name).is_file()
+               and _entry_script(d) is not None and _entry_script(d).name == name]
+    if len(matches) != 1:
+        return None
+    return matches[0]
+
+
 def _venv_python(app_dir: Path):
     r"""The app's own interpreter, on either venv layout.
 
@@ -678,16 +707,46 @@ def discover_apps():
     apps = {}
     if not apps_root().exists():
         return apps
+    server = server_mode.enabled()
     for d in sorted(apps_root().iterdir()):
         if not d.is_dir():
             continue
         script = _entry_script(d)
         if not script:
             continue
+        if server:
+            # PaperPull Server runs the image's copy of the provider, found
+            # by its full path, with the image's own interpreter. The data
+            # folder decides none of this, so a file changed or planted in
+            # /data cannot change which code or interpreter runs. The login
+            # flag is read from the trusted template, not the /data script.
+            # An install that does not map to exactly one shipped template
+            # is listed but not runnable (_start_run refuses it), rather
+            # than falling back to anything in /data.
+            tmpl = _server_template_for(d)
+            tmpl_entry = _entry_script(tmpl) if tmpl else None
+            apps[d.name] = {
+                "name": d.name,
+                "dir": str(d),
+                "script": str(tmpl_entry) if tmpl_entry else script.name,
+                "script_name": (tmpl_entry.name if tmpl_entry else script.name),
+                "template_dir": str(tmpl) if tmpl else None,
+                "python": sys.executable,
+                "login_flag": _login_flag(tmpl_entry) if tmpl_entry else "--login",
+                "accounts": _accounts(d),
+                # The server never uses a /data virtual environment and needs
+                # no setup, so both read honestly here.
+                "has_venv": False,
+                "needs_setup": False,
+                "runnable": tmpl is not None,
+            }
+            continue
         apps[d.name] = {
             "name": d.name,
             "dir": str(d),
             "script": script.name,
+            "script_name": script.name,
+            "template_dir": None,
             "python": _python_for(d),
             "login_flag": _login_flag(script),
             "accounts": _accounts(d),
@@ -700,6 +759,7 @@ def discover_apps():
             # about a problem that cannot arise.
             "needs_setup": (_SAMPLE is None and _venv_python(d) is None
                             and not _is_packaged() and not _runs_apps()),
+            "runnable": True,
         }
     return apps
 
@@ -2159,10 +2219,40 @@ def _build_cmd(app_meta: dict, account: str, action: str, scope_flags=(), redown
         if redownload is not True or action not in REDOWNLOAD_ACTIONS:
             raise ValueError("%s goes only on %s" % (REDOWNLOAD_FLAG, " and ".join(REDOWNLOAD_ACTIONS)))
         flags.append(REDOWNLOAD_FLAG)
-    cmd = [app_meta["python"], app_meta["script"], *flags]
+    interp = [app_meta["python"]]
+    if server_mode.enabled():
+        # -P keeps the current directory and the script's own directory off
+        # sys.path, so nothing in the /data folder is ever importable. The
+        # trusted template folder reaches the run through PYTHONPATH, set in
+        # _run_env, which -P still honors (unlike -I, which would drop it).
+        interp.append("-P")
+    cmd = [*interp, app_meta["script"], *flags]
     if account != "primary":
         cmd += ["--config", f"config.{account}.json"]
     return cmd
+
+
+def _run_env(meta: dict) -> dict:
+    """The environment a run is launched with.
+
+    On PaperPull Server the data anchor and the only import root are set
+    here, and nowhere else. PAPERPULL_DATA_DIR points the core's data at
+    the install's /data folder (AppSpec repoints project_dir to it), and
+    PYTHONPATH is the trusted template folder alone, so under -P the
+    shipped siblings import and nothing from /data does. The version goes
+    to every run so a file it writes records the build that wrote it."""
+    env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8",
+               PAPERPULL_VERSION=VERSION)
+    if server_mode.enabled():
+        env["PAPERPULL_DATA_DIR"] = meta.get("dir", "")
+        # A real server run always carries the template folder (discover_apps
+        # sets it with runnable, and _start_run refuses a run without it), so
+        # the import root is the trusted template and nothing else. The guard
+        # is only for a hand-built meta in a test, which runs no real import.
+        template_dir = meta.get("template_dir")
+        if template_dir:
+            env["PYTHONPATH"] = template_dir
+    return env
 
 
 @app.get("/api/run", dependencies=[Depends(_same_origin_only)])
@@ -2209,6 +2299,24 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
     if app not in apps:
         raise HTTPException(404, "unknown app")
     meta = apps[app]
+
+    if server_mode.enabled() and not meta.get("runnable", True):
+        # Fail closed. The install does not map to exactly one provider the
+        # image ships, so there is no trusted code to run for it, and the
+        # server never falls back to code in the /data folder.
+        detail = ("This install does not match a provider PaperPull ships, so "
+                  "it will not be run. Its folder must hold exactly one "
+                  "provider script whose name is one PaperPull ships. Remove "
+                  "any extra script, or add the provider again from the panel.")
+
+        async def refuse_unmapped():
+            for line in detail.splitlines():
+                yield "data: %s\n\n" % line
+            yield "event: done\ndata: 1\n\n"
+        return StreamingResponse(refuse_unmapped(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache",
+                                          "X-Accel-Buffering": "no"})
+
     blocked = setup_needed(meta)
     cmd = _build_cmd(meta, account, action, scope_flags, redownload)
 
@@ -2235,11 +2343,11 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
     # cleanup below would never run and a closed tab left the downloader going.
     async def stream():
         yield f"data: $ {' '.join(cmd)}\n\n"
-        # The version goes to the app so that a file it writes says which
-        # build wrote it. Every failure file so far has carried an empty
-        # version, which is the one field that says what a tester ran.
-        env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8",
-                   PAPERPULL_VERSION=VERSION)
+        # On the server this sets PAPERPULL_DATA_DIR (the install's /data
+        # folder) and PYTHONPATH (the trusted template folder), the two
+        # things that keep code on the image side and data on the /data
+        # side. On the desktop it only carries the version through.
+        env = _run_env(meta)
         # When the run began, so that only a list of new files this run
         # wrote is handed to the server's plug-ins afterwards.
         started = time.time()
@@ -3687,7 +3795,9 @@ function onApp() {
   const accSel = $('account'); accSel.innerHTML = '';
   for (const a of m.accounts) accSel.append(new Option(a, a));
   const warn = $('venvwarn');
-  if (m.needs_setup) { warn.style.display='block';
+  if (m.runnable === false) { warn.style.display='block';
+    warn.textContent = '⚠ This folder does not match a provider PaperPull ships, so it will not run. Its folder must hold exactly one provider script whose name is one PaperPull ships.'; }
+  else if (m.needs_setup) { warn.style.display='block';
     warn.textContent = '⚠ This provider is not set up yet. Run setup-all in the PaperPull folder, then reload this page.'; }
   else warn.style.display='none';
 }

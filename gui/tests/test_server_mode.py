@@ -702,7 +702,12 @@ def test_what_the_desktop_shows_in_a_folder_the_server_downloads(
 SHOP = '''
 import sys
 from pathlib import Path
-here = Path(__file__).resolve().parent
+# Where its output goes. Real apps file under the config's output_dir, which
+# is "." for a fresh install and so resolves to the working directory the
+# panel runs them in, the install folder in the /data share. On the server
+# the code itself comes from the image, so a fake that wrote next to its own
+# file would write into the read-only image, which no real app does.
+here = Path.cwd()
 if "--pilot" in sys.argv:
     saved = here / "In-Store" / "2026-01-02 Shop Receipt.pdf"
     saved.parent.mkdir(exist_ok=True)
@@ -725,7 +730,19 @@ print("%s %s heard %d: %s" % (event["provider"], event["action"], len(names), ",
 @pytest.fixture()
 def shop(tmp_path, monkeypatch):
     """A provider's folder in the shared folder, with an app that saves one
-    receipt, and a plug-in that says what it was told."""
+    receipt, and a plug-in that says what it was told.
+
+    The server runs the provider's code from the image, so the same app
+    also ships as a template under an image-like tree, and the panel is
+    pointed at it. The folder in the shared folder holds the data, the
+    config among it, exactly as a real install does.
+    """
+    image = tmp_path / "image"
+    (image / "gui").mkdir(parents=True)
+    template = image / "templates" / "apps" / "shop"
+    template.mkdir(parents=True)
+    (template / "shop_receipts.py").write_text(SHOP, encoding="utf-8")
+
     folder = tmp_path / "apps" / "Shop Receipts"
     folder.mkdir(parents=True)
     (folder / "shop_receipts.py").write_text(SHOP, encoding="utf-8")
@@ -737,9 +754,10 @@ def shop(tmp_path, monkeypatch):
         encoding="utf-8")
     (echo / "echo.py").write_text(ECHO, encoding="utf-8")
     monkeypatch.setenv("PAPERPULL_PLUGINS", str(tmp_path / "plugins"))
-    # The server runs every app with its one Python, the way the packaged
-    # build does, rather than an environment of each app's own.
-    monkeypatch.setattr(app_module, "_is_packaged", lambda: True)
+    # Point the panel at the image-like tree, so it is packaged (templates
+    # and no checkout apps beside it) and the server runs each app with its
+    # one Python from the image, the way the real build does.
+    monkeypatch.setattr(app_module, "HERE", image / "gui")
     return folder
 
 

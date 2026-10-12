@@ -22,6 +22,7 @@ Two families exist and both are first-class:
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -57,7 +58,15 @@ class AppSpec:
     """Everything the shared core needs to serve one provider."""
 
     provider: str                     # display name, e.g. "T-Mobile"
-    project_dir: Path                 # the app's own folder
+    # The app's own folder, the anchor for its DATA, its config.json, its
+    # rules file, its browser profile default and the folders it files into.
+    # Never used to locate code to import or run, that is Python's import
+    # path. On the desktop the code and the data sit together, so this is
+    # the install folder. On PaperPull Server the code is loaded from the
+    # read-only image and only the data lives in the writable /data share,
+    # so __post_init__ repoints this to PAPERPULL_DATA_DIR, the install's
+    # data folder, while the code keeps coming from the image.
+    project_dir: Path
     kind: str = DOCUMENT              # RECEIPT or DOCUMENT
 
     folders: List[Folder] = field(default_factory=list)
@@ -82,6 +91,15 @@ class AppSpec:
 
     def __post_init__(self):
         self.project_dir = Path(self.project_dir)
+        # On PaperPull Server the data anchor is the install's folder in the
+        # /data share, handed to the run by the panel, never where the code
+        # being run happens to sit (which is the read-only image). Gated on
+        # both variables, so a desktop process and any server process that
+        # was not given a data folder are left exactly as the app declared.
+        if os.environ.get("PAPERPULL_SERVER") == "1":
+            data_dir = os.environ.get("PAPERPULL_DATA_DIR")
+            if data_dir:
+                self.project_dir = Path(data_dir)
         if self.kind not in (RECEIPT, DOCUMENT):
             raise ValueError(f"AppSpec.kind must be {RECEIPT!r} or {DOCUMENT!r}")
         seen_attrs = [f.attr for f in self.folders]

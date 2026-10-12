@@ -78,6 +78,37 @@ password manager.
   switched off by policy, since a container's browser profile has no
   operating system keyring to protect them.
 
+## Where the provider code runs
+
+On PaperPull Server the provider code comes from the image and nothing
+else. The entry script, the Python interpreter and every module a run
+imports are loaded from the read-only application folder inside the
+container. The data folder holds only data, your configuration, your rules
+file, the downloaded documents and the records. Editing a provider's code
+files under the data folder, or placing a Python virtual environment there,
+has no effect, because the server runs the image's copy.
+
+This matters because the data folder is often a shared folder that more
+than one person or device can write to. Keeping the code on the image side
+means that being able to write to the share does not let anyone change the
+code the server runs as you, inside the container that holds your signed-in
+browser profiles.
+
+Writable data is not the same as harmless. The files in the data folder are
+not executable Python any more, but they still shape what a run does. A
+provider's `document_rules.json` decides how a document is named and filed,
+and `config.json` holds its settings. Treat the data folder as something
+only you, the operator, should be able to write to, and restrict write
+access to the share accordingly. A person who can write there can still
+change how your documents are classified and named, even though they can no
+longer run code.
+
+If you previously edited a provider's scripts on the server, or kept a
+custom Python environment inside a provider's folder, those changes stop
+taking effect once you are on this version. Fold any real code change into
+the project and rebuild the image, or raise it upstream, rather than editing
+inside the data folder.
+
 ## Where your sign-ins live
 
 Each provider account's signed-in browser profile is in the `profiles`
