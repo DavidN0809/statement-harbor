@@ -42,7 +42,8 @@ THE RULES
 * Rename never ends with a file moved and a ledger still giving it the
   name it had. Every ledger is shown to be writable before a file moves,
   and when one still cannot be written, every file goes back under the
-  name it had (run_for, put_back).
+  name it had (run_for, put_back). Review Names keeps the same rule for
+  each receipt it renames (review_names, _undo).
 """
 from __future__ import annotations
 
@@ -1535,7 +1536,9 @@ def review_names(app, ask, words: ReviewWords = WORDS,
     ends the process at once, with nothing run after it, so writing at the
     end would not be enough.
 
-    When a write fails after a receipt was renamed, that receipt goes back
+    Each of those three is shown to be writable before the first question,
+    and when one stays held, nothing is asked and nothing is renamed. When a
+    write still fails after a receipt was renamed, that receipt goes back
     under the name it had, never over another file, what was written for it
     is written back, and the review says so and stops, with SystemExit(1)
     when the file system refused the write and with the error itself
@@ -1583,9 +1586,25 @@ def review_names(app, ask, words: ReviewWords = WORDS,
     if not review:
         print("No receipts need name review.")
         return
+    order_rows = app.order_csv.read_all()
+    # Each new name is written into the index, the order history and
+    # progress.json just after its file is renamed, so each has to be one
+    # that can be written before a file moves. With the index open in Excel
+    # a receipt was renamed and the index kept the name it had, so Verify
+    # reported the file missing. Waiting the minute a write waits, while
+    # nothing has moved, lets a person close it, and when one stays open
+    # nothing is asked and nothing is renamed.
+    held = [p for p in _ledger_files(app, [(app.index_csv, rows), (app.order_csv, order_rows)])
+            if not free_to_write(p)]
+    if held:
+        them = "it" if len(held) == 1 else "them"
+        print()
+        print("Nothing was renamed, since %s could not be written, and Review Names writes "
+              "each new name into %s as it renames. Close any program that has %s open and "
+              "run Review Names again." % (_listed([p.name for p in held]), them, them))
+        raise SystemExit(1)
     print(f"{len(review)} receipt(s) need review. Enter a new summary, "
           "press Enter to keep, or 'q' to stop.\n")
-    order_rows = app.order_csv.read_all()
     written = stopped = False
     try:
         for r, old_path in review:
@@ -1649,8 +1668,8 @@ def review_names(app, ask, words: ReviewWords = WORDS,
                 continue
             # The index first, then the order history, then progress.json,
             # as Rename writes them. A file left renamed when the index could
-            # not be written, the index open in Excel, kept the name it had
-            # in the index, so Verify reported it missing and the
+            # not be written, opened in Excel after the check above, kept the
+            # name it had in the index, so Verify reported it missing and the
             # next run was confused. Now the receipt goes back under the name
             # it had and what was written for it is written back (_undo).
             done, writing = [], _name_of(app.index_csv)

@@ -9,17 +9,22 @@ the order history written all the same. Verify then reported the file
 missing, and the next run was confused about it. Rename was mended so
 (test_rename_with_a_ledger_held_open.py), and Review Names had the same gap.
 
-Now when a write fails after a receipt was renamed, what was written for it
-is written back, its record goes back as it was in memory (every app saves
-progress.json on its way out), the file goes back under the name it had,
-never over another file, and the review says so and stops with exit code 1.
+Now each ledger is shown to be writable before the first question, waiting
+the minute a write waits while another program holds it, and nothing is
+asked or renamed while one stays held. When a write still fails after a
+receipt was renamed, what was written for it is written back, its record
+goes back as it was in memory (every app saves progress.json on its way
+out), the file goes back under the name it had, never over another file,
+and the review says so and stops with exit code 1.
 
 These run each receipt app's own review_names over an output folder on
 disk, with the typing stood in for and each receipt written down by the
-app's own code. A write is refused where the real one gives up. Every
-name, number and answer is invented.
+app's own code. A write is refused where the real one gives up, or on
+Windows the file is held open the way Excel holds a workbook it has open.
+Every name, number and answer is invented.
 """
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -30,11 +35,15 @@ from paperpull_core.models import ONLINE
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_every_app_reviews_a_name_once as census  # noqa: E402
+from test_rename_with_a_ledger_held_open import held_like_excel  # noqa: E402
 
 APPS = census.APPS
 IDS = [a.name for a in APPS]
 FIRST = "2026-05-14 Unsure Receipt.pdf"
 SECOND = "2026-05-14 Other Receipt.pdf"
+
+on_windows = pytest.mark.skipif(os.name != "nt", reason="Windows is where an open file "
+                                "cannot be replaced")
 
 
 @pytest.fixture(autouse=True)
@@ -152,6 +161,14 @@ def refuse(monkeypatch):
     return refusals
 
 
+@pytest.fixture
+def waits(monkeypatch):
+    """Each pause a wait for a held file takes, without the pause."""
+    paused = []
+    monkeypatch.setattr("time.sleep", lambda s: paused.append(s))
+    return paused
+
+
 def test_there_are_apps_to_check():
     assert len(APPS) >= 14, IDS
 
@@ -262,3 +279,111 @@ def test_a_receipt_whose_name_was_taken_is_never_put_over_another_file(app, tmp_
     assert garden[0].read_bytes() == body_of("ORDER-0001")
     assert ("and the receipt could not be put back under the name it had, so rename it back "
             "to that by hand. %s back to %s" % (garden[0].name, FIRST)) in said, said[-1500:]
+
+
+# -- a ledger held open before anything moves ----------------------------------
+
+@on_windows
+@pytest.mark.parametrize("app", APPS, ids=IDS)
+@pytest.mark.parametrize("which", ["index", "order history", "progress.json"])
+def test_a_ledger_open_in_excel_asks_nothing_and_renames_nothing(app, which, tmp_path, waits,
+                                                                 monkeypatch, capsys):
+    mod, inst, filed = two_unsure(app, tmp_path)
+    before = ledgers_of(inst, filed)
+    held = file_of(inst, which)
+    with held_like_excel(path_of(inst, which)):
+        asked, stop, said = reviewed(mod, inst, monkeypatch, capsys)
+    assert exit_code(stop) == 1, said[-1500:]
+    assert asked == [], "a question was asked while a ledger could not be written"
+    as_it_was(inst, filed, before)
+    assert len(waits) == 30 and sum(waits) == 60, "it waits the minute a write waits"
+    assert said.count("is open in another program") == 1
+    assert ("Nothing was renamed, since %s could not be written, and Review Names writes each "
+            "new name into it as it renames. Close any program that has it open and run "
+            "Review Names again." % held) in said, said[-1500:]
+
+
+@on_windows
+@pytest.mark.parametrize("app", APPS, ids=IDS)
+def test_two_ledgers_open_in_excel_are_both_named(app, tmp_path, waits, monkeypatch, capsys):
+    mod, inst, filed = two_unsure(app, tmp_path)
+    before = ledgers_of(inst, filed)
+    with held_like_excel(path_of(inst, "index")), held_like_excel(path_of(inst, "order history")):
+        asked, stop, said = reviewed(mod, inst, monkeypatch, capsys)
+    assert exit_code(stop) == 1 and asked == [], said[-1500:]
+    as_it_was(inst, filed, before)
+    assert ("Nothing was renamed, since %s and %s could not be written, and Review Names "
+            "writes each new name into them as it renames. Close any program that has them "
+            "open and run Review Names again." % (file_of(inst, "index"),
+                                                  file_of(inst, "order history"))) in said
+
+
+@on_windows
+@pytest.mark.parametrize("app", APPS, ids=IDS)
+def test_an_index_closed_while_the_review_waits_is_reviewed(app, tmp_path, monkeypatch,
+                                                            capsys):
+    mod, inst, filed = two_unsure(app, tmp_path)
+    with held_like_excel(path_of(inst, "index")) as release:
+        paused = []
+
+        def pause(seconds):
+            paused.append(seconds)
+            if len(paused) == 3:
+                release()                       # Excel closed in the third pause
+
+        monkeypatch.setattr("time.sleep", pause)
+        asked, stop, said = reviewed(mod, inst, monkeypatch, capsys)
+    assert stop is None and len(asked) == 2, said[-1500:]
+    assert said.index("is open in another program") < said.index("need review"), \
+        "it waited before the first question"
+    names = sorted(p.name for p in filed.iterdir())
+    assert len(names) == 2 and all("Garden Hose" in n or "Lamp" in n for n in names), names
+    assert sorted(r["PDF Filename"] for r in inst.index_csv.read_all()) == names
+    assert "CSV files and progress.json updated." in said
+
+
+@on_windows
+@pytest.mark.parametrize("app", APPS, ids=IDS)
+def test_nothing_to_review_never_waits_for_a_held_index(app, tmp_path, waits, monkeypatch,
+                                                        capsys):
+    mod, inst, filed = two_unsure(app, tmp_path)
+    finished = [dict(r, **{"Classification Confidence": "High", "Processing Status":
+                           "Completed"}) for r in inst.index_csv.read_all()]
+    inst.index_csv.rewrite(finished)
+    with held_like_excel(path_of(inst, "index")):
+        asked, stop, said = reviewed(mod, inst, monkeypatch, capsys)
+    assert stop is None and asked == [] and not waits, said[-1500:]
+    assert "No receipts need name review." in said
+
+
+@on_windows
+@pytest.mark.parametrize("app", APPS, ids=IDS)
+def test_an_index_opened_after_the_check_puts_the_receipt_back(app, tmp_path, waits,
+                                                               monkeypatch, capsys):
+    """Excel opened the index after the check, while the first receipt was
+    renamed. The real write waits its minute for it, gives up, and the
+    receipt goes back under the name it had."""
+    mod, inst, filed = two_unsure(app, tmp_path)
+    before = ledgers_of(inst, filed)
+    real_rename = Path.rename
+    holding = []
+
+    def rename(self, target):
+        moved = real_rename(self, target)
+        if self.name == FIRST and not holding:
+            holding.append(held_like_excel(path_of(inst, "index")))
+            holding[0].__enter__()
+        return moved
+
+    monkeypatch.setattr(Path, "rename", rename)
+    try:
+        asked, stop, said = reviewed(mod, inst, monkeypatch, capsys)
+    finally:
+        if holding:
+            holding[0].__exit__(None, None, None)
+    assert holding, "the first receipt was never renamed"
+    assert exit_code(stop) == 1, said[-1500:]
+    assert len(waits) == 30, "the write waited its minute before it gave up"
+    as_it_was(inst, filed, before)
+    assert ("%s could not be written (PermissionError), so the receipt was put back under the "
+            "name it had." % file_of(inst, "index")) in said, said[-1500:]

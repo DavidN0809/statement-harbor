@@ -48,6 +48,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
   a run that did not finish, so the panel no longer reports the files
   renamed. It also no longer says that Resume carries on from where it
   stopped, since Resume has nothing of a rename's to carry on with.
+- **Review Names no longer leaves the index naming a receipt by its old
+  name.** Review Names, which renames the receipts a receipt app was unsure
+  how to name, renamed each file and then wrote its new name into the
+  index, the order history and progress.json. With the index or the order
+  history open in Excel, the rename was done, the write waited its minute
+  and gave up, and the index kept the old name, so Verify reported the
+  file missing. Now each of them is checked before the first question,
+  waiting the same minute while one is open in another program, and
+  nothing is asked or renamed while one stays open. A write that still
+  fails after a receipt was renamed puts that receipt back under its old
+  name, never over another file, writes back what was written for it, and
+  stops the review with a message saying so. Receipts renamed before it
+  keep their new names.
 
 ## [0.46.0] - 2026-10-11
 
