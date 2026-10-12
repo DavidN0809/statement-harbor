@@ -25,6 +25,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   meanwhile does nothing and is said. The double-click
   file still works as before.
 
+### Changed
+- **PaperPull Server is no longer a beta.** It has shipped with every
+  release since 0.43.0, so the label is gone
+  from its setup guide, the README, the panel's footer, the image's
+  description and the server kit's read-me. Nothing about how it runs
+  changes.
+
 ### Fixed
 - **Robinhood saves IRA statements.** The retirement statements page,
   read since 0.46.0, was read only when a heading on it named a retirement
