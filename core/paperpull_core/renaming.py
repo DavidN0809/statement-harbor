@@ -40,8 +40,9 @@ THE RULES
   location.
 * Preview is the default everywhere. A caller has to ask for the change.
 * Rename never ends with a file moved and a ledger still giving it the
-  name it had. When a ledger cannot be written after the files moved,
-  every file goes back under the name it had (run_for, put_back).
+  name it had. Every ledger is shown to be writable before a file moves,
+  and when one still cannot be written, every file goes back under the
+  name it had (run_for, put_back).
 """
 from __future__ import annotations
 
@@ -54,8 +55,8 @@ from pathlib import Path
 from typing import Callable, Iterable, List, Optional
 
 from .models import State
-from .storage import (build_pdf_filename, fitted_name, sanitize_component, title_case,
-                      unique_path)
+from .storage import (build_pdf_filename, fitted_name, free_to_write, sanitize_component,
+                      title_case, unique_path)
 
 
 @dataclass
@@ -702,6 +703,13 @@ def _write_ledgers(app, ledgers, result: Result, numbered: dict, say=print) -> N
         raise
 
 
+def _ledger_files(app, ledgers) -> List[Path]:
+    """The file behind each ledger a rename writes, the run state's too,
+    for each one kept in a file."""
+    stores = [csv for csv, _rows in ledgers] + [getattr(app, "progress", None)]
+    return [Path(store.path) for store in stores if getattr(store, "path", None)]
+
+
 def _name_of(store) -> str:
     """What a ledger is called when Rename speaks of it, its file's name."""
     path = getattr(store, "path", None)
@@ -999,6 +1007,23 @@ def run_for(app, apply_changes: bool = False, say=print,
             say("")
             say("Nothing has been changed. Run this again with --apply to do it.")
         return Result()
+    if not any(c.renaming and c.new_path for c in changes):
+        return Result()
+
+    # The ledgers are written after the files move, so each has to be one
+    # that can be written before any file moves. Excel holds a CSV it has
+    # open so that nothing can replace it, and the write that found that out
+    # after the files had moved gave up after its minute. Waiting the same
+    # minute here, while nothing has moved, lets a person close it, and when
+    # it stays open nothing is renamed.
+    held = [p for p in _ledger_files(app, ledgers) if not free_to_write(p, say=say)]
+    if held:
+        them = "it" if len(held) == 1 else "them"
+        say("")
+        say("Nothing was renamed, since %s could not be written, and Rename writes the "
+            "new names into %s as it renames. Close any program that has %s open and "
+            "run Rename again." % (_listed([p.name for p in held]), them, them))
+        raise SystemExit(1)
 
     # Every other spelling of a file about to move, in the ledgers and the
     # run state, read while the file is still there to be compared.

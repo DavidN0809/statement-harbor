@@ -458,6 +458,12 @@ def _free_name(directory: Path, filename: str, max_path_length: int,
 # Atomic writes and backups
 # ---------------------------------------------------------------------------
 
+# How long a write waits for a file another program holds, in tries this
+# many seconds apart, and so does a check that the file can be written.
+_LOCKED_TRIES = 30
+_LOCKED_PAUSE_S = 2
+
+
 def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -469,7 +475,7 @@ def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
             os.fsync(f.fileno())
         # Windows: os.replace fails while the target is open in Excel etc.
         # Retry with a message instead of crashing mid-run.
-        for attempt in range(30):
+        for attempt in range(_LOCKED_TRIES):
             try:
                 os.replace(tmp, path)
                 break
@@ -477,7 +483,7 @@ def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
                 if attempt == 0:
                     print(f"  ! {path.name} is locked (open in Excel?). "
                           f"Close it - retrying for up to 60s...")
-                time.sleep(2)
+                time.sleep(_LOCKED_PAUSE_S)
         else:
             raise PermissionError(
                 f"{path} stayed locked. Close the program using it and re-run; "
@@ -488,6 +494,42 @@ def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
                 os.unlink(tmp)
             except OSError:
                 pass
+
+
+def free_to_write(path: Path, say=print) -> bool:
+    """Whether atomic_write_text could replace *path* now, after waiting the
+    same minute it waits while another program holds the file.
+
+    For a command that writes a file only after doing something it cannot
+    easily undo, as Rename writes the index after renaming the files, so it
+    can stop before it starts rather than halfway.
+
+    Windows will not replace a file that another program holds without
+    letting others delete it, which is how Excel holds a CSV it has open.
+    It refuses to rename such a file onto itself just the same, and that
+    changes nothing a write would not, so that is what is tried here. The
+    only change is to a name spelled in other letter case on disk, which
+    takes the case given, as it does when the file is written. A program
+    that holds a file and lets others delete it, as a virus scanner may for
+    a moment, is not seen this way, and the write waits for it as it always
+    has. A file not there yet is free, and so is any file on macOS and
+    Linux, which replace a file whoever has it open."""
+    path = Path(path)
+    for attempt in range(_LOCKED_TRIES):
+        try:
+            os.replace(path, path)
+            return True
+        except FileNotFoundError:
+            return True
+        except PermissionError:
+            if attempt == 0:
+                say(f"  ! {path.name} is open in another program, Excel perhaps. "
+                    f"Close it, and this waits up to {_LOCKED_TRIES * _LOCKED_PAUSE_S} "
+                    f"seconds for it.")
+            time.sleep(_LOCKED_PAUSE_S)
+        except OSError:
+            return False
+    return False
 
 
 def atomic_write_json(path: Path, data) -> None:

@@ -10,14 +10,17 @@ were gone, said every file was already named the way the app names them,
 so nothing ever pointed the ledgers at the files again. A review showed it
 on 2026-10-07.
 
-Now when a write fails after the files moved, each ledger already written
-is written back, the run state is put back in memory as well (every app
-saves it on its way out), every file goes back under the name it had, and
-Rename says so and stops with exit code 1, so the panel does not report
-the files renamed.
+Now each ledger is shown to be writable before any file moves, waiting the
+minute a write waits while another program holds it, and nothing moves
+while one cannot be written. When a write still fails after the files
+moved, each ledger already written is written back, the run state is put
+back in memory as well (every app saves it on its way out), every file
+goes back under the name it had, and Rename says so and stops with exit
+code 1, so the panel does not report the files renamed.
 
 Every ledger here is a real file written by the core's own CsvFile and
-JsonStore. A write is refused where the real one gives up.
+JsonStore. A write is refused where the real one gives up, or on Windows
+the file is held open the way Excel holds a workbook it has open.
 """
 import os
 import sys
@@ -501,3 +504,145 @@ def test_a_file_held_open_after_it_was_renamed_stays_named_by_both_names(tmp_pat
     assert "all but 1" in said and "%s back to old one.pdf" % wanted("Alpha") in said
     index = storage.CsvFile(shop.out / INDEX, INDEX_COLUMNS).read_all()
     assert [r["PDF Filename"] for r in index] == ["old one.pdf", "old two.pdf"]
+
+
+@pytest.fixture
+def waits(monkeypatch):
+    """Each pause a wait for a held file takes, without the pause."""
+    paused = []
+    monkeypatch.setattr("time.sleep", lambda s: paused.append(s))
+    return paused
+
+
+# -- a ledger held open before anything moves ----------------------------------
+
+@on_windows
+def test_an_index_open_in_excel_renames_nothing(tmp_path, waits, monkeypatch):
+    shop, before = two_purchases(tmp_path)
+
+    def never(*_a, **_kw):
+        raise AssertionError("a file moved while the index could not be written")
+
+    monkeypatch.setattr(renaming, "apply", never)
+    with held_like_excel(shop.out / INDEX):
+        code, said = renamed(shop)
+    assert code == 1
+    where_its_ledgers_say(shop, before)
+    assert len(waits) == 30 and sum(waits) == 60, "it waits the minute a write waits"
+    assert said.count("is open in another program") == 1
+    assert ("Nothing was renamed, since %s could not be written, and Rename writes the new "
+            "names into it as it renames. Close any program that has it open and run Rename "
+            "again." % INDEX) in said
+
+
+@on_windows
+def test_the_run_state_held_open_renames_nothing_either(tmp_path, waits, monkeypatch):
+    shop, before = two_purchases(tmp_path)
+    monkeypatch.setattr(renaming, "apply", None)
+    with held_like_excel(shop.out / "progress.json"):
+        code, said = renamed(shop)
+    assert code == 1
+    where_its_ledgers_say(shop, before)
+    assert "Nothing was renamed, since progress.json could not be written" in said
+
+
+@on_windows
+def test_two_ledgers_held_open_are_both_named(tmp_path, waits, monkeypatch):
+    shop, before = two_purchases(tmp_path)
+    monkeypatch.setattr(renaming, "apply", None)
+    with held_like_excel(shop.out / INDEX), held_like_excel(shop.out / HISTORY):
+        code, said = renamed(shop)
+    assert code == 1
+    where_its_ledgers_say(shop, before)
+    assert ("Nothing was renamed, since %s and %s could not be written, and Rename writes "
+            "the new names into them as it renames. Close any program that has them open "
+            "and run Rename again." % (INDEX, HISTORY)) in said
+
+
+@on_windows
+def test_an_index_closed_while_rename_waits_is_renamed(tmp_path, monkeypatch):
+    shop, _before = two_purchases(tmp_path)
+    with held_like_excel(shop.out / INDEX) as release:
+        paused = []
+
+        def pause(seconds):
+            paused.append(seconds)
+            if len(paused) == 3:
+                release()                       # Excel closed in the third pause
+
+        monkeypatch.setattr("time.sleep", pause)
+        code, said = renamed(shop)
+    assert code == 0 and "Renamed 2 file(s)." in said, said
+    where_its_ledgers_say(shop, {"ORD1": wanted("Alpha"), "ORD2": wanted("Beta")})
+
+
+@on_windows
+def test_an_index_opened_while_the_files_move_puts_them_back(tmp_path, waits, monkeypatch):
+    """Excel opened the index after the check, while the files were
+    renamed. The real write waits its minute for it, gives up, and every
+    file goes back."""
+    shop, before = two_purchases(tmp_path)
+    real_apply = renaming.apply
+    holding = []
+
+    def apply_then_opened(changes, say=print):
+        result = real_apply(changes, say=say)
+        holding.append(held_like_excel(shop.out / INDEX))
+        holding[0].__enter__()
+        return result
+
+    monkeypatch.setattr(renaming, "apply", apply_then_opened)
+    try:
+        code, said = renamed(shop)
+    finally:
+        holding[0].__exit__(None, None, None)
+    assert code == 1
+    where_its_ledgers_say(shop, before)
+    assert len(waits) == 30, "the write waited its minute before it gave up"
+    assert ("%s could not be written (PermissionError), so every file was put back under "
+            "the name it had and nothing was renamed." % INDEX) in said
+
+
+@on_windows
+def test_nothing_to_rename_never_waits_for_a_held_index(tmp_path, waits):
+    shop = Shop(tmp_path)
+    shop.bought("ORD1", "Alpha", wanted("Alpha"))
+    with held_like_excel(shop.out / INDEX):
+        code, said = renamed(shop)
+    assert code == 0 and not waits
+    assert "Every file is already named the way this app names them." in said
+
+
+# -- free_to_write ---------------------------------------------------------------
+
+def test_a_free_file_is_free_and_left_as_it_was(tmp_path, waits):
+    f = tmp_path / "index.csv"
+    f.write_bytes(b"a,b\r\n1,2\r\n")
+    before = os.stat(f)
+    assert storage.free_to_write(f, say=lambda *_a: None)
+    after = os.stat(f)
+    assert f.read_bytes() == b"a,b\r\n1,2\r\n"
+    assert (after.st_mtime_ns, after.st_ino) == (before.st_mtime_ns, before.st_ino)
+    assert not waits
+
+
+def test_a_file_not_there_yet_is_free(tmp_path, waits):
+    assert storage.free_to_write(tmp_path / "nothing yet.csv", say=lambda *_a: None)
+    assert not (tmp_path / "nothing yet.csv").exists()
+    assert not waits
+
+
+@on_windows
+@pytest.mark.parametrize("share", [1, 3], ids=["like Excel", "readers and writers"])
+def test_a_held_file_is_not_free_after_the_minute(tmp_path, waits, share):
+    """Excel lets others read. A program that lets others write as well
+    but not delete, as Python's own open does, keeps the file from being
+    replaced just the same, though opening it for writing would pass."""
+    f = tmp_path / "index.csv"
+    f.write_bytes(b"a,b\r\n")
+    said = []
+    with held_like_excel(f, share=share):
+        assert not storage.free_to_write(f, say=said.append)
+    assert len(waits) == 30
+    assert said == ["  ! index.csv is open in another program, Excel perhaps. Close it, and "
+                    "this waits up to 60 seconds for it."]
