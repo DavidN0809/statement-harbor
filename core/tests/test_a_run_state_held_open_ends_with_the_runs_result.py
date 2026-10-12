@@ -104,8 +104,10 @@ def test_a_run_state_that_will_not_write_ends_with_the_result(home):
         patch.setattr(os, "replace", replace)
         code, out = renamed(home)
     ended_with_its_result(home, names, code, out, progress)
-    assert len(tries) == core_storage._LOCKED_TRIES + 1, (
-        "%s waited for progress.json again on its way out, %d tries"
+    # Rename's own check tried it and waited, and the save on the way out,
+    # with no record changed, tried nothing more.
+    assert len(tries) == core_storage._LOCKED_TRIES, (
+        "%s tried progress.json again on its way out, %d tries"
         % (home.app.name, len(tries)))
 
 
