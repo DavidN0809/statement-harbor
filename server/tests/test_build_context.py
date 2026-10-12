@@ -26,6 +26,12 @@ import build  # noqa: E402
     "VERSION", "LICENSE", "paperpull.py",
     "core/paperpull_core/receipt_pdf.py", "core/pyproject.toml",
     "gui/app.py", "gui/run_result.py",
+    "gui/providers.json",                       # the welcome's provider lines
+    "gui/static/index.html", "gui/static/app.css", "gui/static/app.js",   # the page itself
+    "gui/static/fonts/AtkinsonHyperlegibleNext.ttf",                   # its typefaces
+    "gui/static/fonts/AtkinsonHyperlegibleMono.ttf",
+    "gui/static/fonts/OFL-AtkinsonHyperlegibleNext.txt",               # and their licenses
+    "gui/static/fonts/OFL-AtkinsonHyperlegibleMono.txt",
     "apps/walmart/walmart_receipts.py", "apps/walmart/config.example.json",
     "apps/walmart/category_rules.json",
     "packaging/paperpull.ico",

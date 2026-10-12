@@ -457,14 +457,30 @@ _SCREEN_ICON = ('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" str
 
 
 def server_bar() -> str:
-    """What the panel's header carries on the server. The browser screen is
-    where every sign-in happens, so it is a button that cannot be missed,
-    with what it is for beside it. A div, since a form inside a paragraph
-    closes the paragraph where the form starts."""
-    return ('<div class="serverbar"><a class="screenbtn" href="/screen" target="_blank" rel="noopener">'
-            + _SCREEN_ICON + "Browser Screen</a>"
-            '<span class="screenhint">where the providers\' sign-in windows open</span>'
-            '<form method="post" action="/logout"><button>Sign out</button></form></div>')
+    """What the panel's header carries on the server. Every sign-in happens
+    in the sign-in window, the browser on the server's screen. The page
+    docks it beside the accounts when a sign-in starts, and this button
+    opens it at any time, in a tab of its own when the page cannot run. The
+    Paperless line shows only when the page hears new files go there. A
+    div, since a form inside a paragraph closes the paragraph where the
+    form starts."""
+    return ('<div class="serverbar">'
+            '<span id="paperlesspill" class="pill pill-ok" hidden>'
+            '<span class="dot" aria-hidden="true"></span>New files go to Paperless</span>'
+            '<a id="screenbtn" class="btn btn-s screenbtn" href="/screen" target="_blank" rel="noopener"'
+            ' title="The browser on the server, where the providers\' sign-in pages open">'
+            + _SCREEN_ICON + "Sign-in window</a>"
+            '<form method="post" action="/logout"><button class="btn btn-ghost">Sign out</button></form>'
+            '</div>')
+
+
+def paperless_connected() -> bool:
+    """Whether the documents a run saves are copied to Paperless, which
+    takes the Paperless plug-in and the folder it copies into, the consume
+    folder, mounted in the container."""
+    if not any(str(info.get("name") or "") == "Paperless" for _, info in plugins()):
+        return False
+    return Path(os.environ.get("PAPERLESS_CONSUME_DIR") or "/paperless").is_dir()
 
 
 # -- the routes ---------------------------------------------------------------------------
@@ -642,6 +658,12 @@ def output_root(install: Path, account: str) -> Path:
         out = json.loads(config.read_text(encoding="utf-8-sig")).get("output_dir") or "."
     except (OSError, ValueError, AttributeError):
         out = "."
+    # A config written by hand can hold a number or a list here, which no
+    # path can be made of. Refused rather than guessed, since the install's
+    # own folder is the first person's, and a second person's run must never
+    # be read from it or hand its files on.
+    if not isinstance(out, str):
+        raise ValueError("output_dir in %s is not text" % config.name)
     return (install / out).resolve()
 
 
@@ -652,7 +674,10 @@ def new_files(install: Path, account: str, started: float) -> list:
     stopped early leaves the last run's list in place, and its files were
     handed on then. Only files that exist inside the shared folder are
     passed on, whatever the list says."""
-    root = output_root(install, account)
+    try:
+        root = output_root(install, account)
+    except ValueError:
+        return []
     listed = root / "new-this-run.txt"
     try:
         if listed.stat().st_mtime < started:

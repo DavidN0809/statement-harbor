@@ -39,8 +39,8 @@ Everything the program produces stays in the folders you chose.
   the program's setup and packaging both refuse to copy it anywhere.
 - Logs and diagnostics, written only when you run a command, kept next to
   the downloads.
-- A history file, only when you press **Export history** on the panel's
-  Status tab, saved wherever your browser saves downloads. It lists each
+- A history file, only when you press **Export history** in the panel's
+  Settings, saved wherever your browser saves downloads. It lists each
   provider and person, their settings and every document already
   downloaded, with titles, order numbers, totals and the account holders'
   names, and no password, sign-in or PDF. Keep it as private as your

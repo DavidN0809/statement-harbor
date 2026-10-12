@@ -174,8 +174,7 @@ def test_an_app_from_before_the_count_existed_still_reports():
 
 
 def test_the_panel_names_a_wrong_document():
-    src = (Path(app.__file__)).read_text(encoding="utf-8")
-    assert "refused as the wrong document" in src
+    assert "refused as the wrong document" in app.HTML
 
 
 def test_a_run_that_stopped_needs_attention_and_is_named():
@@ -184,14 +183,15 @@ def test_a_run_that_stopped_needs_attention_and_is_named():
     assert run_result.parse(line(stopped=1))["attention"]
     assert run_result.parse(line())["stopped"] == 0
     assert run_result.parse(line(stopped=-1)) is None
-    src = (Path(app.__file__)).read_text(encoding="utf-8")
-    assert "stopped before finishing" in src
+    assert "Stopped before finishing" in app.HTML
 
 
-def test_a_discover_that_stopped_says_to_press_discover_again():
-    """Discover now tells the panel how it ended. Resume downloads, and
-    somebody who pressed Discover asked only to see what the provider has,
-    so a Discover that stopped says to press it again rather than Resume."""
-    src = (Path(app.__file__)).read_text(encoding="utf-8")
-    assert "action === 'discover'" in src
-    assert "then press Discover again" in src
+def test_a_discover_that_stopped_offers_to_check_again():
+    """Discover tells the panel how it ended. Continue downloads, and
+    somebody who asked only to see what the provider has is offered Check
+    again for a Discover that stopped, never Continue."""
+    js = (Path(app.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
+    assert "const downloads = ['pilot', 'all', 'resume'].includes(RUN.action)" in js
+    assert "const recheck = RUN.action === 'discover';" in js
+    assert "recheck ? 'Check again when you are ready'" in js
+    assert 'data-action="discover"' in js and "Check again</button>" in js

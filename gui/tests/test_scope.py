@@ -69,6 +69,9 @@ def test_the_page_has_the_scope_row():
     """The row is on the page, defaults to all years, and every run reads it."""
     html = app_module.index()
     body = html.body.decode("utf-8") if hasattr(html, "body") else str(html)
-    assert 'id="year"' in body and 'id="start"' in body and 'id="end"' in body
-    assert "All years (default)" in body
+    for part in ('id="year"', 'id="start"', 'id="end"', 'name="dates" value="all"',
+                 ">All dates</label>", ">One year</label>", ">Between two dates</label>"):
+        assert part in body, part
+    # All dates is the default whenever nothing was chosen in this browser.
+    assert "const by = s.by || (s.year ? 'year' : (s.start || s.end) ? 'range' : 'all');" in body
     assert "q.set('year'" in body and "q.set('start'" in body and "q.set('end'" in body

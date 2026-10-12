@@ -102,6 +102,6 @@ def test_the_design_note_it_points_at_exists():
 # -- and the panel, which is where a tester actually is -----------------------
 
 def test_the_panel_offers_the_file_rather_than_printing_a_path():
-    page = read(REPO / "gui" / "app.py")
+    page = "".join(read(REPO / "gui" / "static" / name) for name in ("index.html", "app.js"))
     assert "Show the file to attach" in page
     assert "/api/failure/latest" in page

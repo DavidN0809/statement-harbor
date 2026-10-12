@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PaperPull</title>
+<link rel="icon" href="/favicon.ico">
+<style>
+__CSS__
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the page</a>
+<header class="top">
+  <div class="top-in">
+    <a class="brand" href="#/"><img src="/favicon.ico" alt="">PaperPull<span class="ver">v__VERSION__</span><span id="serverbadge" class="badge" hidden>Server</span></a>
+    <nav class="nav" aria-label="Main" id="mainnav">
+      <a href="#/" data-nav="home">Accounts</a>
+      <a href="#/sheets" data-nav="sheets">Spreadsheets</a>
+      <a href="#/names" data-nav="names">File names</a>
+    </nav>
+    <div class="top-right">
+      __SERVER_BAR__
+      <a href="#/settings" data-nav="settings">Settings</a>
+    </div>
+  </div>
+</header>
+<div id="samplebar" class="samplebar" hidden>
+  <span><b>Sample archive.</b> Every document here is invented. Nothing signs in and nothing
+  downloads, and your own archive is untouched.</span>
+  <button class="btn btn-s btn-sm" type="button" data-do="leave-sample">Leave the sample</button>
+</div>
+<div id="notice" class="notice" role="status" hidden><span id="noticetext"></span>
+  <button class="btn btn-ghost btn-sm" type="button" data-do="dismiss-notice">Dismiss</button></div>
+
+<main id="main" tabindex="-1">
+
+<!-- welcome, and adding providers later ----------------------------------- -->
+<section id="view-welcome" class="view" hidden aria-labelledby="w-title">
+  <ol class="stepper" id="w-stepper" aria-label="Setup steps"></ol>
+  <div class="cols">
+    <div class="main-col">
+      <div id="w-step1">
+        <h1 id="w-title">Welcome to PaperPull</h1>
+        <p class="muted" style="margin:6px 0 22px">PaperPull saves your statements and receipts from the sites
+          you choose, into a folder on this computer. First, where should they go?</p>
+        <div class="card pad stack">
+          <label class="field" for="newroot" id="newrootlabel">Folder for your documents</label>
+          <input id="newroot" type="text" spellcheck="false" autocomplete="off">
+          <p class="hint" id="serverroot" hidden><b>/data</b> is the container's name for its data folder.
+            On your server it is the folder named <b>data</b> inside the folder that holds compose.yaml,
+            unless your compose.yaml points it somewhere else. Each provider you choose gets a folder of
+            its own in there, and its documents go in that folder.</p>
+          <p class="hint" id="rootsay">Each provider you choose gets a folder of its own inside it. Nothing
+            is downloaded until you ask.</p>
+          <div class="row-actions"><button class="btn btn-p" type="button" data-do="w-next">Continue</button></div>
+        </div>
+      </div>
+      <div id="w-step2" hidden>
+        <h1 id="w-title2" tabindex="-1">Which providers do you use?</h1>
+        <p class="muted" style="margin:6px 0 20px">Pick any you have an account with. Each gets its own
+          folder, and nothing downloads until you ask. You can add more later.</p>
+        <label class="searchbox"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <span class="sr">Search providers</span><input id="w-search" type="search" autocomplete="off" placeholder="Search providers, like Chase or Verizon"></label>
+        <div class="chips" id="w-groups" role="group" aria-label="Kinds of provider"></div>
+        <div class="tiles" id="providers"></div>
+        <p class="hint" id="w-count" style="margin-top:14px"></p>
+        <div class="tray">
+          <b id="w-picked-n">None chosen yet</b><span class="picked" id="w-picked"></span>
+          <button class="btn btn-s" type="button" data-do="w-back">Back</button>
+          <button class="btn btn-p" type="button" data-do="w-next" id="w-next2">Continue</button>
+        </div>
+      </div>
+      <div id="w-step3" hidden>
+        <h1 tabindex="-1" id="w-title3">Whose documents are these?</h1>
+        <p class="muted" style="margin:6px 0 20px">The name on the account, as the provider writes it.
+          It never leaves this computer. It is what lets PaperPull remove your name from a file before
+          you send it to anyone, and it can go in your file names.</p>
+        <div class="card pad stack">
+          <label class="field" for="owner">Account holder's name</label>
+          <input id="owner" type="text" autocomplete="name" spellcheck="false" maxlength="80">
+          <p class="hint">Leave it blank to skip. A second person on the same provider is added later, from
+            that provider's More menu.</p>
+          <div class="row-actions">
+            <button class="btn btn-s" type="button" data-do="w-back">Back</button>
+            <button class="btn btn-p" type="button" data-do="w-create" id="w-create">Set up</button>
+            <span class="hint" id="newmsg" role="status"></span>
+          </div>
+        </div>
+      </div>
+      <section class="card pad" id="setupmove" hidden style="margin-top:20px"></section>
+    </div>
+    <aside class="side-col" id="w-aside">
+      <section class="card aside-card" id="movelink">
+        <h2>Moving from another computer?</h2>
+        <p>Bring its providers and download history with the file from Export history. Nothing you already
+          have downloads again.</p>
+        <button class="btn btn-s" type="button" data-do="w-import">Import a history file</button>
+      </section>
+      <section class="card aside-card" id="w-sample">
+        <h2>Just looking?</h2>
+        <p>Open a sample archive of invented statements and receipts, to try Accounts and both spreadsheets.
+          Nothing signs in and nothing of yours is touched.</p>
+        <button class="btn btn-s" type="button" data-do="open-sample">Open the sample</button>
+      </section>
+      <section class="card aside-card" id="existinglink">
+        <h2>Already have PaperPull folders?</h2>
+        <p>Point to the folder that holds them, the one with <i>Chase Statements</i>, <i>Amazon Receipts</i>
+          and so on inside it. Nothing is moved or copied.</p>
+        <button class="btn btn-s" type="button" data-do="settings-folder">Choose that folder</button>
+      </section>
+    </aside>
+  </div>
+</section>
+
+<!-- every account ---------------------------------------------------------- -->
+<section id="view-home" class="view" hidden aria-labelledby="h-title">
+  <div class="head">
+    <div><h1 id="h-title" tabindex="-1">Accounts</h1><p id="h-sub"></p></div>
+    <button class="btn btn-s" type="button" data-do="add-provider" id="addlink"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add a provider</button>
+  </div>
+  <div id="h-body"></div>
+</section>
+
+<!-- one account ------------------------------------------------------------ -->
+<section id="view-account" class="view" hidden aria-labelledby="a-title">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="#/">Accounts</a>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+    <span aria-current="page" id="a-crumb"></span></nav>
+  <div id="a-body"></div>
+</section>
+
+<!-- a run ------------------------------------------------------------------ -->
+<section id="view-run" class="view narrow" hidden aria-labelledby="r-title">
+  <nav class="crumbs" aria-label="Breadcrumb" id="r-crumbs"></nav>
+  <ol class="queue" id="r-queue" hidden aria-label="Accounts in this round"></ol>
+  <div id="r-body"></div>
+</section>
+
+<!-- spreadsheets ----------------------------------------------------------- -->
+<section id="view-sheets" class="view" hidden aria-labelledby="s-title">
+  <div class="head"><div><h1 id="s-title" tabindex="-1">Spreadsheets</h1>
+    <p>Made from what PaperPull already saved, so nothing is downloaded. Each file is made fresh every
+      time, so edit a copy.</p></div></div>
+  <div class="cols">
+    <section class="card pad stack main-col" style="flex:1 1 440px" aria-labelledby="xl-title">
+      <h2 id="xl-title">Purchases</h2>
+      <p class="muted">Every item you bought, one row each, from your receipts, newest first. Adds an Orders
+        sheet and your spending per provider per year. It takes a second, and no PDF is opened.</p>
+      <div class="opts" style="margin-top:0">
+        <label class="field" style="flex:1 1 240px">From<select id="xlprovider"></select></label>
+        <fieldset><legend>Format</legend><div class="seg">
+          <label><input type="radio" name="xlfmt" value="xlsx" checked>Excel</label>
+          <label><input type="radio" name="xlfmt" value="csv">CSV</label></div></fieldset>
+      </div>
+      <p class="hint" id="xlnote"></p>
+      <div class="row-actions"><button class="btn btn-p" type="button" id="xlbuild" data-do="xl-build">Create purchases file</button></div>
+      <div id="xlbody"></div>
+    </section>
+    <section class="card pad stack main-col" style="flex:1 1 440px" aria-labelledby="tx-title">
+      <h2 id="tx-title">Bank transactions</h2>
+      <p class="muted">Every transaction inside your statement PDFs, one row each, with a sheet that says
+        whether each statement adds up. Money in is positive and money out is negative, for a bank account
+        and a card alike. A statement that does not add up is still included, with the difference shown.</p>
+      <div class="opts" style="margin-top:0">
+        <label class="field" style="flex:1 1 240px">From<select id="txprovider"></select></label>
+        <fieldset><legend>Format</legend><div class="seg">
+          <label><input type="radio" name="txfmt" value="xlsx" checked>Excel</label>
+          <label><input type="radio" name="txfmt" value="csv">CSV</label></div></fieldset>
+      </div>
+      <p class="hint" id="txnote"></p>
+      <div class="row-actions"><button class="btn btn-p" type="button" id="txbuild" data-do="tx-build">Create transactions file</button></div>
+      <div id="txstate" hidden>
+        <div class="progress"><span class="spinner sm" aria-hidden="true"></span><b id="txnow" role="status">Reading statements</b></div>
+        <p class="hint">The first time takes a few minutes for a big archive. Each statement is read once and
+          remembered, so the next one takes seconds.</p>
+      </div>
+      <div id="txdone"></div>
+      <details class="tech" style="padding:0" id="txdetails" hidden><summary>Technical details</summary><pre class="log short" id="txlog"></pre></details>
+    </section>
+  </div>
+</section>
+
+<!-- file names ------------------------------------------------------------- -->
+<section id="view-names" class="view narrow" hidden aria-labelledby="n-title">
+  <div class="head"><div><h1 id="n-title" tabindex="-1">File names</h1>
+    <p>How new downloads are named. Saving touches nothing on disk. Renaming the files you already have is
+      a separate step, with a preview first.</p></div></div>
+  <p id="nmunavail" class="hint warn" hidden>File naming is not available in this install. Update PaperPull to get it.</p>
+  <div id="nmbody">
+    <div class="opts" style="margin:0 0 18px">
+      <label class="field">Show examples from<select id="nmapp"></select></label>
+      <fieldset><legend>Use this naming for</legend><div class="seg">
+        <label><input type="radio" name="nmscope" value="shared" checked><span id="nmsharedlabel">Every provider of this kind</span></label>
+        <label><input type="radio" name="nmscope" value="own"><span id="nmownlabel">Only this provider</span></label></div></fieldset>
+    </div>
+    <section class="card pad">
+      <p class="small muted" style="font-weight:700;margin-bottom:8px" id="nmlead">Your newest file would be named</p>
+      <p class="namebig" id="nmname">&nbsp;</p>
+      <h2 class="section-title">Parts, in order</h2>
+      <div class="parts" id="nmparts"></div>
+      <p class="hint" id="nmtextonly" hidden>This pattern is written in a way the parts above cannot show.
+        Change it under Edit as text, or press Back to the default.</p>
+      <p class="hint" style="margin-top:10px">A dashed part is left out, with its separator, when a file does
+        not have it. Under each part you can add is how many of your files carry it.</p>
+      <div class="opts">
+        <label class="field">Between parts<select id="nmsep"></select></label>
+        <label class="field">Date style<select id="nmdate"></select></label>
+        <label class="checkline"><input type="checkbox" id="nmskip" checked>Leave out a new part when a file does not have it</label>
+      </div>
+    </section>
+    <p class="hint warn" id="nmproblem" hidden style="margin-top:12px"></p>
+    <section class="card pad" style="margin-top:20px">
+      <h2 class="section-title">Your newest files, before and after</h2>
+      <div class="tablebox" id="nmpreview"></div>
+      <div class="row-actions" style="margin-top:18px">
+        <button class="btn btn-p" type="button" data-do="nm-save">Save</button>
+        <button class="btn btn-s" type="button" data-do="nm-default">Back to the default</button>
+        <button class="btn btn-ghost" type="button" data-do="nm-clear">Start empty</button>
+        <span class="hint" id="nmnote" role="status"></span>
+      </div>
+    </section>
+    <section class="callout info" id="nmoffer" hidden style="margin-top:20px">
+      <div class="text">
+        <h2>Rename the files you already have to match?</h2>
+        <p id="nmofferapps"></p>
+        <p>Preview first. It lists every file that would change and changes nothing. Renaming then does
+          exactly that. Nothing is downloaded or deleted, nothing moves between folders, and each app's
+          index follows its files, so nothing is ever downloaded twice. The preview can also list files an
+          app would now describe better than when it saved them.</p>
+        <div class="row-actions">
+          <button class="btn btn-s" type="button" id="nmprevbtn" data-do="nm-preview">1. Preview the changes</button>
+          <button class="btn btn-p" type="button" id="nmapplybtn" data-do="nm-apply" disabled>2. Rename them</button>
+          <button class="link" type="button" data-do="nm-notnow">Not now</button>
+          <span class="hint" id="nmofferstate" role="status"></span>
+        </div>
+        <pre class="log short" id="nmlog" hidden></pre>
+      </div>
+    </section>
+    <details class="card tech" style="margin-top:20px" id="nmtext">
+      <summary>Edit as text <span>for people who prefer to write the pattern</span></summary>
+      <input id="nmpattern" type="text" spellcheck="false" autocomplete="off" class="mono" style="width:100%;margin-top:12px"
+             placeholder="an empty box means the default">
+      <p class="hint" style="margin-top:10px">Written by hand, <code>{date:yyyymmdd}[ - {provider}][ -- {number|kind}]</code>
+        is the date, then the provider, then the order number, or the kind when there is no number. Square
+        brackets make a part that is skipped when empty, and <code>{a|b}</code> takes the first that has a value.</p>
+    </details>
+  </div>
+</section>
+
+<!-- settings --------------------------------------------------------------- -->
+<section id="view-settings" class="view narrow" hidden aria-labelledby="g-title">
+  <div class="head"><div><h1 id="g-title" tabindex="-1">Settings</h1><p>Things set once, out of the everyday path.</p></div></div>
+  <div class="stack" style="gap:20px">
+    <section class="card pad stack" aria-labelledby="g-folder" id="g-foldercard">
+      <h2 id="g-folder">Your PaperPull folder</h2>
+      <p class="mono small" id="root" style="word-break:break-all"></p>
+      <p class="hint" id="rootwhy"></p>
+      <div id="existing" class="stack" hidden>
+        <label class="field" for="rootinput">Use another folder, the one that holds your provider folders</label>
+        <input id="rootinput" type="text" spellcheck="false" placeholder="C:\Users\you\Documents\PaperPull">
+        <div class="row-actions"><button class="btn btn-s" type="button" data-do="save-root">Use this folder</button>
+          <span class="hint" id="rootmsg" role="status"></span></div>
+      </div>
+    </section>
+    <section class="card pad stack" aria-labelledby="hxhead" id="stmove">
+      <div id="movebox" class="stack">
+        <h2 id="hxhead">Move to another computer</h2>
+        <p class="hint" id="hxlead"></p>
+        <div class="row-actions" id="hxexportrow"><button class="btn btn-s" type="button" id="hxexport" data-do="hx-export">Export history</button></div>
+        <label class="field" for="hxfile">Import a history file</label>
+        <input id="hxfile" type="file" accept=".ppz">
+        <div id="hxplan" class="tablebox"></div>
+        <div class="row-actions"><button class="btn btn-p" type="button" id="hximport" hidden data-do="hx-import">Import</button>
+          <span class="hint" id="hxmsg" role="status"></span></div>
+      </div>
+    </section>
+    <section class="card pad stack" aria-labelledby="g-sample" id="g-samplecard">
+      <h2 id="g-sample">Sample archive</h2>
+      <p class="hint">Invented statements and receipts, so you can try Accounts and both spreadsheets before you
+        point this at a real account. Nothing is downloaded and nothing of yours is touched.</p>
+      <div class="row-actions"><button class="btn btn-s" type="button" id="g-sampleopen" data-do="open-sample">Open the sample</button>
+        <button class="btn btn-s" type="button" id="g-sampleleave" data-do="leave-sample" hidden>Leave the sample</button></div>
+    </section>
+    <section class="card pad stack" aria-labelledby="g-look">
+      <h2 id="g-look">Light or dark</h2>
+      <div class="seg" role="radiogroup" aria-labelledby="g-look">
+        <label><input type="radio" name="theme" value="system">Follow this computer</label>
+        <label><input type="radio" name="theme" value="light">Light</label>
+        <label><input type="radio" name="theme" value="dark">Dark</label></div>
+      <p class="hint">Remembered in this browser only.</p>
+    </section>
+    <section class="card pad stack" aria-labelledby="g-about">
+      <h2 id="g-about">About PaperPull</h2>
+      <p>PaperPull <span id="g-ver">v__VERSION__</span>. It only reads your accounts. It never pays, moves money
+        or changes anything at a provider, and you always sign in yourself.</p>
+      <p class="row-actions small"><a href="https://paperpull.net/guide.html" target="_blank" rel="noopener">How to use it</a>
+        <span class="sep-dot" aria-hidden="true">·</span><a href="https://github.com/rheeloaded/paperpull#readme" target="_blank" rel="noopener">README</a>
+        <span class="sep-dot" aria-hidden="true">·</span><a href="https://github.com/rheeloaded/paperpull/issues" target="_blank" rel="noopener">Report a problem</a></p>
+    </section>
+  </div>
+</section>
+</main>
+
+<div id="runbar" class="runbar" hidden role="status" aria-live="polite">
+  <span class="what" id="rb-what"></span><span class="state" id="rb-state"></span>
+  <span class="bar wide" id="rb-bar"><span></span></span>
+  <a class="btn" href="#/run">View</a>
+</div>
+<footer class="foot">
+  __FOOTER__
+</footer>
+
+<!-- the server's sign-in window ----------------------------------------- -->
+<aside id="dock" class="dock" aria-labelledby="dock-title">
+  <div class="dock-head">
+    <div><h2 id="dock-title">Sign-in window</h2>
+      <p id="dock-say">Sign in below the way you would on the provider's own site. Your password goes to the
+        provider, never to PaperPull. Leave it signed in when you are done.</p></div>
+    <a class="btn btn-s" href="/screen" target="_blank" rel="noopener">Full screen</a>
+    <button class="btn btn-p" type="button" data-do="dock-close" title="Hides this panel. The window stays open on the server.">Done</button>
+  </div>
+  <iframe id="dockframe" title="The sign-in window, the browser on the server" src="about:blank"></iframe>
+  <p class="tiny">This is the browser on the server, live. Every provider's sign-in page opens here.</p>
+</aside>
+
+<!-- dialogs ------------------------------------------------------------- -->
+<dialog id="dlg-restore" aria-labelledby="rs-title">
+  <form method="dialog" id="rs-form">
+    <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v5h5"/></svg></div>
+      <div><h2 id="rs-title">Restore deleted files</h2>
+        <p>PaperPull remembers every document it saved, so it never downloads one twice, even after you delete
+          the PDF, say once it is in paperless-ngx. Restore fetches the missing ones again, for the dates you pick.</p></div></div>
+    <div class="dlg-body">
+      <fieldset><legend>Which dates</legend>
+        <div class="row-actions">
+          <div class="seg"><label><input type="radio" name="rsby" value="year" checked>One year</label>
+            <label><input type="radio" name="rsby" value="range">Between two dates</label></div>
+          <label class="field" id="rs-yearbox"><span class="sr">Year</span><select id="rs-year"></select></label>
+        </div>
+        <div class="dates" id="rs-range" hidden>
+          <label class="field">From<input type="date" id="rs-start"></label>
+          <label class="field">To<input type="date" id="rs-end"></label></div>
+        <p class="hint" style="margin-top:8px">A year, or both a From and a To date, is needed, so a whole history is
+          never fetched again by accident.</p>
+      </fieldset>
+      <fieldset><legend>How many</legend><div class="stack" style="gap:8px">
+        <label class="opt"><input type="radio" name="rshow" value="all" checked><span><b>Every missing file in those dates</b>
+          <span>Goes through every document in range, the ones already downloaded included, and fetches again each one whose file is gone</span></span></label>
+        <label class="opt"><input type="radio" name="rshow" value="pilot"><span><b>Just the newest few, as a test</b>
+          <span>The same, for the newest few documents in range only</span></span></label></div></fieldset>
+      <ul class="facts">
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L19 7"/></svg><span>Nothing is overwritten. A file you still have stays as it is, and the app may save a second copy beside it, under a name of its own.</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>The provider is asked again for each document fetched, so a long range takes as long as the first download did.</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v5h5"/></svg><span>For this run only. Your next Get new documents works as usual, and Continue never restores.</span></li>
+      </ul>
+      <p class="err" id="rs-err" role="alert" hidden></p>
+    </div>
+    <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn btn-p" type="button" id="rs-go" data-do="rs-go">Restore missing files</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-person" aria-labelledby="ps-title">
+  <form method="dialog">
+    <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="8" r="4"/><path d="M3 21a7 7 0 0 1 14 0M19 8v6M16 11h6"/></svg></div>
+      <div><h2 id="ps-title">Add another person</h2>
+        <p id="ps-lead">They get their own folder beside this one, their own sign-in window and their own download
+          history, so nothing mixes with the first account.</p></div></div>
+    <div class="dlg-body">
+      <label class="field" for="ps-label">A short label for the account<input id="ps-label" type="text" autocomplete="off" spellcheck="false" maxlength="32" placeholder="for example spouse or alex"></label>
+      <p class="hint" style="margin-top:-10px">Lowercase letters, digits, - or _. It names their folder.</p>
+      <label class="field" for="ps-owner">Their name, as it appears on the documents (optional)<input id="ps-owner" type="text" autocomplete="off" maxlength="80"></label>
+      <p class="err" id="ps-err" role="alert" hidden></p>
+    </div>
+    <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn btn-p" type="button" data-do="ps-go">Add this person</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-remove" aria-labelledby="rm-title">
+  <form method="dialog">
+    <div class="dlg-head"><div class="icon bad" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18v4H3zM5 11v8h14v-8M10 15h4"/></svg></div>
+      <div><h2 id="rm-title">Remove from PaperPull?</h2>
+        <p id="rm-lead"></p></div></div>
+    <div class="dlg-body"><ul class="facts">
+      <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L19 7"/></svg><span>Nothing is deleted. Its folder is moved into a Removed folder beside the others, with its PDFs, download history and signed-in browser profile all still inside.</span></li>
+      <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L19 7"/></svg><span>Delete that folder yourself whenever you are sure. Until then, moving it back restores the provider.</span></li></ul>
+      <p class="err" id="rm-err" role="alert" hidden></p></div>
+    <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn btn-danger" type="button" data-do="rm-go">Move it to Removed</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-rename" aria-labelledby="rn-title">
+  <form method="dialog">
+    <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></div>
+      <div><h2 id="rn-title">Rename existing files</h2>
+        <p><b>Rename preview</b> shows what this app would call the files you already have, and changes nothing.
+          <b>Apply renames</b> then renames them where they sit. Nothing is downloaded either way, nothing moves between
+          folders, and only files this app downloaded are touched.</p></div></div>
+    <div class="dlg-body">
+      <div class="row-actions"><button class="btn btn-s" type="button" data-do="rn-preview" id="rn-prev">1. Rename preview</button>
+        <button class="btn btn-p" type="button" data-do="rn-apply" id="rn-apply" disabled>2. Apply renames</button>
+        <span class="hint" id="rn-state" role="status"></span></div>
+      <pre class="log" id="rn-log" hidden></pre>
+    </div>
+    <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Close</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-support" aria-labelledby="sp-title">
+  <form method="dialog">
+    <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg></div>
+      <div><h2 id="sp-title">Make a support report</h2>
+        <p id="sp-diagnose"><b>Diagnose</b> reads the provider's page and writes two files to its Diagnostics folder, downloading
+          nothing. The one whose name starts with <b>survey-</b> holds counts and states and no text from your account,
+          and that is the one to attach to an issue. The detailed file beside it keeps a word only when it is on
+          PaperPull's fixed list and writes any other as its shape, so it can go with it. A screenshot, where Diagnose
+          takes one, shows the page as it is and stays on this machine.</p></div></div>
+    <div class="dlg-body"><p class="hint">Sign in to the provider first and leave its window on the page that has your
+      documents, so the report reads the right page.</p></div>
+    <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn btn-p" type="button" data-do="sp-go">Make the report</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-record" aria-labelledby="rc-title">
+  <form method="dialog">
+    <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg></div>
+      <div><h2 id="rc-title">Record steps for support</h2>
+        <p><b>Record</b> watches one signed-in page while you click your way to a document, and writes what you did to the
+          Diagnostics folder. It downloads nothing and captures no keystroke. It is the one-round version of a support
+          report, since a report guesses which control matters and a recording knows.</p></div></div>
+    <div class="dlg-body"><p class="hint">Start it, click through the provider's site to one document in its window, then
+      press Stop recording here.</p></div>
+    <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn btn-p" type="button" data-do="rc-go">Start recording</button></div>
+  </form>
+</dialog>
+
+<script>
+__JS__
+</script>
+</body>
+</html>

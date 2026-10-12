@@ -204,7 +204,8 @@ def test_what_diagnose_prints_names_the_safe_file(tmp_path):
 # -- and the panel says the same -------------------------------------------------
 
 def test_the_panel_says_how_each_file_diagnose_writes_is_built():
-    page = (REPO / "gui" / "app.py").read_text(encoding="utf-8")
+    page = "".join((REPO / "gui" / "static" / name).read_text(encoding="utf-8")
+                   for name in ("index.html", "app.js"))
     start = page.index("<b>Diagnose</b>")
     blurb = " ".join(page[start:start + 900].split())
     assert "survey-" in blurb, "the panel does not say which file to attach"

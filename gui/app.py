@@ -683,12 +683,13 @@ def setup_needed(meta: dict) -> str:
         return ("This is the sample archive, so there is nothing to sign in "
                 "to and nothing to download.\n\n"
                 "Everything already in it was invented to show what a real "
-                "archive looks like. The Status tab and both spreadsheets "
+                "archive looks like. Accounts and both spreadsheets "
                 "work on it exactly as they would on yours.\n\n"
                 "To see the sign-in step, leave the sample, add a provider, "
-                "and press Login. Your own browser opens on that provider's "
-                "sign-in page. Nothing is downloaded until you have signed "
-                "in there yourself, and PaperPull never sees what you type.")
+                "open it and press Open sign-in window. Your own browser opens "
+                "on that provider's sign-in page. Nothing is downloaded until "
+                "you have signed in there yourself, and PaperPull never sees "
+                "what you type.")
     if _is_packaged() or _venv_python(Path(meta["dir"])) is not None or _runs_apps():
         return ""
     script = "setup-all.command" if sys.platform != "win32" else "setup-all.bat"
@@ -786,7 +787,10 @@ def api_apps():
     apps = discover_apps()
     return {"apps_root": str(apps_root()), "root_source": root_source(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
             "more_actions": list(MORE_ACTIONS), "redownload_actions": list(REDOWNLOAD_ACTIONS),
-            "apps": apps, "refreshed": refreshed}
+            "apps": apps, "refreshed": refreshed,
+            # What the server's header says about where new documents go.
+            "server": ({"paperless": server_mode.paperless_connected()}
+                       if server_mode.enabled() else None)}
 
 
 # -- the panel's tools ---------------------------------------------------------
@@ -1085,6 +1089,299 @@ def api_status():
     return {"available": True, "root": str(apps_root()), "rows": out, "gaps": gaps}
 
 
+# -- every account at a glance ---------------------------------------------------
+#
+# The home page answers "what needs me" with one row per provider and person.
+# A row comes from three things, the status reporter run on that account's
+# own folder, the panel's own record of the runs it started there, and
+# whether one of them is running now. Nothing here says an account is signed
+# in, since nothing short of a run can know that (a page with no sign-in
+# challenge on it is not a session).
+
+RUN_LOG = "panel-runs.json"
+RUN_LOG_KEEP = 20
+# (app name, account) -> {"action", "started"} for each run streaming now.
+_RUNS: dict = {}
+# The runs that download, whose ending decides whether an account was left
+# partway. A Login, a Discover or a Verify that stops leaves nothing to
+# continue, so it never makes a row say Continue.
+DOWNLOAD_ACTIONS = ("pilot", "all", "resume")
+# The files a row lists as the newest it saved.
+LATEST_SHOWN = 4
+
+
+def _account_root(meta: dict, account: str) -> Path:
+    """The folder an account's documents and records are written to."""
+    return server_mode.output_root(Path(meta["dir"]), account)
+
+
+def _read_run_log(root: Path) -> list:
+    try:
+        raw = json.loads((root / RUN_LOG).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [e for e in raw if isinstance(e, dict)] if isinstance(raw, list) else []
+
+
+def _note_run(root: Path, entry: dict) -> None:
+    """Put a run's outcome first in its account's run log, keeping the
+    newest RUN_LOG_KEEP. Best effort. A folder that cannot be written keeps
+    no log, and a run is never failed for it."""
+    path = root / RUN_LOG
+    tmp = root / (RUN_LOG + ".tmp")
+    try:
+        tmp.write_text(json.dumps(([entry] + _read_run_log(root))[:RUN_LOG_KEEP], indent=1),
+                       encoding="utf-8")
+    except OSError:
+        return
+    # On Windows a reader holding the log, OneDrive's sync, a virus scanner
+    # or another tab reading the accounts, makes the swap fail for a moment.
+    # A few short tries, since this can run on the panel's own thread when a
+    # page goes away, then the leftover is cleared.
+    for attempt in range(5):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            time.sleep(0.05 * (attempt + 1))
+        except OSError:
+            break
+    try:
+        tmp.unlink()
+    except OSError:
+        pass
+
+
+def _saved_this_run(root: Path, started: float) -> list:
+    """The names of the files a run saved, from the new-this-run.txt it
+    wrote, for the page to list. A list older than the run is the last
+    run's, left in place by a run that stopped before writing its own."""
+    listed = root / "new-this-run.txt"
+    try:
+        if listed.stat().st_mtime < started:
+            return []
+        lines = listed.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    names = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name = re.split(r"[\\/]", line)[-1]
+        if name and name not in names:
+            names.append(name)
+    return names[:500]
+
+
+def _latest_saved(root: Path) -> list:
+    """The newest files an account saved, as {"name", "date"}, read from its
+    own records. Names only, so nothing here ever names a path to open."""
+    try:
+        raw = json.loads((root / "progress.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return []
+    found = []
+    for rec in raw.values() if isinstance(raw, dict) else ():
+        if not isinstance(rec, dict) or not rec.get("downloaded_ok"):
+            continue
+        name = rec.get("pdf_filename")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        when = rec.get("date") or rec.get("purchase_date") or ""
+        found.append({"name": re.split(r"[\\/]", name)[-1],
+                      "date": when if isinstance(when, str) else ""})
+    found.sort(key=lambda f: f["date"], reverse=True)
+    return found[:LATEST_SHOWN]
+
+
+def _provider_of(meta: dict) -> tuple:
+    """(provider name, kind) for an install, from its own storage.py, the
+    way the welcome list reads a template."""
+    try:
+        src = (Path(meta["dir"]) / "storage.py").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        src = ""
+    p, k = _PROVIDER_RE.search(src), _KIND_RE.search(src)
+    name = meta["name"]
+    for tail in (" Statements", " Receipts"):
+        if name.endswith(tail):
+            name = name[:-len(tail)]
+    return (p.group(1) if p else name), (k.group(1) if k else "")
+
+
+def _last_outcome(entry) -> str:
+    """How a logged run ended, in one word the page turns into a sentence.
+    "" for a run that finished cleanly or no run at all."""
+    if not entry:
+        return ""
+    if entry.get("closed"):
+        return "closed"
+    code = entry.get("exit_code")
+    result = entry.get("result") if isinstance(entry.get("result"), dict) else None
+    if code == 130:
+        return "interrupted"
+    if code not in (0, None):
+        return "failed"
+    if result and result.get("stopped"):
+        return "stopped"
+    if result and result.get("attention"):
+        return "attention"
+    return ""
+
+
+# The order the home page lists accounts in, most in need first.
+STATE_ORDER = ("stopped", "attention", "unreadable", "overdue", "due", "gap",
+               "never", "not_started", "nostatus", "unknown", "current", "ongoing")
+
+
+def _account_state(row, outcome: str, gaps: list, known: bool = True) -> str:
+    """One word for where an account stands. A run that did not finish
+    comes first, since the next step is to continue it. Then what the last
+    run left to look at, then how current the archive is, then gaps. An
+    archive whose status could not be read is never called not started."""
+    if outcome in ("closed", "interrupted", "failed", "stopped"):
+        return "stopped"
+    if outcome == "attention":
+        return "attention"
+    if row is None:
+        return "not_started" if known else "nostatus"
+    status = str(row.get("status") or "")
+    if status in ("unreadable", "overdue", "due", "never"):
+        return status
+    if gaps:
+        return "gap"
+    return status if status in STATE_ORDER else "unknown"
+
+
+def _owner_of(meta: dict, account: str) -> str:
+    """The account holder's name as the account's config gives it, or ""."""
+    config = Path(meta["dir"]) / ("config.json" if account == "primary"
+                                  else "config.%s.json" % account)
+    try:
+        owner = json.loads(config.read_text(encoding="utf-8-sig")).get("owner")
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return owner.strip()[:80] if isinstance(owner, str) else ""
+
+
+def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: str,
+                 slug: str, account: str) -> dict:
+    """One provider and person, with where they stand."""
+    root = _account_root(meta, account)
+    row, known = None, mod is not None
+    if mod is not None:
+        try:
+            row = mod.scan_install(root)
+        except Exception:
+            row, known = None, False
+    gaps = []
+    if row is not None:
+        try:
+            gaps = [_jsonable(g) for g in mod.group_gaps(row.get("gaps") or [])]
+        except Exception:
+            gaps = []
+    log = _read_run_log(root)
+    last = next((e for e in log if e.get("action") in DOWNLOAD_ACTIONS), None)
+    outcome = _last_outcome(last)
+    running = _RUNS.get((name, account))
+    return {
+        "app": name, "account": account, "provider": provider,
+        "owner": _owner_of(meta, account),
+        "gets": cards.get(slug, {}).get("documents", ""),
+        "kind": (row or {}).get("kind") or kind,
+        "state": _account_state(row, outcome, gaps, known),
+        "documents": (row or {}).get("documents") or 0,
+        "newest": _jsonable((row or {}).get("newest")),
+        # When the app last finished a run at all, from its own run
+        # summary, so a run from a terminal counts as a check too.
+        "checked": _jsonable((row or {}).get("last_run")),
+        "age_days": (row or {}).get("age_days"),
+        "cadence_days": (row or {}).get("cadence_days"),
+        "cadence": mod._fmt_cadence((row or {}).get("cadence_days")) if mod else "-",
+        "gaps": gaps,
+        "last_run": last, "last_outcome": outcome,
+        "runs": log[:5],
+        "latest": _latest_saved(root),
+        "running": dict(running) if running else None,
+        "runnable": meta.get("runnable", True),
+        "needs_setup": meta.get("needs_setup", False),
+    }
+
+
+def account_rows() -> list:
+    """Every provider and person, with where each stands. One account that
+    cannot be read, a config written by hand say, gets a row that says so
+    and never takes the others' rows down with it."""
+    mod = _status_module()
+    cards = _provider_notes()
+    rows = []
+    for name, meta in discover_apps().items():
+        provider, kind = _provider_of(meta)
+        # The template an install came from is named for its entry script,
+        # chase_docs.py for apps/chase, which is how its line is found.
+        slug = str(meta.get("script_name") or "").rsplit("_", 1)[0]
+        for account in meta["accounts"]:
+            try:
+                rows.append(_account_row(mod, cards, name, meta, provider, kind, slug, account))
+            except Exception:
+                running = _RUNS.get((name, account))
+                rows.append({
+                    "app": name, "account": account, "provider": provider, "owner": "",
+                    "gets": cards.get(slug, {}).get("documents", ""), "kind": kind,
+                    "state": "nostatus", "documents": 0, "newest": None, "checked": None,
+                    "age_days": None, "cadence_days": None, "cadence": "-", "gaps": [],
+                    "last_run": None, "last_outcome": "", "runs": [], "latest": [],
+                    "running": dict(running) if running else None,
+                    "runnable": meta.get("runnable", True),
+                    "needs_setup": meta.get("needs_setup", False)})
+    order = {s: i for i, s in enumerate(STATE_ORDER)}
+    rows.sort(key=lambda r: (order.get(r["state"], len(order)), -(r["age_days"] or 0),
+                             r["provider"].lower(), r["account"] != "primary", r["account"]))
+    return rows
+
+
+@app.get("/api/accounts", dependencies=[Depends(_same_origin_only)])
+def api_accounts():
+    """The home page's rows. A plain def, so the folder walk runs in a
+    worker thread and a download streaming meanwhile is not held up."""
+    return {"root": str(apps_root()), "root_source": root_source(),
+            "status_available": _status_module() is not None,
+            "accounts": account_rows()}
+
+
+@app.post("/api/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+async def api_reveal(request: Request):
+    """Show one account's folder in the file manager. Takes the app's name
+    and the account, both checked against what the panel itself found, and
+    never a path."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    name = str((body or {}).get("app") or "")
+    account = str((body or {}).get("account") or "primary")
+    apps = discover_apps()
+    if name not in apps or account not in apps[name]["accounts"]:
+        raise HTTPException(404, "unknown app or account")
+    try:
+        folder = _account_root(apps[name], account)
+    except ValueError:
+        raise HTTPException(404, "that account's config names no folder PaperPull can read")
+    if not folder.is_dir():
+        raise HTTPException(404, "that account has no folder yet")
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", str(folder)])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(folder)])
+        else:
+            subprocess.Popen(["xdg-open", str(folder)])
+    except Exception as e:
+        raise HTTPException(500, "could not open the folder, %s" % e)
+    return {"ok": True}
+
+
 
 @app.post("/api/sample", dependencies=[Depends(_same_origin_only)])
 async def api_sample(request: Request):
@@ -1227,19 +1524,35 @@ def _launcher_left_out(item: Path) -> bool:
             and item.name.lower() not in PACKAGED_LAUNCHERS)
 
 
+PROVIDER_CARDS = HERE / "providers.json"
+
+
 def _provider_notes() -> dict:
-    """What each app downloads, from the table in PROVIDERS.md, keyed by slug.
-    Best effort. A missing file or a changed table just means no note."""
-    notes = {}
+    """What each app downloads, in a line written for the person choosing
+    providers, keyed by slug, from providers.json beside this file.
+
+    The welcome list used to show the "What it downloads" column of
+    PROVIDERS.md, which is written for GitHub and carries who tested an app,
+    issue numbers and how it reads the site, so a new user picking their
+    bank read "Confirmed by @watling777 ... (#26)". providers.json holds the
+    short line, the group the provider sits in and whether it has been run
+    on a real account yet. Best effort. A missing or broken file just means
+    no note, never another document's text."""
     try:
-        text = (HERE.parent / "PROVIDERS.md").read_text(encoding="utf-8")
-    except OSError:
-        return notes
-    for line in text.splitlines():
-        m = re.match(r"\|\s*\[`([a-z0-9_]+)`\][^|]*\|([^|]*)\|([^|]*)\|([^|]*)\|", line)
-        if m:
-            notes[m.group(1)] = {"documents": m.group(3).strip(),
-                                 "category": m.group(4).strip()}
+        data = json.loads(PROVIDER_CARDS.read_text(encoding="utf-8"))
+        groups, cards = data["groups"], data["providers"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+    notes = {}
+    for slug, card in cards.items() if isinstance(cards, dict) else ():
+        if not isinstance(card, dict):
+            continue
+        group = card.get("group", "")
+        notes[slug] = {"documents": card.get("gets", ""),
+                       "group": group,
+                       "category": groups.get(group, "") if isinstance(groups, dict) else "",
+                       "tested": card.get("tested", True) is not False,
+                       "note": card.get("note", "")}
     return notes
 
 
@@ -1272,7 +1585,10 @@ def list_providers() -> list:
         out.append({"slug": d.name, "provider": provider, "kind": kind,
                     "folder": install_folder_name(provider, kind),
                     "documents": n.get("documents", ""),
-                    "category": n.get("category", "")})
+                    "category": n.get("category", ""),
+                    "group": n.get("group", ""),
+                    "tested": n.get("tested", True),
+                    "note": n.get("note", "")})
     return out
 
 
@@ -2042,22 +2358,25 @@ async def api_history_import(request: Request):
 
 # -- stopping a recording -----------------------------------------------------
 
-def _diagnostics_of(meta: dict) -> Path:
-    """An app's Diagnostics folder, wherever its config sends output."""
-    app_dir = Path(meta["dir"])
-    out = ""
-    try:
-        cfg = json.loads((app_dir / "config.json").read_text(encoding="utf-8-sig"))
-        out = str(cfg.get("output_dir") or "")
-    except (OSError, ValueError):
-        pass
-    base = Path(out).expanduser() if out else app_dir
-    if not base.is_absolute():
-        base = (app_dir / base)
-    return base / "Diagnostics"
+def _diagnostics_of(meta: dict, account: str = "primary") -> Path:
+    """An account's Diagnostics folder, wherever its config sends output. A
+    second person's config sends theirs to their own folder, which is where
+    their recording waits and their failure file is written. Found the way
+    a run's own folder is found, so a config that names no usable folder
+    raises ValueError rather than lead to the first person's folder."""
+    return _account_root(meta, account) / "Diagnostics"
 
 
-def _latest_failure(meta: dict):
+def _account_named(meta: dict, account) -> str:
+    """The account a request names, only one the panel itself found for
+    that app, so a name from the page can never point at another folder."""
+    account = str(account or "primary")
+    if account not in (meta.get("accounts") or ["primary"]):
+        raise HTTPException(404, "unknown account")
+    return account
+
+
+def _latest_failure(meta: dict, account: str = "primary"):
     """The newest failure file an app wrote, if it wrote one recently.
 
     A run that stops early writes one of these by itself. It is the most
@@ -2083,8 +2402,8 @@ def _latest_failure(meta: dict):
         except OSError:
             return ""
     try:
-        found = sorted(_diagnostics_of(meta).glob("failure-*.json"), key=written)
-    except OSError:
+        found = sorted(_diagnostics_of(meta, account).glob("failure-*.json"), key=written)
+    except (OSError, ValueError):
         return None
     for path in reversed(found):
         try:
@@ -2096,12 +2415,12 @@ def _latest_failure(meta: dict):
 
 
 @app.get("/api/failure/latest", dependencies=[Depends(_same_origin_only)])
-def api_failure_latest(app: str = ""):
+def api_failure_latest(app: str = "", account: str = "primary"):
     """Whether the run that just stopped left a file worth attaching."""
     apps = discover_apps()
     if app not in apps:
         raise HTTPException(404, "unknown app")
-    found = _latest_failure(apps[app])
+    found = _latest_failure(apps[app], _account_named(apps[app], account))
     if found is None:
         return {"found": False}
     return {"found": True, "name": found.name}
@@ -2116,7 +2435,7 @@ async def api_failure_reveal(request: Request):
     apps = discover_apps()
     if name not in apps:
         raise HTTPException(404, "unknown app")
-    found = _latest_failure(apps[name])
+    found = _latest_failure(apps[name], _account_named(apps[name], (body or {}).get("account")))
     if found is None:
         raise HTTPException(404, "no recent failure file")
     try:
@@ -2132,7 +2451,7 @@ async def api_failure_reveal(request: Request):
 
 
 @app.get("/api/failure/download", dependencies=[Depends(_same_origin_only)])
-def api_failure_download(app: str = ""):
+def api_failure_download(app: str = "", account: str = "primary"):
     """On PaperPull Server, the newest failure file of one app, handed to the
     browser to attach to an issue. Only the app's name comes from the page,
     and the file is found here the way reveal finds it."""
@@ -2141,7 +2460,7 @@ def api_failure_download(app: str = ""):
     apps = discover_apps()
     if app not in apps:
         raise HTTPException(404, "unknown app")
-    found = _latest_failure(apps[app])
+    found = _latest_failure(apps[app], _account_named(apps[app], account))
     if found is None:
         raise HTTPException(404, "no recent failure file")
     return FileResponse(found, filename=found.name)
@@ -2159,7 +2478,10 @@ async def api_record_stop(request: Request):
     apps = discover_apps()
     if name not in apps:
         raise HTTPException(404, "unknown app")
-    target = _diagnostics_of(apps[name])
+    try:
+        target = _diagnostics_of(apps[name], _account_named(apps[name], (body or {}).get("account")))
+    except ValueError:
+        raise HTTPException(404, "that account's config names no folder PaperPull can read")
     try:
         target.mkdir(parents=True, exist_ok=True)
         (target / ".stop-recording").write_text("stop\n", encoding="utf-8")
@@ -2387,6 +2709,39 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             yield "data: A history file is being imported. Run this once it has finished.\n\n"
             yield "event: done\ndata: 1\n\n"
             return
+        # One run per account. A second, from another tab, would put two
+        # downloaders on one progress.json, one browser and one folder.
+        # Checked and claimed with nothing awaited between, so two requests
+        # cannot both get through.
+        if (app, account) in _RUNS:
+            yield ("data: %s is already running for this account, in another tab "
+                   "or window. Wait for it to finish there.\n\n" % app)
+            yield "event: done\ndata: 1\n\n"
+            return
+        # Where the run's log goes, worked out before the run is claimed, so
+        # nothing that can fail sits between the claim and the code that
+        # lets it go. A folder that cannot be worked out keeps no log.
+        try:
+            root = _account_root(meta, account)
+        except Exception:
+            root = None
+        _RUNS[(app, account)] = {"action": action,
+                                 "started": datetime.now().isoformat(timespec="seconds")}
+        noted = False
+
+        def note(code, result, closed=False):
+            if root is None:
+                return
+            try:
+                _note_run(root, {
+                    "action": action, "account": account,
+                    "started": _RUNS.get((app, account), {}).get("started", ""),
+                    "ended": datetime.now().isoformat(timespec="seconds"),
+                    "exit_code": code, "closed": closed, "result": result,
+                    "scope": list(scope_flags), "redownload": bool(redownload),
+                    "saved": _saved_this_run(root, started)})
+            except Exception:
+                pass
         try:
             _RUNNING.add(app)
             proc = subprocess.Popen(
@@ -2422,6 +2777,9 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             except OSError:
                 pass
         except Exception as e:
+            _RUNS.pop((app, account), None)
+            if not any(a == app for a, _ in _RUNS):
+                _RUNNING.discard(app)
             yield f"data: [failed to start] {e}\n\n"
             yield "event: done\ndata: 1\n\n"
             return
@@ -2433,12 +2791,14 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         # and one output folder. Stopping is safe: downloaded_ok is only set
         # after a document is saved, so a re-run resumes and re-fetches nothing.
         result = None
+        read_all = False
         try:
             while True:
                 # readline blocks, so it goes to a worker thread rather than
                 # stalling the event loop for every other request.
                 line = await to_thread.run_sync(proc.stdout.readline)
                 if not line:
+                    read_all = True
                     break
                 parsed = run_result.parse(line)
                 if parsed is not None:
@@ -2455,10 +2815,32 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
                     yield f"data: {told}\n\n"
             if result is not None:
                 yield f"event: result\ndata: {json.dumps(result)}\n\n"
+            # The files this run saved, by name, for the page to list under
+            # its one-line outcome. The log below keeps them for the home page.
+            yield f"event: saved\ndata: {json.dumps(_saved_this_run(root, started) if root else [])}\n\n"
+            # Marked first. The note's thread finishes even when the page
+            # goes meanwhile, so marking it after would note the run twice.
+            noted = True
+            await to_thread.run_sync(note, code, result)
             yield "data: \n\n"
             yield f"event: done\ndata: {code}\n\n"
         finally:
-            _RUNNING.discard(app)
+            if not noted:
+                # The page went away before the run was noted. A run that had
+                # already ended by itself, say while the Paperless copy ran,
+                # is noted with its own code, but only once its output was
+                # read to the end, or its counts were, since a code of 0 with
+                # the counts line still unread could hide a run that stopped.
+                # Any other is stopped by this, and its row says so.
+                ended = proc.poll() if (read_all or result is not None) else None
+                if ended is not None:
+                    note(ended, result)
+                else:
+                    note(None, result, True)
+            _RUNS.pop((app, account), None)
+            # Another person's run of the same app may still be going.
+            if not any(a == app for a, _ in _RUNS):
+                _RUNNING.discard(app)
             if proc.poll() is None:
                 proc.terminate()
                 try:
@@ -2693,11 +3075,29 @@ async def api_naming_save(request: Request):
             "changed": changed}
 
 
+# The line along the bottom of the page. The desktop one says the panel runs
+# on this computer and offers the paid Store edition. Neither is true of
+# PaperPull Server, which is free and runs on a box of the person's own, so
+# the server says that instead and keeps only the donation link.
+FOOTER_DESKTOP = (
+    '<span>PaperPull v__VERSION__ &middot; read-only, runs locally</span>\n'
+    '  <span>Free, and it costs money to make. Show your appreciation: '
+    '<a href="https://ko-fi.com/rheeloaded" target="_blank" rel="noopener">donate on Ko-fi</a> or '
+    '<a href="https://github.com/rheeloaded/paperpull#support" target="_blank" rel="noopener">'
+    'buy the Store edition</a></span>')
+FOOTER_SERVER = (
+    '<span>PaperPull Server v__VERSION__ (beta) &middot; read-only, runs on your own server</span>\n'
+    '  <span>Free, and it costs money to make. If it saves you time, you can '
+    '<a href="https://ko-fi.com/rheeloaded" target="_blank" rel="noopener">donate on Ko-fi</a>.</span>')
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     server = server_mode.enabled()
     bar = server_mode.server_bar() if server else ""
-    return (HTML.replace("__VERSION__", VERSION).replace("__SERVER_BAR__", bar)
+    footer = FOOTER_SERVER if server else FOOTER_DESKTOP
+    return (HTML.replace("__FOOTER__", footer)
+            .replace("__VERSION__", VERSION).replace("__SERVER_BAR__", bar)
             .replace("__SERVER__", "true" if server else "false"))
 
 
@@ -2724,1369 +3124,39 @@ def favicon():
                     headers={"Cache-Control": "max-age=86400"})
 
 
-HTML = r"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PaperPull</title>
-<link rel="icon" href="/favicon.ico">
-<style>
-  :root { color-scheme: light dark; --bg:#0f1115; --panel:#171a21; --fg:#e6e6e6;
-          --muted:#98a0ad; --accent:#4c8dff; --line:#262b36; --ok:#3ecf8e; }
-  * { box-sizing: border-box; }
-  body { margin:0; font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif;
-         background:var(--bg); color:var(--fg); display:flex; flex-direction:column; height:100vh; }
-  header { padding:18px 22px; border-bottom:1px solid var(--line); }
-  header h1 { margin:0; font-size:18px; }
-  header h1 .tag { color:var(--muted); font-weight:400; }
-  header h1 .ver { color:var(--accent); font-weight:400; font-size:13px; vertical-align:middle; }
-  header .serverbar { margin:12px 0 0; font-size:13px; color:var(--muted);
-                      display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-  header .serverbar a { color:var(--accent); text-decoration:none; }
-  header .serverbar a.screenbtn { display:inline-flex; align-items:center; gap:8px;
-                                  background:var(--accent); color:#fff; padding:9px 18px;
-                                  border-radius:8px; font-size:15px; font-weight:600; }
-  header .serverbar a.screenbtn:hover { filter:brightness(1.12); }
-  header .serverbar form { display:inline; }
-  header .serverbar button { background:none; border:0; padding:0; color:var(--accent);
-                             font:inherit; cursor:pointer; }
-  header p { margin:4px 0 0; color:var(--muted); font-size:13px; }
-  main { display:grid; grid-template-columns: 320px 1fr; grid-template-rows: minmax(0, 1fr); gap:0; flex:1; min-height:0; }
-  footer { padding:8px 22px; border-top:1px solid var(--line); font-size:12px;
-           color:var(--muted); display:flex; justify-content:space-between; align-items:center; }
-  footer a { color:var(--accent); text-decoration:none; }
-  footer a:hover { text-decoration:underline; }
-  .setup { flex:1; overflow:auto; padding:32px 22px; }
-  .setup > * { max-width:600px; margin-left:auto; margin-right:auto; }
-  .setup h2 { font-size:22px; margin:0 0 8px; }
-  .setup p.lead { color:var(--muted); margin:0 0 22px; line-height:1.5; }
-  .setup label { text-transform:none; letter-spacing:0; font-size:14px;
-                 color:var(--fg); margin:16px 0 6px; }
-  .stwrap button.nmchip { display:inline-flex; flex-direction:column; align-items:flex-start;
-                          line-height:1.25; padding:5px 10px; text-align:left; }
-  .nmchip small { color:var(--muted); font-size:11px; }
-  .nmchip.nmnone { opacity:.5; }
-  #panenm label { text-transform:none; letter-spacing:0; font-size:14px; color:var(--fg); }
-  #nmpattern { width:100%; padding:8px 10px; background:var(--panel); color:var(--fg);
-               border:1px solid var(--line); border-radius:6px; font-size:14px;
-               font-family:ui-monospace,Consolas,monospace; }
-  .setup input[type=text] { width:100%; font:inherit; padding:8px 10px;
-                            background:var(--panel); color:var(--fg);
-                            border:1px solid var(--line); border-radius:6px; }
-  .setup .providers { max-height:300px; overflow:auto; border:1px solid var(--line);
-                      border-radius:6px; padding:2px 10px; }
-  .setup .providers label { display:flex; gap:10px; align-items:flex-start;
-                            margin:0; padding:8px 2px; border-bottom:1px solid var(--line);
-                            font-size:14px; cursor:pointer; }
-  .setup .providers label:last-child { border-bottom:0; }
-  .setup .providers input { margin-top:3px; flex:none; }
-  .setup .providers .hint { display:block; font-size:12px; margin:1px 0 0; }
-  .setup button { font:inherit; padding:8px 18px; }
-  .setup button.primary { grid-column:auto; }
-  .controls { padding:20px 22px; border-right:1px solid var(--line); overflow:auto; }
-  .tabs { display:flex; gap:2px; padding:0 22px; border-bottom:1px solid var(--line); }
-  .tabs button { background:none; border:0; border-bottom:2px solid transparent;
-                 color:var(--muted); padding:10px 14px; font:inherit; cursor:pointer; }
-  .tabs button.on { color:var(--fg); border-bottom-color:var(--accent); }
-  .stwrap { flex:1; overflow:auto; padding:16px 22px; }
-  .stwrap button { background:var(--panel); color:var(--fg); border:1px solid var(--line);
-                   border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
-  table.st { border-collapse:collapse; width:100%; font-size:13px; }
-  table.st th { text-align:left; color:var(--muted); font-weight:500;
-                border-bottom:1px solid var(--line); padding:6px 10px 6px 0; }
-  table.st td { padding:6px 10px 6px 0; border-bottom:1px solid var(--line); }
-  /* Headers align with their columns. The .num rule used to reach only the
-     cells, so "Docs" sat at the left of a column whose numbers sat at the
-     right, a screen-width apart on a wide window. Every column except
-     Provider shrinks to its content, so labels and values stay together. */
-  table.st th.num, table.st td.num { text-align:right; }
-  table.st th:not(:first-child), table.st td:not(:first-child) {
-    width:1%; white-space:nowrap; padding-left:18px; }
-  .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; }
-  .pill.overdue { background:#4a1d1d; color:#ff9a9a; }
-  .pill.due { background:#4a3a1d; color:#ffd08a; }
-  .pill.current { background:#1d4a35; color:var(--ok); }
-  .pill.other { background:var(--line); color:var(--muted); }
-  .gapbox { margin-top:18px; border-left:3px solid var(--accent); padding:2px 0 2px 12px; }
-  .gapbox h3 { margin:0 0 4px; font-size:14px; }
-  .gapbox p { color:var(--muted); font-size:13px; margin:2px 0; }
-  label { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.04em;
-          color:var(--muted); margin:16px 0 6px; }
-  select { width:100%; padding:9px 10px; background:var(--panel); color:var(--fg);
-           border:1px solid var(--line); border-radius:8px; font-size:14px; }
-  .scope { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-  .scope input[type=date] { width:100%; padding:8px 10px; background:var(--panel); color:var(--fg);
-           border:1px solid var(--line); border-radius:8px; font-size:13px; box-sizing:border-box; }
-  .scope input[type=date]:disabled { opacity:.45; }
-  .scope .sub { font-size:11px; color:var(--muted); text-transform:none; letter-spacing:0; margin:6px 0 4px; }
-  label.again { display:flex; gap:8px; align-items:flex-start; text-transform:none; letter-spacing:0;
-                font-size:13px; color:var(--fg); margin:12px 0 0; cursor:pointer; }
-  label.again input { margin:3px 0 0; flex:none; }
-  .actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:20px; }
-  .actions.more { margin-top:8px; }
-  .morelink { font-size:12px; color:var(--muted); margin-top:10px; }
-  .morelink a { color:var(--accent); text-decoration:none; }
-  .morehint { font-size:12px; color:var(--muted); margin:6px 0 0; }
-  button { padding:10px; border:1px solid var(--line); border-radius:8px; cursor:pointer;
-           background:var(--panel); color:var(--fg); font-size:14px; }
-  button:hover { border-color:var(--accent); }
-  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; grid-column:1/3; }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  .hint { font-size:12px; color:var(--muted); margin-top:16px; }
-  .samplebar { display:none; align-items:center; gap:12px; flex-wrap:wrap;
-    padding:8px 20px; font-size:13px; background:#2a2411; color:#ffcf6b;
-    border-bottom:1px solid #4a3f1c; }
-  .samplebar b { color:#ffe1a3; }
-  .samplebar button { font:inherit; font-size:12px; padding:3px 12px; }
-  .warn { color:#ffcf6b; }
-  .console { background:#0b0d11; margin:0; padding:16px 20px; overflow:auto;
-             font:13px/1.55 ui-monospace,Consolas,monospace; white-space:pre-wrap; }
-  .status { padding:8px 20px; border-bottom:1px solid var(--line); font-size:13px; color:var(--muted); }
-  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--muted); margin-right:8px; }
-  .dot.run { background:var(--accent); animation:pulse 1s infinite; }
-  .dot.warn { background:#e6a23c; } .dot.ok { background:var(--ok); } .dot.err { background:#ff5c5c; }
-  @keyframes pulse { 50% { opacity:.3; } }
-</style>
-</head>
-<body>
-<header>
-  <h1>PaperPull <span class="ver">v__VERSION__</span><span class="tag"> &middot; Receipt &amp; Statement Downloader</span></h1>
-  <p id="root">control panel</p>
-  __SERVER_BAR__
-</header>
-<div id="samplebar" class="samplebar">
-  <span><b>Sample archive.</b> Every document here is invented. Nothing signs
-  in and nothing downloads, and your own archive is untouched.</span>
-  <button onclick="leaveSample()">Leave the sample</button>
-</div>
-<section id="setup" class="setup" style="display:none">
-  <div id="newuser">
-    <h2>Welcome to PaperPull</h2>
-    <p class="lead" id="newlead">Two steps. Choose where your downloads will live, then tick
-    the providers you have accounts with. A folder is set up for each one, and
-    nothing is downloaded until you ask.</p>
-    <label id="newrootlabel">Folder for your downloads</label>
-    <input id="newroot" type="text">
-    <p class="hint" id="serverroot" style="display:none; margin:8px 0 0; line-height:1.5">
-      <b>/data</b> is the container's name for its data folder. On your server
-      it is the folder named <b>data</b> inside the folder that holds
-      compose.yaml, unless your compose.yaml points it somewhere else. Each
-      provider you tick gets a folder of its own in there, and its documents
-      go in that folder.
-    </p>
-    <label>Providers you have accounts with</label>
-    <div id="providers" class="providers"></div>
-    <div style="margin-top:14px; display:flex; gap:10px; align-items:center;">
-      <button class="primary" onclick="createInstalls()">Set up</button>
-      <span class="hint" style="margin:0" id="newmsg"></span>
-    </div>
-  </div>
-  <p class="hint" style="margin-top:26px" id="movelink">
-    <a href="#" onclick="toggleMove(); return false;" style="color:var(--accent)">Moving from another computer? Bring its providers and history</a>
-  </p>
-  <div id="setupmove" style="display:none"></div>
-  <p class="hint" style="margin-top:26px">
-    <a href="#" onclick="openSample(); return false;" style="color:var(--accent)">Not ready to sign in to anything? See a sample archive</a><br>
-    Invented statements and receipts, so you can try the Status tab and both
-    spreadsheets before you point this at a real account. Nothing is
-    downloaded and nothing of yours is touched.
-  </p>
-  <p class="hint" style="margin-top:18px" id="existinglink">
-    <a href="#" onclick="toggleExisting(); return false;" style="color:var(--accent)">Already have PaperPull downloaders from before?</a>
-  </p>
-  <div id="existing" style="display:none">
-    <p class="hint" style="margin-top:6px">
-      Paste the full path of the folder that holds them, the one with
-      <i>Chase Statements</i>, <i>Amazon Receipts</i> and so on inside it.
-      Nothing is moved or copied. This panel works on what is already there,
-      and your existing way of running them keeps working too.
-    </p>
-    <input id="rootinput" type="text" placeholder="C:\Users\you\Documents\Receipt and Statement Downloader">
-    <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
-      <button onclick="saveRoot()">Use this folder</button>
-      <span class="hint" style="margin:0" id="rootmsg"></span>
-    </div>
-  </div>
-</section>
-<main>
-  <div class="controls">
-    <label for="app">App <a href="#" id="addlink" onclick="addProvider(); return false;" style="color:var(--accent); font-weight:400; font-size:12px; margin-left:8px;">add a provider</a> <a href="#" id="removelink" onclick="removeProvider(); return false;" style="color:var(--muted); font-weight:400; font-size:12px; margin-left:8px;">remove</a></label>
-    <select id="app"></select>
-    <label for="account">Account <a href="#" id="addacct" onclick="addAccount(); return false;" style="color:var(--accent); font-weight:400; font-size:12px; margin-left:8px;">add a person</a></label>
-    <select id="account"></select>
-    <label for="year">Scope</label>
-    <select id="year" onchange="onScope()"></select>
-    <div class="scope">
-      <div><div class="sub">From</div><input id="start" type="date" onchange="onScope()"></div>
-      <div><div class="sub">To</div><input id="end" type="date" onchange="onScope()"></div>
-    </div>
-    <p class="hint" id="scopehint" style="margin-top:8px"></p>
-    <label class="again" id="againrow"><input type="checkbox" id="again" autocomplete="off"
-           onchange="onAgain()"> Download again what this app already downloaded</label>
-    <p class="hint" id="againhint" style="display:none; margin-top:6px">For the next Pilot or
-       Run All, with a year, or both a From and a To date, chosen above. Each document in range
-       whose file is gone is fetched again. A file you still have is never overwritten, though
-       the app may save a second copy beside it. The box clears once that run starts.</p>
-    <div class="actions" id="actions"></div>
-    <button id="stoprec" class="primary" style="display:none;margin-top:8px"
-            onclick="stopRecording()">Stop recording</button>
-    <p class="morelink"><a href="#" id="morelink" onclick="toggleMore(); return false;">more</a></p>
-    <div id="morebox" style="display:none">
-      <div class="actions more" id="moreactions"></div>
-      <p class="morehint"><b>Verify</b> re-checks every saved PDF. <b>Diagnose</b> reads the
-         provider's page and writes two files to its Diagnostics folder, downloading nothing.
-         The one whose name starts with <b>survey-</b> holds counts and states and no text
-         from your account, and that is the one to attach to an issue. The detailed
-         file beside it keeps a word only when it is on PaperPull's fixed list and
-         writes any other as its shape, so it can go with it. A screenshot, where
-         Diagnose takes one, shows the page as it is and stays on this machine.</p>
-      <p class="morehint"><b>Rename preview</b> shows what this app would call the files you
-         already have, and changes nothing. <b>Apply renames</b> then renames them where they
-         sit. Nothing is downloaded either way, nothing moves between folders, and only files
-         this app downloaded are touched.</p>
-    </div>
-    <p class="hint">1. <span id="steplogin"><b>Login</b> opens a browser. Sign in yourself and leave it open.</span><br>
-       2. <b>Discover</b> shows what the provider has for you and downloads
-       nothing. It is optional, since Pilot and Run All look too.<br>
-       3. <b>Pilot</b> tests the newest few.<br>
-       4. <b>Run All</b> downloads everything you don't already have.</p>
-    <p class="hint" style="border-left:3px solid var(--accent); padding-left:10px;">
-       ↻ <b>Safe to re-run.</b> Run All and Resume skip any statement or receipt
-       you've already downloaded. Nothing is ever fetched twice, even if you
-       deleted the PDFs after importing them elsewhere<span id="againnote">, unless
-       you tick <b>Download again</b> under Scope</span>.</p>
-    <p class="hint warn" id="venvwarn" style="display:none"></p>
-  </div>
-  <div style="display:flex; flex-direction:column; min-width:0;">
-  <div class="tabs">
-    <button id="tabout" class="on" onclick="showTab('out')">Output</button>
-    <button id="tabst" onclick="showTab('st')">Status</button>
-    <button id="tabxl" onclick="showTab('xl')">Spreadsheet</button>
-    <button id="tabnm" onclick="showTab('nm')">File names</button>
-  </div>
-  <div id="paneout" style="display:flex; flex-direction:column; min-height:0; flex:1;">
-    <div class="status"><span class="dot" id="dot"></span><span id="statustext">idle</span></div>
-    <pre class="console" id="console"></pre>
-    <p class="hint warn" id="failnote" style="display:none;margin:6px 0 0">
-       This run wrote a file about what went wrong. It holds counts and states
-       and no text from your account. Read it, then attach it to this
-       provider&#39;s issue.
-       <button id="failreveal" onclick="revealFailure()">Show the file to attach</button></p>
-  </div>
-  <div id="panest" class="stwrap" style="display:none;">
-    <p><button onclick="loadStatus()">Refresh</button>
-       <span class="hint" id="stnote"></span></p>
-    <div id="stbody">not loaded yet</div>
-    <div id="stmove">
-      <div id="movebox">
-        <h3 id="hxhead" style="margin:26px 0 6px; font-size:15px">Move to another computer</h3>
-        <p class="hint" style="margin-top:0" id="hxlead"></p>
-        <p id="hxexportrow"><button id="hxexport" onclick="exportHistory()">Export history</button></p>
-        <label for="hxfile">Import a history file</label>
-        <input id="hxfile" type="file" accept=".ppz" onchange="planHistory()">
-        <div id="hxplan" style="margin-top:10px"></div>
-        <p><button class="primary" id="hximport" style="display:none" onclick="importHistory()">Import</button>
-           <span class="hint" id="hxmsg"></span></p>
-      </div>
-    </div>
-  </div>
-  <div id="panexl" class="stwrap" style="display:none;">
-    <p class="hint" style="margin-top:0">Every purchase from a receipt archive, one row
-       per item, newest first, with an Orders sheet and a Summary of spend per year.
-       Built from what the apps already recorded while downloading, so it takes a
-       second and no PDF is opened. Rebuilt from scratch each time. Edit a copy, not
-       this file.</p>
-    <p><select id="xlprovider" style="width:auto; min-width:220px; display:inline-block; margin-right:8px"></select>
-       <span class="hint" id="xlnote"></span></p>
-    <p><button class="primary" id="xlbuild" onclick="buildSpreadsheet(false)">Build Excel workbook</button>
-       <button onclick="buildSpreadsheet(true)">Build CSV instead</button>
-       <button id="xlreveal" onclick="revealSpreadsheet()" style="display:none">Show in folder</button></p>
-    <div id="xlbody"></div>
-    <h3 style="margin:26px 0 6px; font-size:15px">Statements</h3>
-    <p class="hint" style="margin-top:0">The transactions inside your statement PDFs, one row
-       each, with a Statements sheet that says whether every statement adds up. Each PDF is
-       read once and remembered, so the first build takes a few minutes for a big archive and
-       the next takes seconds. Money in is positive, money out is negative, for a bank account
-       and a card alike. A statement that does not reconcile is still exported, with the
-       difference shown, so you know which rows to doubt.</p>
-    <p><select id="txprovider" style="width:auto; min-width:220px; display:inline-block; margin-right:8px"></select>
-       <span class="hint" id="txnote"></span></p>
-    <p><button class="primary" id="txbuild" onclick="buildTransactions(false)">Build transactions workbook</button>
-       <button id="txcsv" onclick="buildTransactions(true)">Build CSV instead</button>
-       <button id="txreveal" onclick="revealSpreadsheet()" style="display:none">Show in folder</button></p>
-    <pre class="console" id="txlog" style="max-height:220px; display:none"></pre>
-  </div>
-  <div id="panenm" class="stwrap" style="display:none;">
-    <p class="hint" style="margin-top:0">How the files this app downloads are named. Add
-       the parts you want, in order. A part marked <b>skip if empty</b> is left out, with
-       the separator in front of it, whenever a document does not have it, so no name ends
-       in a stray dash. Saving renames nothing. Once you save, the page offers to rename
-       the files you already have, preview first.</p>
-    <p id="nmunavail" class="hint warn" style="display:none">File naming is not available
-       in this install. Update PaperPull to get it.</p>
-    <div id="nmbody">
-      <p><b id="nmapp"></b> <span class="hint" id="nmkind"></span></p>
-      <p><label style="display:inline"><input type="radio" name="nmscope" value="shared" checked
-           onchange="nmScope()"> <span id="nmsharedlabel">every app of this kind</span></label>
-         &nbsp; <label style="display:inline"><input type="radio" name="nmscope" value="own"
-           onchange="nmScope()"> <span id="nmownlabel">only this app</span></label></p>
-      <p style="margin:0 0 6px">
-        <span class="hint">Separator</span>
-        <select id="nmsep" style="width:auto; display:inline-block">
-          <option value=" ">space</option><option value=" - ">&nbsp;-&nbsp;</option>
-          <option value=" -- ">&nbsp;--&nbsp;</option><option value="_">_</option>
-          <option value="">none</option></select>
-        <span class="hint" style="margin-left:10px">Date as</span>
-        <select id="nmdate" style="width:auto; display:inline-block">
-          <option>yyyy-mm-dd</option><option>yyyymmdd</option><option>mm-dd-yyyy</option>
-          <option>dd mmm yyyy</option><option>mmmm d yyyy</option></select>
-        <label style="display:inline; margin-left:10px"><input type="checkbox" id="nmskip" checked>
-          skip if empty</label></p>
-      <p class="hint" style="margin:0 0 6px">Click a part to add it where the cursor is.
-         Under each is how many of the files you already have from this app carry it. A
-         part on none of them would always come out empty, so it is shown faded.</p>
-      <div id="nmfields" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px"></div>
-      <input id="nmpattern" type="text" spellcheck="false" autocomplete="off"
-             oninput="nmChanged()" placeholder="an empty box means the default">
-      <p class="hint warn" id="nmproblem" style="display:none; margin:6px 0 0"></p>
-      <div id="nmpreview" style="margin:10px 0"></div>
-      <p><button class="primary" onclick="nmSave()">Save</button>
-         <button onclick="nmDefault()">Back to the default</button>
-         <button onclick="nmClear()">Start empty</button>
-         <span class="hint" id="nmnote" style="margin-left:8px"></span></p>
-      <div id="nmoffer" style="display:none; border-left:3px solid var(--accent);
-           padding:2px 0 2px 12px; margin:6px 0 14px">
-        <p style="margin:4px 0"><b>Rename the files you already have to match?</b></p>
-        <p class="hint" style="margin:4px 0" id="nmofferapps"></p>
-        <p class="hint" style="margin:4px 0">Preview first. It lists every file that would
-           change, in the Output tab, and changes nothing. Renaming then does exactly that.
-           Nothing is downloaded or deleted, nothing moves between folders, and each app's
-           index follows its files, so nothing is ever downloaded twice. The preview can
-           also list files an app would now summarize better than when it saved them.</p>
-        <p style="margin:4px 0"><button id="nmprevbtn" onclick="nmRename(false)">Preview renames</button>
-           <button id="nmapplybtn" class="primary" onclick="nmRename(true)" disabled>Rename them</button>
-           <button onclick="nmOffer(null)">Not now</button>
-           <span class="hint" id="nmofferstate" style="margin-left:8px"></span></p>
-      </div>
-      <p class="hint">Written by hand, <code>{date:yyyymmdd}[ - {provider}][ -- {number|kind}]</code>
-         is the date, then the provider, then the order number, or the kind when there is
-         no number. Square brackets make a part that is skipped when empty, and
-         <code>{a|b}</code> takes the first that has a value.</p>
-    </div>
-  </div>
-  </div>
-</main>
-<footer>
-  <span>PaperPull v__VERSION__ &middot; read-only, runs locally</span>
-  <span>Free, and it costs money to make. Show your appreciation: <a href="https://ko-fi.com/rheeloaded" target="_blank" rel="noopener">donate on Ko-fi</a> or <a href="https://github.com/rheeloaded/paperpull#support" target="_blank" rel="noopener">buy the Store edition</a></span>
-</footer>
-<script>
-// PaperPull Server, where the panel is in a browser on another computer.
-const SERVER = __SERVER__;
-async function saveRoot() {
-  const root = $('rootinput').value.trim();
-  $('rootmsg').textContent = '';
-  if (!root) { $('rootmsg').textContent = 'paste the folder path first'; return; }
-  let r;
-  try {
-    r = await fetch('/api/root', {method: 'POST',
-      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({root})});
-  } catch (e) { $('rootmsg').textContent = 'could not reach the control panel'; return; }
-  const d = await r.json();
-  if (!r.ok) { $('rootmsg').textContent = d.detail || 'that did not work'; return; }
-  if (d.apps === 0) {
-    $('rootmsg').textContent = 'saved, but no downloaders were found there yet';
-  } else {
-    $('rootmsg').textContent = 'found ' + d.apps + ' downloader' + (d.apps === 1 ? '' : 's');
-  }
-  STATUS_LOADED = false; XL_LOADED = false;
-  await load();
-}
+STATIC = HERE / "static"
+# The panel's two typefaces, gui/static/fonts, licensed under the SIL Open
+# Font License (NOTICE.md). Served by name from this list and nothing else,
+# so no request can name another file.
+FONTS = ("AtkinsonHyperlegibleNext.ttf", "AtkinsonHyperlegibleMono.ttf")
 
-function changeRoot() {
-  $('setup').style.display = 'block';
-  $('rootinput').value = META.apps_root || '';
-  $('rootinput').focus();
-}
 
-async function setSample(on) {
-  const r = await fetch('/api/sample', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                                        body: JSON.stringify({on: on})});
-  if (!r.ok) { alert(((await r.json()).detail) || 'could not switch'); return; }
-  STATUS_LOADED = false; XL_LOADED = false;
-  showTab('out');
-  await load();
-}
-const openSample = () => setSample(true);
-const leaveSample = () => setSample(false);
+@app.get("/fonts/{name}", include_in_schema=False)
+def font(name: str):
+    """One of the panel's typefaces. Like the icon they are the same for
+    everyone and say nothing about the person. On the server they come only
+    after the password, as every page does. Kept for a day in the browser."""
+    if name not in FONTS:
+        raise HTTPException(404, "no such font")
+    try:
+        data = (STATIC / "fonts" / name).read_bytes()
+    except OSError:
+        raise HTTPException(404, "no such font")
+    return Response(content=data, media_type="font/ttf",
+                    headers={"Cache-Control": "max-age=86400"})
 
-let PROVIDERS = null;
 
-function showSetup(on) {
-  $('setup').style.display = on ? 'block' : 'none';
-  document.querySelector('main').style.display = on ? 'none' : '';
-}
+def _page() -> str:
+    """The panel's one page, from gui/static. index.html is the page with
+    __CSS__ and __JS__ where its style and script go, so the page still
+    arrives whole in one answer and nothing else needs a route. Read once,
+    at import. A copy missing any of the three is a broken build, and says
+    so here rather than serving half a page."""
+    def read(name):
+        return (STATIC / name).read_text(encoding="utf-8")
+    return (read("index.html").replace("__CSS__", read("app.css"), 1)
+            .replace("__JS__", read("app.js"), 1))
 
-function toggleExisting() {
-  const e = $('existing');
-  e.style.display = e.style.display === 'none' ? 'block' : 'none';
-  if (e.style.display === 'block') $('rootinput').focus();
-}
 
-async function loadProviders(onlyMissing) {
-  const d = await (await fetch('/api/providers')).json();
-  PROVIDERS = d;
-  if (!$('newroot').value) $('newroot').value = d.suggested_root || '';
-  const box = $('providers');
-  if (!d.templates) { box.textContent = 'No provider templates are available in this copy.'; return; }
-  const rows = d.providers.filter(p => !onlyMissing || !p.installed);
-  if (!rows.length) { box.textContent = 'Every provider is already set up.'; return; }
-  box.innerHTML = rows.map(p =>
-    '<label><input type="checkbox" value="' + esc(p.slug) + '"' +
-    (p.installed ? ' disabled checked' : '') + '>' +
-    '<span><b>' + esc(p.provider) + '</b>' +
-    (p.documents ? '<span class="hint">' + esc(p.documents) + '</span>' : '') +
-    (p.installed ? '<span class="hint">already set up</span>' : '') +
-    '</span></label>').join('');
-}
+HTML = _page()
 
-async function createInstalls() {
-  const root = $('newroot').value.trim();
-  const picked = [...document.querySelectorAll('#providers input:checked:not(:disabled)')].map(i => i.value);
-  $('newmsg').textContent = '';
-  if (!root) { $('newmsg').textContent = 'choose a folder first'; return; }
-  if (!picked.length) { $('newmsg').textContent = 'tick at least one provider'; return; }
-  // Asked here because an app started from this panel has no stdin to
-  // ask on, and without it redaction cannot take this person's name out
-  // of a survey or a recording.
-  const owner = (prompt(
-    'Whose documents are these?\n\n' +
-    'The name on the account, as the provider writes it. It never leaves ' +
-    'this computer. It is what lets PaperPull remove your name from a file ' +
-    'before you send it to anyone.\n\n' +
-    'Leave it blank to skip.') || '').trim();
-  $('newmsg').textContent = 'setting up...';
-  let r;
-  try {
-    r = await fetch('/api/create', {method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({root, providers: picked, owner})});
-  } catch (e) { $('newmsg').textContent = 'could not reach the control panel'; return; }
-  const d = await r.json();
-  if (!r.ok) { $('newmsg').textContent = d.detail || 'that did not work'; return; }
-  STATUS_LOADED = false; XL_LOADED = false;
-  await load();
-  const n = d.created.length;
-  $('console').textContent =
-    'Set up ' + n + ' provider' + (n === 1 ? '' : 's') + ' under\n' + d.root +
-    (d.owner ? '\nDocuments will be filed under ' + d.owner + '.' :
-     '\nNo name was given, so nothing can be removed from a file for you.') +
-    '\n\nNext: pick one above, click Login, and sign in when the browser opens.';
-}
-
-async function addProvider() {
-  showSetup(true);
-  $('newuser').style.display = 'block';
-  $('existing').style.display = 'none';
-  $('newroot').value = META.apps_root || '';
-  await loadProviders(true);
-}
-
-async function addAccount() {
-  const name = $('app').value;
-  if (!name) return;
-  const label = (prompt(
-    'A second person on "' + name + '".\n\n' +
-    'They get their own folder beside this one, their own sign-in window and their own ' +
-    'download history, so nothing mixes with the first account.\n\n' +
-    'Short label for the account (letters, digits, - or _), for example spouse or alex:') || '').trim();
-  if (!label) return;
-  const owner = (prompt('Their name, as it should appear on the documents (optional):') || '').trim();
-  let r;
-  try {
-    r = await fetch('/api/account', {method: 'POST',
-      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({app: name, label, owner})});
-  } catch (e) { $('console').textContent = 'could not reach the control panel'; return; }
-  const d = await r.json();
-  if (!r.ok) { $('console').textContent = d.detail || 'that did not work'; return; }
-  STATUS_LOADED = false;
-  await load();
-  $('app').value = name; onApp();
-  $('account').value = d.account;
-  $('console').textContent =
-    'Added "' + d.account + '" to ' + name + (d.owner ? ' for ' + d.owner : '') + '.\n\n' +
-    'Downloads go to ' + d.output_dir + '\n' +
-    (d.cdp_url ? 'Sign-in browser on ' + d.cdp_url + '\n' : '') +
-    '\nThe Account box above is set to it. Click Login, sign in as that person in the window ' +
-    'that opens, then Pilot.';
-}
-
-async function removeProvider() {
-  const name = $('app').value;
-  if (!name) return;
-  const ok = confirm(
-    'Remove "' + name + '" from PaperPull?\n\n' +
-    'Nothing is deleted. Its folder is moved into a "Removed" folder beside the ' +
-    'others, with its PDFs, download history and signed-in browser profile all ' +
-    'still inside. Delete that folder yourself whenever you are sure.\n\n' +
-    'It will no longer appear in this list.');
-  if (!ok) return;
-  let r;
-  try {
-    r = await fetch('/api/remove', {method: 'POST',
-      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({app: name})});
-  } catch (e) { $('console').textContent = 'could not reach the control panel'; return; }
-  const d = await r.json();
-  if (!r.ok) { $('console').textContent = d.detail || 'that did not work'; return; }
-  STATUS_LOADED = false; XL_LOADED = false;
-  await load();
-  const kept = [];
-  if (d.pdfs) kept.push(d.pdfs + ' PDF' + (d.pdfs === 1 ? '' : 's'));
-  if (d.history) kept.push('a history of ' + d.history + ' document' + (d.history === 1 ? '' : 's'));
-  if (d.profile) kept.push('a signed-in browser profile');
-  $('console').textContent =
-    'Removed "' + d.app + '" from the list.\n\nIts folder was moved to\n' + d.moved_to +
-    (kept.length ? '\n\nStill inside it: ' + kept.join(', ') + '.' : '') +
-    '\n\nNothing was deleted. Delete that folder yourself when you are sure you no longer ' +
-    'need what is in it. Until then, moving it back restores the provider.';
-}
-
-// -- moving to another computer (#67) -----------------------------------------
-// One box. On the welcome page of a new computer it brings a history file in,
-// setting up what the file names. On the Status tab it writes one too.
-const HX_LEAD_WELCOME =
-  'Choose the history file you saved with Export history on the Status tab of your ' +
-  'other computer. Each provider and person in it is set up here with their settings, ' +
-  'and every document they already downloaded is marked as downloaded, so none of them ' +
-  'is downloaded here again. No sign-in comes with the file, so you sign in to each ' +
-  'provider here yourself.';
-const HX_LEAD_STATUS =
-  'Export history saves a file that lists each provider and person here, their settings, ' +
-  'and every document each one has already downloaded. Import it on another computer, or ' +
-  'on PaperPull Server, and nothing you already have is downloaded there again. It holds ' +
-  'no password, no sign-in and no PDF. It does hold document titles, order numbers, totals ' +
-  'and the account holders\' names, so keep it as private as your documents.';
-const HX_PLAN = {'set up': 'set up here', 'add person': 'added here', 'fill in': 'already here'};
-const HX_DONE = {'set up': 'set up', 'add person': 'added', 'fill in': 'filled in'};
-let HX_FILE = '';
-
-function placeMove(welcome) {
-  (welcome ? $('setupmove') : $('stmove')).append($('movebox'));
-  $('hxhead').style.display = welcome ? 'none' : '';
-  $('hxexportrow').style.display = welcome ? 'none' : '';
-  $('hxlead').textContent = welcome ? HX_LEAD_WELCOME : HX_LEAD_STATUS;
-}
-function toggleMove() {
-  const b = $('setupmove');
-  b.style.display = b.style.display === 'none' ? 'block' : 'none';
-}
-function hxWelcome() { return $('setup').style.display === 'block'; }
-function hxReset() {
-  HX_FILE = ''; $('hxfile').value = '';
-  $('hximport').style.display = 'none';
-}
-
-async function exportHistory() {
-  $('hxmsg').textContent = 'writing the file...';
-  let r;
-  try { r = await fetch('/api/history/export'); }
-  catch (e) { $('hxmsg').textContent = 'could not reach the control panel'; return; }
-  if (!r.ok) {
-    let d = {}; try { d = await r.json(); } catch (e) {}
-    $('hxmsg').textContent = d.detail || 'that did not work'; return;
-  }
-  const blob = await r.blob();
-  const named = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = named ? named[1] : 'PaperPull history.ppz';
-  document.body.append(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
-  $('hxmsg').textContent = 'Saved ' + a.download + ' with your downloads. Keep it as private as your documents.';
-}
-
-async function hxPost(url) {
-  const body = {file: HX_FILE, root: hxWelcome() ? $('newroot').value.trim() : ''};
-  let r;
-  try {
-    r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
-                          body: JSON.stringify(body)});
-  } catch (e) { $('hxmsg').textContent = 'could not reach the control panel'; return null; }
-  let d = {}; try { d = await r.json(); } catch (e) {}
-  if (!r.ok) { $('hxmsg').textContent = d.detail || 'that did not work'; return null; }
-  return d;
-}
-
-function hxTable(d, done) {
-  const why = r => r.failed ? r.failed : r.action === 'skipped' ? 'skipped, ' + r.why
-                 : (done ? HX_DONE : HX_PLAN)[r.action];
-  const rows = d.rows.map(r =>
-    '<tr><td>' + esc(r.provider) + '</td><td>' + esc(r.account === 'primary' ? '' : r.account) +
-    '</td><td>' + esc(why(r)) + '</td><td class="num">' + r.records + '</td>' +
-    '<td class="num">' + r.downloaded + '</td></tr>').join('');
-  return '<table class="st"><thead><tr><th>Provider</th><th>Person</th><th>Here</th>' +
-    '<th class="num">Documents</th><th class="num">Downloaded</th></tr></thead><tbody>' +
-    rows + '</tbody></table>';
-}
-
-function hxCounts(d) {
-  const ok = d.rows.filter(r => r.action !== 'skipped' && !r.failed);
-  const n = a => ok.filter(r => r.action === a).length;
-  return {setUp: n('set up'), people: n('add person'), filled: n('fill in'),
-          skipped: d.rows.length - ok.length,
-          docs: ok.reduce((s, r) => s + r.downloaded, 0),
-          changes: n('set up') + n('add person') +
-                   ok.reduce((s, r) => s + (r.new || 0) + (r.marked || 0), 0)};
-}
-
-function hxSaying(c, done) {
-  const parts = [];
-  const many = (k, one, more) => k + ' ' + (k === 1 ? one : more);
-  if (c.setUp) parts.push((done ? 'set up ' : 'sets up ') + many(c.setUp, 'provider', 'providers'));
-  if (c.people) parts.push((done ? 'added ' : 'adds ') + many(c.people, 'person', 'people'));
-  if (c.filled) parts.push((done ? 'added to ' : 'adds to ') + 'the history of ' +
-                           c.filled + ' already here');
-  const said = parts.length > 1
-    ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts.join('');
-  let s = (done ? 'Imported. It ' : 'Importing ') + said + '. ' +
-    many(c.docs, 'document', 'documents') + ' downloaded on the other computer ' +
-    (done ? 'will' : 'would') + ' never be downloaded here again.';
-  if (c.skipped) s += ' ' + many(c.skipped, 'line was', 'lines were') + ' skipped, as the table says.';
-  return s;
-}
-
-async function planHistory() {
-  const f = $('hxfile').files[0];
-  HX_FILE = ''; $('hxplan').innerHTML = ''; $('hximport').style.display = 'none';
-  $('hxmsg').textContent = '';
-  if (!f) return;
-  if (f.size > 12 * 1024 * 1024) { $('hxmsg').textContent = 'that file is far larger than any download history'; return; }
-  $('hxmsg').textContent = 'reading the file...';
-  try {
-    const url = await new Promise((ok, no) => {
-      const rd = new FileReader();
-      rd.onload = () => ok(String(rd.result)); rd.onerror = () => no(rd.error);
-      rd.readAsDataURL(f);
-    });
-    HX_FILE = url.slice(url.indexOf(',') + 1);
-  } catch (e) { $('hxmsg').textContent = 'that file could not be read'; return; }
-  const d = await hxPost('/api/history/plan');
-  if (!d) return;
-  const c = hxCounts(d);
-  $('hxplan').innerHTML = hxTable(d, false);
-  if (!c.setUp && !c.people && !c.filled) {
-    $('hxmsg').textContent = 'Nothing in that file can be imported here, as the table says.';
-    return;
-  }
-  if (!c.changes) {
-    $('hxmsg').textContent = 'Everything in that file is already here, so importing it ' +
-      'would change nothing.';
-    return;
-  }
-  $('hxmsg').textContent = hxSaying(c, false) + ' Nothing is downloaded now.';
-  $('hximport').textContent = c.setUp || c.people ? 'Set up and import' : 'Import';
-  $('hximport').style.display = '';
-}
-
-async function importHistory() {
-  if (!HX_FILE) return;
-  $('hximport').disabled = true;
-  $('hxmsg').textContent = 'importing...';
-  const d = await hxPost('/api/history/import');
-  $('hximport').disabled = false;
-  if (!d) return;
-  hxReset();
-  const c = hxCounts(d);
-  $('hxplan').innerHTML = hxTable(d, true);
-  $('hxmsg').textContent = hxSaying(c, true);
-  const welcome = hxWelcome();
-  STATUS_LOADED = false; XL_LOADED = false;
-  await load();
-  if (welcome) {
-    showTab('out');
-    $('console').textContent = hxSaying(c, true) + '\n\nNothing was downloaded, and no ' +
-      'sign-in came with the file. Next, pick a provider above, press Login, and sign in ' +
-      (SERVER ? 'on the Browser Screen' : 'when the browser opens') +
-      '. Run All then downloads only what is new.';
-  }
-}
-
-let STATUS_LOADED = false;
-
-// Which providers get a spreadsheet. Receipt archives have line items, so
-// they are listed, each with its second-account folders folded in. Statement
-// archives are not offered one, since they have documents, not purchases.
-let XL_LOADED = false;
-async function loadExportProviders() {
-  const sel = $('xlprovider'); sel.innerHTML = '';
-  let d;
-  try { d = await (await fetch('/api/export/providers')).json(); }
-  catch (e) { d = {available: false, providers: []}; }
-  XL_LOADED = true;
-  const provs = (d.providers || []);
-  sel.append(new Option('All providers', ''));
-  for (const p of provs) sel.append(new Option(p.provider, p.provider));
-  const names = provs.map(p => p.provider).join(', ');
-  $('xlnote').textContent = provs.length
-    ? 'Receipt archives found, ' + names + '. Statement archives have no line items and are not offered.'
-    : 'No receipt archive found under this folder. Amazon, Target, Walmart and Gap write one after a run.';
-  $('xlbuild').disabled = !provs.length;
-}
-async function loadTransactionProviders() {
-  const sel = $('txprovider'); sel.innerHTML = '';
-  let d;
-  try { d = await (await fetch('/api/export/transactions/providers')).json(); }
-  catch (e) { d = {available: false, providers: []}; }
-  const provs = d.providers || [];
-  sel.append(new Option('All statement archives', ''));
-  for (const p of provs) sel.append(new Option(p.provider + ' (' + p.pdfs + ' PDFs)', p.provider));
-  $('txnote').textContent = provs.length
-    ? 'Archives with PDFs on disk, ' + provs.map(p => p.provider).join(', ') + '.'
-    : (d.reason || 'No statement PDFs on disk under this folder.');
-  $('txbuild').disabled = !provs.length; $('txcsv').disabled = !provs.length;
-}
-let txes = null;
-function buildTransactions(asCsv) {
-  if (txes) txes.close();
-  const log = $('txlog'); log.textContent = ''; log.style.display = 'block';
-  $('txreveal').style.display = 'none';
-  $('txbuild').disabled = true; $('txcsv').disabled = true;
-  const q = new URLSearchParams({provider: $('txprovider').value, csv: asCsv ? '1' : ''});
-  txes = new EventSource('/api/export/transactions?' + q.toString());
-  txes.onmessage = e => { log.textContent += e.data + '\n'; log.scrollTop = log.scrollHeight; };
-  txes.addEventListener('result', e => { $('txreveal').style.display = ''; });
-  txes.addEventListener('done', e => {
-    txes.close(); txes = null;
-    $('txbuild').disabled = false; $('txcsv').disabled = false;
-    if (e.data !== '0') log.textContent += '(ended with code ' + e.data + ')\n';
-  });
-  txes.onerror = () => { if (txes) { txes.close(); txes = null; } $('txbuild').disabled = false; $('txcsv').disabled = false; };
-}
-async function buildSpreadsheet(asCsv) {
-  $('xlbody').textContent = 'building...';
-  $('xlreveal').style.display = 'none';
-  let d;
-  const provider = $('xlprovider').value;
-  try {
-    d = await (await fetch('/api/export', {method: 'POST',
-      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({csv: asCsv, provider})})).json();
-  } catch (e) { $('xlbody').textContent = 'could not reach the control panel'; return; }
-  if (!d.ok) { $('xlbody').textContent = d.reason || 'the export failed'; return; }
-  let html = '<table class="st"><tr><th>Provider</th><th class="num">Line items</th></tr>';
-  for (const [p, n] of Object.entries(d.providers).sort()) {
-    html += '<tr><td>' + esc(p) + '</td><td class="num">' + n + '</td></tr>';
-  }
-  html += '</table>';
-  html += '<p style="margin-top:14px"><b>' + d.purchases + ' purchases</b> across ' + d.orders + ' orders.</p>';
-  html += '<p class="hint">Wrote <code>' + esc(d.path) + '</code></p>';
-  if (d.openpyxl_missing) html += '<p class="hint warn">openpyxl is not installed here, so this is a .csv. Run <code>pip install openpyxl</code> in the panel\'s environment for an .xlsx.</p>';
-  $('xlbody').innerHTML = html;
-  $('xlreveal').style.display = '';
-}
-async function revealSpreadsheet() {
-  // A server cannot open a folder on the computer the page is on, so it
-  // hands the spreadsheet to the browser instead.
-  if (SERVER) { location.href = '/api/export/download'; return; }
-  try { await fetch('/api/export/reveal', {method: 'POST'}); } catch (e) {}
-}
-function showTab(which) {
-  const isSt = which === 'st', isXl = which === 'xl', isNm = which === 'nm';
-  const other = isSt || isXl || isNm;
-  $('paneout').style.display = other ? 'none' : 'flex';
-  $('panest').style.display  = isSt ? 'block' : 'none';
-  $('panexl').style.display  = isXl ? 'block' : 'none';
-  $('panenm').style.display  = isNm ? 'block' : 'none';
-  $('tabout').className = other ? '' : 'on';
-  $('tabst').className  = isSt ? 'on' : '';
-  $('tabxl').className  = isXl ? 'on' : '';
-  $('tabnm').className  = isNm ? 'on' : '';
-  if (isSt && !STATUS_LOADED) loadStatus();
-  if (isXl && !XL_LOADED) { loadExportProviders(); loadTransactionProviders(); }
-  if (isNm) loadNaming();
-}
-
-// -- file names (#50) --------------------------------------------------------
-let NM = null, NM_TIMER = null;
-function nmScopeValue() { return document.querySelector('input[name=nmscope]:checked').value; }
-async function loadNaming() {
-  const app = $('app').value;
-  if (!app) return;
-  let d;
-  try { d = await (await fetch('/api/naming?app=' + encodeURIComponent(app))).json(); }
-  catch (e) { return; }
-  $('nmunavail').style.display = d.available ? 'none' : 'block';
-  $('nmbody').style.display = d.available ? 'block' : 'none';
-  if (!d.available) return;
-  NM = d;
-  const kind = d.kind === 'receipts' ? 'receipts' : 'statements';
-  $('nmapp').textContent = d.provider;
-  $('nmkind').textContent = 'a ' + kind + ' app';
-  $('nmsharedlabel').textContent = 'every ' + kind + ' app';
-  $('nmownlabel').textContent = 'only ' + d.provider;
-  document.querySelector('input[name=nmscope][value=' + (d.own ? 'own' : 'shared') + ']').checked = true;
-  $('nmpattern').value = d.own || d.shared || d.default;
-  $('nmnote').textContent = '';
-  const box = $('nmfields'); box.innerHTML = '';
-  const n = d.fill.records;
-  const receipts = d.kind === 'receipts';
-  for (const f of d.fields) {
-    // An order total, a store and online or in store are things a receipt
-    // has. On a statements app they would only ever come out empty.
-    if (!receipts && (f === 'total' || f === 'store' || f === 'type')) continue;
-    const b = document.createElement('button');
-    b.className = 'nmchip';
-    const got = d.fill.filled[f] || 0;
-    const name = document.createElement('span');
-    name.textContent = nmLabel(f, receipts);
-    const how = document.createElement('small');
-    how.textContent = nmHowMany(f, got, n);
-    b.append(name, how);
-    b.title = 'Adds {' + f + '} to the pattern';
-    if (n && f !== 'owner' && f !== 'part' && !got) b.classList.add('nmnone');
-    b.onclick = () => nmInsert(f);
-    box.append(b);
-  }
-  nmChanged();
-}
-function nmLabel(f, receipts) {
-  return ({date: 'Date', year: 'Year', month: 'Month', provider: 'Provider',
-           owner: 'Account holder', kind: 'Document type', summary: 'Description',
-           number: receipts ? 'Order number' : 'Document number', account: 'Account',
-           total: 'Order total', store: 'Store', type: 'Online or in store',
-           part: 'Part, like 1 of 3'})[f] || f;
-}
-// How many of the files already downloaded have this part, in words, so
-// nobody builds a name on something this provider never gives.
-function nmHowMany(f, got, n) {
-  if (f === 'owner') return 'from your settings';
-  if (f === 'part') return 'only on a split order';
-  if (!n) return '';
-  if (got >= n) return 'on every file';
-  if (got === 0) return 'on none of your files';
-  const pct = Math.round(100 * got / n);
-  return pct >= 90 ? 'on almost every file' : 'on ' + got + ' of ' + n + ' files';
-}
-function nmScope() {
-  if (!NM) return;
-  $('nmpattern').value = (nmScopeValue() === 'own' ? NM.own : '') || NM.shared || NM.default;
-  nmChanged();
-}
-function nmInsert(field) {
-  const inp = $('nmpattern');
-  const text = inp.value;
-  const at = inp.selectionStart == null ? text.length : inp.selectionStart;
-  const sep = at > 0 ? $('nmsep').value : '';
-  const f = field === 'date' ? '{date:' + $('nmdate').value + '}' : '{' + field + '}';
-  // A date and a provider are always there, so they are never optional.
-  const skip = $('nmskip').checked && field !== 'date' && field !== 'provider';
-  const part = skip ? '[' + sep + f + ']' : sep + f;
-  inp.value = text.slice(0, at) + part + text.slice(at);
-  inp.focus();
-  inp.selectionStart = inp.selectionEnd = at + part.length;
-  nmChanged();
-}
-function nmChanged() {
-  clearTimeout(NM_TIMER);
-  NM_TIMER = setTimeout(nmPreview, 250);
-}
-async function nmPreview() {
-  const pattern = $('nmpattern').value;
-  let d;
-  try {
-    d = await (await fetch('/api/naming/preview', {method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({app: $('app').value, pattern})})).json();
-  } catch (e) { return; }
-  const pr = $('nmproblem');
-  pr.style.display = d.problem ? 'block' : 'none';
-  pr.textContent = d.problem || '';
-  const box = $('nmpreview'); box.innerHTML = '';
-  if (!d.names || !d.names.length) {
-    box.innerHTML = '<p class="hint">No files from this app yet, so there is nothing to preview.</p>';
-    return;
-  }
-  const t = document.createElement('table'); t.className = 'st';
-  t.innerHTML = '<thead><tr><th>Your newest files now</th><th>With this pattern</th></tr></thead>';
-  const tb = document.createElement('tbody');
-  for (const n of d.names) {
-    const tr = document.createElement('tr');
-    const a = document.createElement('td'); a.textContent = n.current;
-    const b = document.createElement('td'); b.textContent = n.new;
-    if (n.new !== n.current) b.style.fontWeight = '600';
-    tr.append(a, b); tb.append(tr);
-  }
-  t.append(tb); box.append(t);
-}
-async function nmSave() {
-  let r, d;
-  try {
-    r = await fetch('/api/naming/save', {method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({app: $('app').value, scope: nmScopeValue(),
-                            pattern: $('nmpattern').value})});
-    d = await r.json();
-  } catch (e) { $('nmnote').textContent = 'could not reach the control panel'; return; }
-  if (!r.ok) { $('nmnote').textContent = d.detail || 'not saved'; return; }
-  await loadNaming();
-  $('nmnote').textContent = d.written ? 'Saved. New downloads use it.' : 'Nothing to change.';
-  if (d.changed && d.changed.length) nmOffer(d.changed);
-}
-
-// The offer to bring files already on disk into line, one app and one
-// account at a time, through the app's own --rename. Renaming is never
-// offered until a preview of the same apps has finished cleanly.
-let NM_OFFER = null, NM_PREVIEWED = false;
-function nmOffer(apps) {
-  NM_OFFER = apps; NM_PREVIEWED = false;
-  $('nmoffer').style.display = apps ? 'block' : 'none';
-  if (!apps) return;
-  $('nmofferapps').textContent = (apps.length === 1 ? 'In ' : 'In these ' + apps.length + ' apps, ') +
-    apps.join(', ') + ', every account.';
-  $('nmapplybtn').disabled = true;
-  $('nmprevbtn').disabled = false;
-  $('nmofferstate').textContent = '';
-  $('nmoffer').scrollIntoView({block: 'nearest'});
-}
-function nmPairs() {
-  const pairs = [];
-  for (const a of NM_OFFER || []) {
-    const m = META.apps[a];
-    if (!m) continue;
-    for (const acc of (m.accounts && m.accounts.length ? m.accounts : ['primary'])) pairs.push([a, acc]);
-  }
-  return pairs;
-}
-function nmRename(apply) {
-  const pairs = nmPairs();
-  if (!pairs.length) return;
-  if (apply && !NM_PREVIEWED) return;
-  if (apply && !confirm('Rename the files the preview listed, in ' + NM_OFFER.length +
-      (NM_OFFER.length === 1 ? ' app?' : ' apps?') +
-      ' Nothing is downloaded or deleted, and each app\'s index follows its files.')) return;
-  const action = apply ? 'rename_apply' : 'rename';
-  showTab('out');
-  $('console').textContent = '';
-  let i = 0;
-  const next = (code) => {
-    if (code !== undefined && code !== '0') {
-      $('nmofferstate').textContent = 'Stopped at ' + pairs[i - 1].join(', ') +
-        ', which did not finish. Its output says why.';
-      return;
-    }
-    if (i >= pairs.length) {
-      if (apply) {
-        $('nmofferstate').textContent = 'Renamed. The Output tab lists each file.';
-        $('nmapplybtn').disabled = true; $('nmprevbtn').disabled = true;
-        loadNaming();
-      } else {
-        NM_PREVIEWED = true;
-        $('nmapplybtn').disabled = false;
-        $('console').textContent += '\n== That is the whole preview. Nothing has been changed. ' +
-          'To rename these files, go back to File names and press Rename them. ==\n';
-        $('console').scrollTop = $('console').scrollHeight;
-        $('nmofferstate').textContent = 'Preview done. Read it in the Output tab, then rename here.';
-      }
-      return;
-    }
-    const [app, account] = pairs[i++];
-    $('console').textContent += (i > 1 ? '\n' : '') + '== ' + app +
-      (account === 'primary' ? '' : ', ' + account) + ' ==\n';
-    run(action, {app, account, append: true, onDone: next});
-  };
-  $('nmofferstate').textContent = apply ? 'Renaming...' : 'Previewing...';
-  next();
-}
-function nmDefault() { $('nmpattern').value = NM ? NM.default : ''; nmChanged(); }
-function nmClear() { $('nmpattern').value = ''; $('nmpattern').focus(); nmChanged(); }
-
-function pillClass(s) {
-  if (s === 'OVERDUE') return 'overdue';
-  if (s === 'due') return 'due';
-  if (s === 'current') return 'current';
-  return 'other';
-}
-
-function esc(s) {
-  return String(s == null ? '' : s).replace(/[&<>"']/g,
-    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-async function loadStatus() {
-  $('stbody').textContent = 'scanning...';
-  $('stnote').textContent = '';
-  let d;
-  try { d = await (await fetch('/api/status')).json(); }
-  catch (e) { $('stbody').textContent = 'could not reach the control panel'; return; }
-  STATUS_LOADED = true;
-  if (!d.available) { $('stbody').textContent = d.reason || 'status is unavailable'; return; }
-  if (!d.rows.length) { $('stbody').textContent = 'no archives found under ' + d.root; return; }
-  const body = d.rows.map(r =>
-    '<tr><td>' + esc(r.provider || r.folder) + '</td>' +
-    '<td class="num">' + (r.documents == null ? '' : r.documents) + '</td>' +
-    '<td>' + esc(r.newest || '') + '</td>' +
-    '<td class="num">' + (r.age_days == null ? '' : r.age_days + ' d') + '</td>' +
-    '<td>' + esc(r.cadence || '') + '</td>' +
-    '<td><span class="pill ' + pillClass(r.label) + '">' + esc(r.label) + '</span></td></tr>'
-  ).join('');
-  let html = '<table class="st"><thead><tr><th>Provider</th><th class="num">Docs</th>' +
-    '<th>Newest</th><th class="num">Age</th><th>Every</th><th>Status</th></tr></thead><tbody>' +
-    body + '</tbody></table>';
-  if (d.gaps.length) {
-    html += '<div class="gapbox"><h3>Possible gaps</h3>' +
-      '<p>A run that looks current can still be missing periods in the middle.</p>';
-    for (const g of d.gaps) {
-      html += '<p style="margin-top:8px"><b>' + esc(g.provider) + '</b></p>';
-      for (const w of g.windows) {
-        const who = w.count > 1
-          ? (w.count + ' series, including ' + (w.labels[0] || ''))
-          : (w.labels[0] || '');
-        html += '<p>' + esc(w.after) + ' to ' + esc(w.before) + ' &middot; ' +
-                esc(String(w.missing)) + ' missing &middot; ' + esc(who) + '</p>';
-      }
-    }
-    html += '</div>';
-  }
-  $('stbody').innerHTML = html;
-  $('stnote').textContent = 'scanned ' + d.root;
-}
-
-let META = null, es = null;
-const $ = id => document.getElementById(id);
-
-async function load() {
-  META = await (await fetch('/api/apps')).json();
-  const inSample = META.root_source === 'sample';
-  $('samplebar').style.display = inSample ? 'flex' : 'none';
-  $('root').innerHTML = 'apps root: ' + esc(META.apps_root) +
-    (inSample ? ' <span class="hint">(the sample)</span>'
-     : SERVER ? ' <span class="hint">(the data folder beside compose.yaml on your server)</span>'
-     : (META.root_source === 'environment' ? ' <span class="hint">(from APPS_ROOT)</span>'
-        : ' <a href="#" onclick="changeRoot(); return false;" style="color:var(--accent)">change</a>')
-       // Reachable with an archive already open, not just from the welcome
-       // screen, or the only people who could ever see it are new ones.
-       + ' <a href="#" onclick="openSample(); return false;" style="color:var(--muted)">see the sample</a>');
-  const fresh = Object.keys(META.refreshed || {});
-  if (fresh.length) {
-    $('root').innerHTML += '<br><span class="hint">updated to this version\'s code: ' +
-      esc(fresh.join(', ')) + ' (the old files are in each folder\'s Backups)</span>';
-  }
-  const appSel = $('app');
-  appSel.innerHTML = '';
-  const keys = Object.keys(META.apps);
-  // Nothing in the sample is moved anywhere, and nothing is moved into it.
-  $('movebox').style.display = inSample ? 'none' : '';
-  placeMove(!keys.length);
-  $('movelink').style.display = keys.length ? 'none' : '';
-  if (!keys.length) {
-    showSetup(true);
-    $('newuser').style.display = 'block';
-    $('existing').style.display = 'none';
-    $('addlink').style.display = 'none';
-    $('removelink').style.display = 'none';
-    loadProviders(false);
-    if (META.root_source !== 'environment') $('newroot').focus();
-    return;
-  }
-  showSetup(false);
-  // Nothing in the sample can be added to, renamed or removed, so the links
-  // that would try are not offered.
-  $('addlink').style.display = inSample ? 'none' : '';
-  $('removelink').style.display = inSample ? 'none' : '';
-  $('addacct').style.display = inSample ? 'none' : '';
-  for (const k of keys) appSel.append(new Option(META.apps[k].name, k));
-  appSel.onchange = onApp;
-  fillScope();
-  clearAgain();
-  const acts = $('actions'); acts.innerHTML = '';
-  const more = $('moreactions'); more.innerHTML = '';
-  const tucked = new Set(META.more_actions || []);
-  for (const [k, label] of Object.entries(META.actions)) {
-    const b = document.createElement('button');
-    b.textContent = label; b.className = (k === 'all') ? 'primary' : '';
-    b.onclick = () => run(k);
-    (tucked.has(k) ? more : acts).append(b);
-  }
-  let open = false;
-  try { open = localStorage.getItem('moreactions') === '1'; } catch (e) {}
-  showMore(open);
-  onApp();
-}
-// The rarely wanted actions sit behind one link. Open or closed is
-// remembered in this browser only, like the scope.
-function showMore(on) {
-  $('morebox').style.display = on ? 'block' : 'none';
-  $('morelink').textContent = on ? 'fewer' : 'more';
-  try { localStorage.setItem('moreactions', on ? '1' : '0'); } catch (e) {}
-}
-function toggleMore() { showMore($('morebox').style.display === 'none'); }
-function onApp() {
-  const m = META.apps[$('app').value];
-  if ($('panenm').style.display === 'block') loadNaming();
-  const accSel = $('account'); accSel.innerHTML = '';
-  for (const a of m.accounts) accSel.append(new Option(a, a));
-  const warn = $('venvwarn');
-  if (m.runnable === false) { warn.style.display='block';
-    warn.textContent = '⚠ This folder does not match a provider PaperPull ships, so it will not run. Its folder must hold exactly one provider script whose name is one PaperPull ships.'; }
-  else if (m.needs_setup) { warn.style.display='block';
-    warn.textContent = '⚠ This provider is not set up yet. Run setup-all in the PaperPull folder, then reload this page.'; }
-  else warn.style.display='none';
-}
-function setStatus(cls, text) { $('dot').className = 'dot ' + cls; $('statustext').textContent = text; }
-// Scope. "All years" is the default and walks everything, which is what keeps
-// each archive's discovery complete for the Status tab. One year, or a date
-// range, makes the run skip the years outside it on sites with a year picker.
-// The choice is remembered in this browser only.
-function fillScope() {
-  const sel = $('year'); sel.innerHTML = '';
-  sel.append(new Option('All years (default)', ''));
-  const now = new Date().getFullYear();
-  for (let y = now; y >= now - 15; y--) sel.append(new Option(String(y), String(y)));
-  let saved = {};
-  try { saved = JSON.parse(localStorage.getItem('scope') || '{}'); } catch (e) {}
-  sel.value = saved.year || '';
-  if (sel.value !== (saved.year || '')) sel.value = '';
-  $('start').value = saved.start || '';
-  $('end').value = saved.end || '';
-  onScope();
-}
-function scopeValues() {
-  return { year: $('year').value, start: $('start').value, end: $('end').value };
-}
-function onScope() {
-  const s = scopeValues();
-  const oneYear = s.year !== '';
-  $('start').disabled = oneYear; $('end').disabled = oneYear;
-  let text;
-  if (oneYear) text = `Only ${s.year}. Years outside it are skipped where the site has a year picker.`;
-  else if (s.start || s.end) text = `${s.start || 'the beginning'} to ${s.end || 'today'}. Years outside that are skipped where the site has a year picker.`;
-  else text = 'Every year. Slower on sites with a year picker, and the only way the Status tab sees the whole archive.';
-  $('scopehint').textContent = text;
-  try { localStorage.setItem('scope', JSON.stringify(s)); } catch (e) {}
-}
-// Download again. Unlike the scope it is never remembered. It starts clear
-// on every visit and clears itself once a run that uses it starts, so a
-// later ordinary Run All never downloads again by surprise.
-function onAgain() { $('againhint').style.display = $('again').checked ? 'block' : 'none'; }
-function clearAgain() { $('again').checked = false; onAgain(); }
-// A page the browser brings back from its back and forward cache keeps
-// what was ticked, and load() does not run again for it.
-window.addEventListener('pageshow', e => { if (e.persisted) clearAgain(); });
-// Only a year, or both ends of a range. One date alone is open at the
-// other end, and From 1990 or To today is a whole history.
-function againScoped(s) { return Boolean(s.year || (s.start && s.end)); }
-// What it does is said so it holds for every app. Each goes through the
-// range again and fetches again what is gone. Most also save a second copy
-// of a file still there, and Target leaves an invoice still on file as it is.
-function againQuestion(action, app, account, s) {
-  const range = s.year ? 'dated ' + s.year : 'dated ' + s.start + ' to ' + s.end;
-  return 'Download again from ' + app + (account === 'primary' ? '' : ', account ' + account) + '?\n\n' +
-    (action === 'pilot' ? 'Pilot goes through the newest few documents ' + range + ' again'
-                        : 'Run All goes through every document ' + range + ' again') +
-    ', the ones this app already downloaded included, and fetches again each one whose ' +
-    'file is gone.\n\n' +
-    'Nothing is overwritten. A file you still have stays as it is, and the app may save ' +
-    'a second copy beside it, under a name of its own.\n\n' +
-    'This asks the provider again for each document it fetches, just as the first download did.';
-}
-// Said when a run that downloads again ends before it is through. Resume
-// never downloads again, so it would skip the rest and call the run done,
-// and the same range again would fetch again what this run restored.
-const AGAIN_LEFT = 'Resume will not download again, and Download again for the same range ' +
-  'fetches again what this run already restored, so choose the range that is left';
-// A run that downloads again is asked for in a POST body, so the ticked box
-// and the answer to the question arrive as true and false, never as text in
-// an address. EventSource can only GET, so this reads the same stream with
-// fetch and hands its events to the same handlers.
-function postRun(body) {
-  const stop = new AbortController(), on = {};
-  const src = { onmessage: null, onerror: null, refused: '',
-                addEventListener(name, fn) { on[name] = fn; }, close() { stop.abort(); } };
-  const lost = () => { if (!stop.signal.aborted && src.onerror) src.onerror(); };
-  (async () => {
-    let r;
-    try {
-      r = await fetch('/api/run', { method: 'POST', signal: stop.signal,
-        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    } catch (e) { lost(); return; }
-    if (!r.ok) {
-      try { const d = await r.json(); if (typeof d.detail === 'string') src.refused = d.detail; } catch (e) {}
-      src.refused = src.refused || 'the panel refused this run';
-      lost(); return;
-    }
-    const reader = r.body.getReader(), text = new TextDecoder();
-    let buf = '', ended = false;
-    try {
-      for (;;) {
-        const part = await reader.read();
-        if (part.done) break;
-        buf += text.decode(part.value, { stream: true });
-        let cut;
-        while ((cut = buf.indexOf('\n\n')) >= 0) {
-          const block = buf.slice(0, cut);
-          buf = buf.slice(cut + 2);
-          let name = 'message';
-          const data = [];
-          for (const line of block.split('\n')) {
-            if (line.startsWith('event:')) name = line.slice(6).trim();
-            else if (line.startsWith('data:')) data.push(line.slice(line.startsWith('data: ') ? 6 : 5));
-          }
-          if (name === 'done') ended = true;
-          const e = { data: data.join('\n') };
-          if (name === 'message') { if (src.onmessage) src.onmessage(e); }
-          else if (on[name]) on[name](e);
-        }
-      }
-    } catch (e) { lost(); return; }
-    if (!ended) lost();
-  })();
-  return src;
-}
-// opts is for a run the page starts for itself rather than from a button,
-// the File names page's renames. It names the app and account, leaves the
-// Scope out, adds to the console instead of clearing it, and is told when
-// the run ends.
-function run(action, opts) {
-  opts = opts || {};
-  if (es) es.close();
-  const app = opts.app || $('app').value, account = opts.account || $('account').value;
-  const s = opts.app ? {year: '', start: '', end: ''} : scopeValues();
-  if (s.year === '' && s.start && s.end && s.start > s.end) {
-    setStatus('err', 'the From date is after the To date'); return;
-  }
-  const ticked = !opts.app && $('again').checked;
-  const again = ticked && (META.redownload_actions || []).includes(action);
-  if (again && !againScoped(s)) {
-    setStatus('err', 'Download again needs a year, or both a From and a To date, chosen in Scope first');
-    return;
-  }
-  if (again && !confirm(againQuestion(action, app, account, s))) return;
-  if (again) clearAgain();
-  const q = new URLSearchParams({ app, account, action });
-  if (s.year) q.set('year', s.year); else { if (s.start) q.set('start', s.start); if (s.end) q.set('end', s.end); }
-  if (!opts.append) $('console').textContent = '';
-  // Any other button leaves the box ticked for the Pilot or Run All it is
-  // for, and says so where this run's output starts.
-  if (ticked && !again) {
-    $('console').textContent += 'Download again stays ticked. It applies only to Pilot and Run All, ' +
-      'so this ' + ((META.actions || {})[action] || action) + ' runs as usual.\n';
-  }
-  $('failnote').style.display = 'none';
-  const scoped = s.year ? ` (${s.year})` : (s.start || s.end) ? ` (${s.start || '…'} to ${s.end || '…'})` : '';
-  setStatus('run', `running ${action}${again ? ', downloading again,' : ''} on ${app} / ${account}${scoped}`);
-  // Only the buttons this run locked are unlocked at the end. The Spreadsheet
-  // tab's build buttons stay disabled when there is nothing to build from.
-  document.querySelectorAll('button:not(#tabout):not(#tabst):not(#tabxl):not(#tabnm):not(#stoprec):not(:disabled)')
-    .forEach(b => { b.disabled = true; b.dataset.runlock = '1'; });
-  // A recording waits for the person, so it needs a way to say when. The
-  // app this run belongs to is remembered here rather than read back off
-  // the App list when Stop is pressed, because the App list is not locked
-  // during a run and a recording stopped against the wrong provider would
-  // never stop at all.
-  recordingApp = (action === 'record') ? app : null;
-  $('stoprec').style.display = recordingApp ? 'block' : 'none';
-  es = again ? postRun(Object.assign({ app, account, action, redownload: true, confirmed: true },
-                                     Object.fromEntries(q.entries())))
-             : new EventSource(`/api/run?${q.toString()}`);
-  const con = $('console');
-  let result = null;
-  es.addEventListener('result', e => { result = JSON.parse(e.data); });
-  es.onmessage = e => { con.textContent += e.data + '\n'; con.scrollTop = con.scrollHeight; };
-  es.addEventListener('done', e => {
-    const code = e.data;
-    const unfinished = code !== '0' || Boolean(result && result.stopped);
-    if (code !== '0') {
-      setStatus('err', (code === '130' ? 'interrupted, progress saved' : `exited (code ${code}), check output`) +
-                       (again ? '. ' + AGAIN_LEFT : ''));
-    } else if (result && result.stopped) {
-      // Resume downloads, and Discover was pressed only to see what is there.
-      setStatus('warn', again ? 'stopped before finishing. ' + AGAIN_LEFT
-        : action === 'discover'
-          ? 'stopped before finishing, see the output, then press Discover again'
-          : 'stopped before finishing, see the output, then press Resume');
-    } else if (result && result.attention) {
-      const details = [];
-      if (result.wrong_document) details.push(`${result.wrong_document} refused as the wrong document`);
-      if (result.manual_review) details.push(`${result.manual_review} need review`);
-      if (result.failed) details.push(`${result.failed} failed`);
-      if (result.validation_failures) details.push(`${result.validation_failures} PDF validation failures`);
-      setStatus('warn', `finished, needs attention (${details.join(', ')})`);
-    } else if (result) {
-      setStatus('ok', 'finished, no issues reported');
-    } else if (META && META.root_source === 'sample') {
-      setStatus('ok', 'nothing to run in the sample');
-    } else {
-      setStatus('warn', 'finished, check output (no run summary)');
-    }
-    // The app's own last lines may say to press Resume, so this goes below them.
-    if (again && unfinished) {
-      con.textContent += 'This download again ended before it was through. ' + AGAIN_LEFT + '.\n';
-      con.scrollTop = con.scrollHeight;
-    }
-    $('stoprec').style.display = 'none';
-    recordingApp = null;
-    unlockButtons();
-    es.close(); es = null;
-    if (code !== '0' || (result && result.attention)) checkFailure(app);
-    if (opts.onDone) opts.onDone(code);
-  });
-  es.onerror = () => { if (es) { if (es.refused) con.textContent += es.refused + '\n'; setStatus('err', es.refused || ('connection lost' + (again ? '. ' + AGAIN_LEFT : ''))); $('stoprec').style.display = 'none'; recordingApp = null; unlockButtons(); es.close(); es=null; if (opts.onDone) opts.onDone('lost'); } };
-}
-let failureApp = null;
-async function checkFailure(app) {
-  try {
-    const r = await fetch(`/api/failure/latest?app=${encodeURIComponent(app)}`);
-    const d = await r.json();
-    if (d.found) { failureApp = app; $('failnote').style.display = ''; }
-  } catch (e) {}
-}
-async function revealFailure() {
-  if (!failureApp) return;
-  if (SERVER) { location.href = '/api/failure/download?app=' + encodeURIComponent(failureApp); return; }
-  try {
-    await fetch('/api/failure/reveal', { method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app: failureApp }) });
-  } catch (e) {}
-}
-let recordingApp = null;
-async function stopRecording() {
-  if (!recordingApp) return;
-  const b = $('stoprec');
-  b.disabled = true; b.textContent = 'Stopping...';
-  try {
-    await fetch('/api/record/stop', { method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app: recordingApp }) });
-  } catch (e) {}
-  b.disabled = false; b.textContent = 'Stop recording';
-}
-function unlockButtons() {
-  document.querySelectorAll('button[data-runlock]').forEach(b => { b.disabled = false; delete b.dataset.runlock; });
-}
-// On the server the downloads folder is the shared folder the container was
-// given, so it is shown and not asked for, with where to find it on the
-// server, and what would open a folder on this computer downloads the file
-// instead.
-function serverPage() {
-  if (!SERVER) return;
-  $('newlead').textContent = 'Tick the providers you have accounts with. Each one '
-    + 'gets a folder of its own, and nothing is downloaded until you ask.';
-  $('newrootlabel').textContent = 'Where your downloads go';
-  $('serverroot').style.display = 'block';
-  $('steplogin').innerHTML = '<b>Login</b> opens the provider\'s sign-in window on the '
-    + '<b>Browser Screen</b>, the button at the top. Sign in there yourself and leave it open.';
-  $('newroot').readOnly = true;
-  $('existinglink').style.display = 'none';
-  // Download again is not offered here, see _redownload_ok.
-  $('againrow').style.display = 'none';
-  $('againnote').style.display = 'none';
-  $('failreveal').textContent = 'Download the file to attach';
-  $('xlreveal').textContent = 'Download';
-  $('txreveal').textContent = 'Download';
-}
-serverPage();
-load();
-</script>
-</body>
-</html>
-"""

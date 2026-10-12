@@ -223,8 +223,9 @@ reports **"already downloaded, skipping"** (delete-safe works).
 ### 8. Scrub and open a PR
 
 `git status`, only source should be staged (no profile/config/PDFs/state). Add
-your provider to [PROVIDERS.md](../PROVIDERS.md), fill in the PR checklist, and
-open it. See [CONTRIBUTING.md](../CONTRIBUTING.md).
+your provider to [PROVIDERS.md](../PROVIDERS.md) and give it a short line in
+[gui/providers.json](../gui/providers.json) for the panel's welcome list, fill
+in the PR checklist, and open it. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ---
 

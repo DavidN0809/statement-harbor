@@ -22,7 +22,7 @@ See "Design safety" in [SECURITY.md](SECURITY.md).
 - **Sessions.** Signing in gives your browser a random token in a cookie
   that the page's scripts cannot read and other sites cannot send. A
   session lasts 14 days, and ends sooner when the container restarts, the
-  password changes, or you sign out. A Browser Screen left open closes
+  password changes, or you sign out. A sign-in window left open closes
   within seconds of its session ending.
 - **Wrong guesses wait.** After five wrong passwords or setup codes from one
   address, each next try waits, twice as long each time, up to a quarter of
@@ -42,8 +42,8 @@ See "Design safety" in [SECURITY.md](SECURITY.md).
 
 ## Treat it like a bank password
 
-Whoever has the password can use every site you are signed in to on the
-Browser Screen, as you. Choose one you use nowhere else, and keep it in your
+Whoever has the password can use every site you are signed in to in the
+sign-in window, as you. Choose one you use nowhere else, and keep it in your
 password manager.
 
 ## Keep it on your home network
@@ -73,7 +73,7 @@ password manager.
   Never run the container with `seccomp=unconfined` or `privileged`.
 - **Only the panel is on the network.** Each provider's browser debugging
   port and the screen sharing server listen inside the container only. The
-  Browser Screen reaches you through the panel, behind the password, on the
+  sign-in window reaches you through the panel, behind the password, on the
   panel's one port.
 - **Chrome keeps no passwords.** Its password manager and card autofill are
   switched off by policy, since a container's browser profile has no

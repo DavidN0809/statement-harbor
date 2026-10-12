@@ -1,17 +1,19 @@
-"""Download again, the box under Scope.
+"""Download again, which the panel offers as Restore deleted files.
 
 Every app takes --redownload, which makes it fetch every document in scope
 again, the ones it already downloaded included, and save each beside the
 file already there. The panel adds it to a Pilot or a Run All only, only
 with a year or dates chosen, and only when the request carries the answer
-to the page's question. Both arrive as JSON true in a POST body, never as
-text, and what reaches the app is that one flag. Nothing else a body holds
-can reach a command line, and without the box the flag never appears.
+to the dialog that asks for it. Both arrive as JSON true in a POST body,
+never as text, and what reaches the app is that one flag. Nothing else a
+body holds can reach a command line, and without the request the flag
+never appears.
 
 Most of this asks the run endpoints directly, with a stand-in for the app's
-process that keeps the command it was handed. The last part serves the
-real panel on a free local port, as test_server_mode.py does, and runs a
-real app script that writes down the arguments it was started with.
+process that keeps the command it was handed. The page part reads the
+page's script, and the last part serves the real panel on a free local
+port, as test_server_mode.py does, and runs a real app script that writes
+down the arguments it was started with.
 """
 import asyncio
 import io
@@ -324,115 +326,128 @@ def function(name: str) -> str:
         i += 1
 
 
-def test_the_box_sits_with_the_scope_and_starts_unticked():
+def _dialog(body: str) -> str:
+    start = body.index('<dialog id="dlg-restore"')
+    return " ".join(body[start:body.index("</dialog>", start)].split())
+
+
+def test_it_is_a_dialog_of_its_own_never_a_box_on_the_everyday_path():
+    """Download again was a box beside the dates that changed what the next
+    Pilot or Run All did, so a run could download again by surprise. It is
+    Restore deleted files now, a dialog of its own, and Get new documents
+    never downloads again."""
     body = page()
-    box = re.search(r"<input[^>]*\bid=\"again\"[^>]*>", body).group(0)
-    assert 'type="checkbox"' in box and not re.search(r"\bchecked\b", box)
-    # A browser that restores a form on reload would otherwise tick it again.
-    assert 'autocomplete="off"' in box
-    assert "Download again what this app already downloaded" in body
-    assert body.index('id="scopehint"') < body.index('id="again"') < body.index('id="actions"')
+    assert 'id="again"' not in body and "<dialog id=\"dlg-restore\"" in body
+    script = body[body.index("<script>"):]
+    # Asked for in one place, the dialog's own button, and sent in one.
+    assert script.count("redownload: true") == 2
+    go = function("rsGo")
+    assert "if (!startRun(DLG_ROW, how, {scope: s, redownload: true})) {" in go
+    # The dialog closes only once the run started, so a refusal is said in it.
+    assert go.index("startRun(") < go.index("$('dlg-restore').close();")
+    assert "const again = opts.redownload === true;" in function("startRun")
 
 
-def test_the_box_is_never_remembered():
+def test_it_starts_fresh_each_time_and_is_never_remembered():
     body = page()
     script = body[body.index("<script>"):]
-    keys = set(re.findall(r"localStorage\.(?:get|set)Item\('([^']+)'", script))
-    assert keys == {"scope", "moreactions"}, keys
-    assert "clearAgain();" in function("load")
-    assert "$('again').checked = false" in function("clearAgain")
-    # Brought back from the back and forward cache, load() does not run.
-    assert "addEventListener('pageshow', e => { if (e.persisted) clearAgain(); })" in script
-
-
-def test_the_box_clears_once_a_run_that_uses_it_starts():
-    run = function("run")
-    asked = run.index("confirm(againQuestion(")
-    cleared = run.index("if (again) clearAgain();")
-    assert asked < cleared < run.index("postRun(") and cleared < run.index("new EventSource(")
-    # Nothing between the question and the clearing can end the run first.
-    assert "return" not in run[run.index("\n", asked):cleared]
-    # And nothing else in a run clears it.
-    assert run.count("clearAgain()") == 1
-
-
-def test_another_button_leaves_it_ticked_and_says_so():
-    """Tick, Login, then Run All used to be an ordinary Run All, since the
-    Login had cleared the box with nothing said."""
-    run = function("run")
-    assert "const ticked = !opts.app && $('again').checked;" in run
-    told = run.index("if (ticked && !again)")
-    said = " ".join(run[told:run.index("\n  }", told)].split())
-    assert "Download again stays ticked. It applies only to Pilot and Run All" in said
-    assert "runs as usual" in said
-
-
-def test_a_run_that_ends_early_says_resume_will_not_download_again():
-    """Resume never downloads again, so it would skip the rest of the range
-    and then call the run finished with no issues."""
-    body = " ".join(page().split())
-    left = re.search(r"const AGAIN_LEFT = (.*?);", body).group(1)
-    for words in ("Resume will not download again",
-                  "Download again for the same range ' + 'fetches again what this run already restored",
-                  "so choose the range that is left"):
-        assert words in left, words
-    run = " ".join(function("run").split())
-    assert "again ? 'stopped before finishing. ' + AGAIN_LEFT" in run
-    assert "(again ? '. ' + AGAIN_LEFT : '')" in run
-    assert "'connection lost' + (again ? '. ' + AGAIN_LEFT : '')" in run
-    assert "if (again && unfinished)" in run
-
-
-def test_it_is_asked_for_only_with_the_box_and_after_the_question():
-    run = function("run")
-    assert "$('again').checked" in run and "META.redownload_actions" in run
-    sent = run.index("redownload: true, confirmed: true")
-    assert run.index("confirm(againQuestion(") < sent
-    assert run.count("redownload: true") == 1 and run.count("confirmed: true") == 1
-    assert "again ? postRun(" in run
-    assert "/api/run?" in run and "redownload" not in run[run.index("new EventSource("):]
+    keys = set(re.findall(r"store\.(?:get|set)\('([^']+)'", script))
+    assert keys == {"scope", "theme"}, keys
+    opened = function("openRestore")
+    for reset in ("el.checked = el.value === 'year'", "el.checked = el.value === 'all'",
+                  "$('rs-start').value = ''", "$('rs-end').value = ''", "showModal()"):
+        assert reset in opened, reset
+    # The everyday path's dates never reach it, it has its own.
+    scope = function("rsScope")
+    assert "rs-year" in scope and "scopeValues" not in scope and "scopeSaved" not in scope
+    # Brought back from the back and forward cache, the page starts again.
+    assert "addEventListener('pageshow', e => { if (e.persisted) location.reload(); })" in script
 
 
 def test_a_year_or_both_ends_are_needed_on_the_page_first():
-    run = function("run")
-    check = run.index("again && !againScoped(s)")
-    assert check < run.index("confirm(againQuestion(")
-    assert "a year, or both a From and a To date" in run[check:run.index("confirm(againQuestion(")]
+    go = function("rsGo")
+    check = go.index("if (!againScoped(s))")
+    assert check < go.index("startRun(") and check < go.index(".close()")
+    assert "Choose a year, or both a From and a To date." in go
+    assert "s.start > s.end" in go
     assert "return Boolean(s.year || (s.start && s.end));" in function("againScoped")
+    # And the run itself refuses it again, whoever asks.
+    assert ("if (again && (SERVER || !againScoped(s) || "
+            "!(META.redownload_actions || []).includes(action))) return false;") in function("startRun")
 
 
-def test_the_question_says_what_happens():
-    question = " ".join(function("againQuestion").split())
-    for words in ("Download again from", "Run All goes through every document",
-                  "Pilot goes through the newest few documents",
-                  "the ones this app already downloaded included, and fetches again each one whose",
-                  "file is gone", "Nothing is overwritten.", "A file you still have stays as it is",
-                  "the app may save ' + 'a second copy beside it, under a name of its own",
-                  "This asks the provider again for each document it fetches"):
-        assert words in question, words
+def test_it_is_sent_only_in_a_post_body_with_the_agreement():
+    run = function("startRun")
+    assert run.count("redownload: true") == 1 and run.count("confirmed: true") == 1
+    assert "again ? postRun(Object.assign({ app, account, action, redownload: true, confirmed: true }" in \
+        " ".join(run.split())
+    assert "/api/run?" in run and "redownload" not in run[run.index("new EventSource("):]
+
+
+def test_the_dialog_says_what_happens():
+    dialog = _dialog(page())
+    for words in ("PaperPull remembers every document it saved, so it never downloads one twice",
+                  "Restore fetches the missing ones again, for the dates you pick",
+                  "the ones already downloaded included, and fetches again each one whose file is gone",
+                  "Nothing is overwritten.", "A file you still have stays as it is",
+                  "the app may save a second copy beside it, under a name of its own",
+                  "The provider is asked again for each document fetched",
+                  "For this run only.", "Continue never restores",
+                  "A year, or both a From and a To date, is needed"):
+        assert words in dialog, words
     # True of every app, Target's invoices still on file included, so it
     # promises no new copy of every document.
-    assert "new copy" not in question and "Each new" not in question
-    for scope in ("s.year", "s.start", "s.end"):
-        assert scope in question
+    assert "new copy" not in dialog and "Each new" not in dialog
+    assert 'value="all" checked' in dialog and 'value="pilot" checked' not in dialog
+
+
+def test_a_restore_that_ends_early_says_continue_will_not_download_again():
+    """Continue never downloads again, so it would skip the rest of the range
+    and then call the run finished with no issues."""
+    body = " ".join(page().split())
+    left = re.search(r"const AGAIN_LEFT = (.*?);", body).group(1)
+    for words in ("Continue will not download again",
+                  "restoring the same dates again ' + 'fetches again what this run already restored",
+                  "so choose the dates that are left"):
+        assert words in left, words
+    outcome = " ".join(function("runOutcome").split())
+    # Every way a run can end without finishing says it, and offers Continue
+    # only to a run that downloads and was not a restore.
+    assert "const next = RUN.again ? AGAIN_LEFT :" in outcome
+    assert "const downloads = ['pilot', 'all', 'resume'].includes(RUN.action) && !RUN.again;" in outcome
+    assert outcome.count("+ next + '.'") + outcome.count("say: next + '.'") >= 4
+    assert outcome.count("resume: downloads") == 5 and "resume: !RUN.again" not in outcome
+    assert "say: RUN.again ? AGAIN_LEFT + '.'" in outcome
+    assert "if (RUN.again && !RUN.outcome.clean && RUN.sink)" in function("finishRun")
+    # A row whose last run was a restore that stopped offers the rest of the
+    # restore, never Continue, and a round of Get new for all leaves it out.
+    # Where Restore is not offered, the server and the sample, the row opens
+    # the account rather than show a button that would do nothing.
+    present = " ".join(function("present").split())
+    assert ("const restore = SERVER || inSample() ? {label: 'Open', nav: true} : "
+            "{label: 'Restore the rest', dialog: 'restore', primary: true};") in present
+    assert "act: again ? restore : {label: 'Continue', run: 'resume', primary: true}" in present
+    assert "!(r.last_run && r.last_run.redownload)" in function("queueTargets")
+    account = " ".join(function("renderAccount").split())
+    assert "r.state === 'stopped' && !stoppedHere && !SERVER && !inSample() ?" in account
 
 
 def test_a_refusal_is_shown_rather_than_a_lost_connection():
-    run = function("run")
-    assert "es.refused" in run
+    assert "es.refused" in function("startRun")
     assert "d.detail" in function("postRun")
+    assert ("if (RUN.refused) return {tone: 'bad', title: 'This run did not start', say: RUN.refused"
+            in " ".join(function("runOutcome").split()))
 
 
-def test_the_server_page_does_not_show_it():
-    server = function("serverPage")
-    assert "$('againrow').style.display = 'none'" in server
-    assert "$('againnote').style.display = 'none'" in server
+def test_the_server_page_does_not_offer_it():
+    assert "if (!SERVER) html += menuItem('restore'" in function("openMenu")
+    assert "if (SERVER || inSample()) return;" in function("openRestore")
 
 
 def test_the_safe_to_rerun_note_names_the_way_back():
-    text = " ".join(page().split())
-    assert "Nothing is ever fetched twice, even if you deleted the PDFs" in text
-    assert "unless you tick <b>Download again</b> under Scope" in text
+    text = " ".join(function("renderAccount").split())
+    assert "nothing is ever downloaded twice, even if you deleted the PDFs" in text
+    assert "To get deleted files back, use Restore deleted files under More." in text
 
 
 def test_the_page_and_the_server_name_the_same_actions():
