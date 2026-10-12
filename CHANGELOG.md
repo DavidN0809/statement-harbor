@@ -48,6 +48,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   a run that did not finish, so the panel no longer reports the files
   renamed. It also no longer says that Resume carries on from where it
   stopped, since Resume has nothing of a rename's to carry on with.
+- **A run state open in another program no longer ends a run with a
+  traceback.** Every app saves its run state, progress.json, on its way
+  out, and only then writes the result the panel reads. With progress.json
+  open in another program, that save waited its minute and stopped with a
+  traceback, so the panel never got the run's result. A Rename that had
+  just stopped because progress.json was open waited a second minute for
+  it and then showed the traceback over its own clean stop. Now that save
+  says in one line that the file could not be written and where it is,
+  the run ends as it would have, and a file the run has already waited for
+  is not waited for again. The list of what was found, discovery.json, is
+  saved on the way out the same way.
 
 ## [0.46.0] - 2026-10-11
 

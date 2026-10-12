@@ -1,11 +1,12 @@
 import ast
 import json
+import os
 from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from paperpull_core import pressing
+from paperpull_core import pressing, storage
 from paperpull_core.run_reporting import report_run_result, PREFIX
 from paperpull_core.storage import atomic_write_text, now_iso
 
@@ -47,8 +48,8 @@ def test_interrupt_saves_progress_and_returns_nonzero(entry):
     class FakeApp:
         def __init__(self, args):
             self.stats = {"mode": "all"}
-            self.progress = SimpleNamespace(save=lambda: saved.append("progress"))
-            self.discovery = SimpleNamespace(save=lambda: saved.append("discovery"))
+            self.progress = SimpleNamespace(save=lambda **how: saved.append(("progress", how)))
+            self.discovery = SimpleNamespace(save=lambda **how: saved.append(("discovery", how)))
         def cmd_run(self, *args, **kwargs): raise KeyboardInterrupt
         def write_run_summary(self): saved.append("summary")
         def close(self): saved.append("closed")
@@ -60,7 +61,11 @@ def test_interrupt_saves_progress_and_returns_nonzero(entry):
              "build_parser": lambda: SimpleNamespace(parse_args=lambda argv: args)}
     exec(compile(ast.Module(body=[main], type_ignores=[]), str(entry), "exec"), scope)
     assert scope["main"]([]) == 130
-    assert saved == ["progress", "discovery", "summary", "closed"]
+    # Both stores are saved with leaving=True, so a file another program
+    # holds is named in one line rather than raised out of the finally
+    # before the result is written (the census below).
+    assert saved == [("progress", {"leaving": True}), ("discovery", {"leaving": True}),
+                     "summary", "closed"]
 
 
 def test_a_wrong_document_is_reported_on_its_own_and_said_in_words(capsys):
@@ -128,8 +133,8 @@ def test_each_provider_reports_a_quiet_stop_as_stopped(entry, capsys):
     class FakeApp:
         def __init__(self, args):
             self.stats = {"mode": "all", "new_files": []}
-            self.progress = SimpleNamespace(save=lambda: None)
-            self.discovery = SimpleNamespace(save=lambda: None)
+            self.progress = SimpleNamespace(save=lambda **how: None)
+            self.discovery = SimpleNamespace(save=lambda **how: None)
         def cmd_run(self, *args, **kwargs): raise SystemExit(0)
         def write_run_summary(self): report_run_result(self.stats)
         def close(self): pass
@@ -142,3 +147,64 @@ def test_each_provider_reports_a_quiet_stop_as_stopped(entry, capsys):
     with pytest.raises(SystemExit):
         scope["main"]([])
     assert _result(capsys.readouterr().out)["stopped"] == 1
+
+
+def _held(monkeypatch, path: Path) -> list:
+    """os.replace refused for `path` as Windows refuses to replace a file
+    another program holds open, each try counted, and the pause between
+    tries not taken."""
+    real = os.replace
+    tries = []
+
+    def replace(src, dst, *args, **kwargs):
+        if Path(dst) == path:
+            tries.append(dst)
+            raise PermissionError(13, "The process cannot access the file because it is "
+                                  "being used by another process", str(dst))
+        return real(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", replace)
+    monkeypatch.setattr("time.sleep", lambda *_a, **_kw: None)
+    return tries
+
+
+@pytest.mark.parametrize("entry", ENTRIES, ids=lambda p: p.parent.name)
+def test_each_provider_writes_its_result_when_its_run_state_is_held(entry, tmp_path,
+                                                                     monkeypatch, capsys):
+    """Every app's own main, with a run that stops because another program
+    holds progress.json, as Rename stops when its check finds it held. The
+    save on the way out waited a second minute and raised PermissionError
+    out of the finally, so the person saw a traceback in place of the stop
+    and the panel never got the result. Now that save says in one line
+    where the file is, does not wait for it again, and the result is
+    written."""
+    tree = ast.parse(entry.read_text(encoding="utf-8-sig"))
+    main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    progress = tmp_path / "progress.json"
+    tries = _held(monkeypatch, progress)
+
+    class FakeApp:
+        def __init__(self, args):
+            self.stats = {"mode": "all", "new_files": []}
+            self.progress = storage.JsonStore(progress)
+            self.discovery = storage.JsonStore(tmp_path / "discovery.json")
+        def cmd_run(self, *args, **kwargs):
+            assert not storage.free_to_write(progress, say=lambda *_a: None)
+            raise SystemExit(1)
+        def write_run_summary(self): report_run_result(self.stats)
+        def close(self): pass
+    args = SimpleNamespace(start_date=None, end_date=None, open_browser=False,
+                           login=False, discover=False, pilot=False, all=True,
+                           pilot_online=False, pilot_instore=False, online=False, instore=False)
+    scope = {"ONLINE": "Online", "IN_STORE": "In-Store", "App": FakeApp, "pressing": pressing,
+             "build_parser": lambda: SimpleNamespace(parse_args=lambda argv: args)}
+    exec(compile(ast.Module(body=[main], type_ignores=[]), str(entry), "exec"), scope)
+    with pytest.raises(SystemExit) as stop:
+        scope["main"]([])
+    out = capsys.readouterr().out
+    assert stop.value.code == 1
+    assert ("  ! %s could not be written, so it keeps what was last saved in it. Close any "
+            "program that has it open before the next run." % progress) in out.splitlines()
+    assert _result(out)["stopped"] == 1
+    assert len(tries) == storage._LOCKED_TRIES + 1, "it waited for the file again on its way out"
+    assert (tmp_path / "discovery.json").exists(), "the save after it was never reached"
