@@ -7,9 +7,12 @@ through September was one, deleted them, and 0.34.1 still skipped each as
 already downloaded (#26). Only a record proved to be a copy is cleared,
 and a real bill a year older is left alone.
 """
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -107,3 +110,47 @@ def test_the_repair_runs_when_the_app_starts():
     import inspect
     src = inspect.getsource(att_docs.App.__init__)
     assert src.index("self._clear_wrong_year_copies()") > src.index("migrate_legacy_keys")
+
+
+# -- a history moved to another computer ----------------------------------------
+
+APP = Path(__file__).resolve().parents[1]
+
+
+def app_in(folder: Path):
+    """The app as its own main builds it over `folder`, an output folder
+    tools/migrate.py finds by the storage.py beside its progress.json."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "storage.py").write_bytes((APP / "storage.py").read_bytes())
+    if not (folder / "progress.json").exists():
+        (folder / "progress.json").write_text("{}", encoding="utf-8")
+    config = json.loads((APP / "config.example.json").read_text())
+    config.update({"owner": "Tester", "output_dir": str(folder)})
+    cfg = folder.parent / "config.json"
+    cfg.write_text(json.dumps(config))
+    return att_docs.App(att_docs.build_parser().parse_args(["--discover", "--config", str(cfg)]))
+
+
+@pytest.mark.parametrize("minimal", [False, True], ids=["whole", "minimal"])
+def test_a_copy_moved_to_another_computer_is_cleared_there(tmp_path, capsys, minimal):
+    """The history was moved before the old computer ever opened AT&T on a
+    version with the repair, with no PDF copied across. The app clears the
+    copy when it starts on the new computer, from what the moved records
+    say of each bill, and leaves the real ones done."""
+    sys.path.insert(0, str(APP.parents[1] / "tools"))
+    import migrate
+    old, new = tmp_path / "old" / "AT&T Statements", tmp_path / "new" / "AT&T Statements"
+    old.mkdir(parents=True)
+    (old / "storage.py").write_bytes((APP / "storage.py").read_bytes())
+    (old / "progress.json").write_text(json.dumps(_store()), encoding="utf-8")
+    app_in(new)
+    archive = tmp_path / "history.ppz"
+    assert migrate.export(old.parent, archive, minimal=minimal) == 0
+    assert migrate.do_import(archive, new.parent, assume_yes=True) == 0
+
+    app = app_in(new)
+    assert "1 bill(s) saved under the wrong year" in capsys.readouterr().out
+    done = {rec["date"] + rec["account"]: app._already_done(att_docs.Document.from_dict(rec))
+            for rec in _store().values()}
+    assert done.pop("2025-07-22") is False, "the copy would stay done for good"
+    assert all(done.values()), done
