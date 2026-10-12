@@ -299,7 +299,8 @@ HUB = ('<nav><a href="#">Individual</a><a href="#" aria-current="page">Retiremen
 def test_the_retirement_page_is_known_by_a_heading_of_its_own(show):
     """The hub's Retirement tab is on every statements page, and the one
     for the address open is marked as chosen whatever list is under it, so
-    only a heading in the page's main region says whose list it is."""
+    only a heading in the page's main region, or the statements it lists,
+    says whose list it is. These statements name no account."""
     link = statement_link("January 2022")
     for html, named in [
             (HUB + "<main><h1>Retirement</h1>%s</main>" % link, True),
@@ -315,6 +316,56 @@ def test_the_retirement_page_is_known_by_a_heading_of_its_own(show):
         page = show(html, url=RETIREMENT)
         assert site.names_account(page, "Retirement") is named, html
         assert site.names_account(page, "Crypto") is True, "the crypto page is told apart by its list"
+
+
+DASH = chr(0x2013)
+
+
+def account_row(month, account, inside=True):
+    """One statement as a real account showed it, its link the only one in
+    its own row, the title naming its account. `inside` puts the title in
+    the link with its "Download PDF", else beside a link of that alone."""
+    title = "%s %s %s Statement" % (month, DASH, account)
+    if inside:
+        return ('<div><a download href="#"><span>%s</span> <span>Download PDF</span></a>'
+                "</div>" % title)
+    return '<div><span>%s</span> <a download href="#">Download PDF</a></div>' % title
+
+
+def test_the_retirement_page_is_known_by_its_statements_when_no_heading_names_it(show):
+    """On a real account the only heading on every statements page was the
+    account holder's name, so the retirement page was never read and none
+    of its statements was saved. Each statement's own title names its
+    account there, so a page whose headings name no account is known by
+    them, when every statement it lists names a retirement account and
+    none names another. The individual list at the retirement address
+    names the individual account in its titles and is still not read."""
+    ira, ira_too = (account_row("September 2026", "Consolidated IRA"),
+                    account_row("August 2026", "Consolidated IRA"))
+    individual = account_row("September 2026", "Individual Investing Account")
+    crypto = account_row("September 2026", "Robinhood Crypto Account")
+    for rows, heading, named in [
+            (ira + ira_too, "Dana Example", True),
+            (account_row("September 2026", "Consolidated IRA", inside=False)
+             + account_row("August 2026", "Consolidated IRA", inside=False),
+             "Dana Example", True),
+            (ira, "", True),
+            # the individual or the crypto list at the retirement address
+            (individual, "Dana Example", False),
+            (crypto, "Dana Example", False),
+            # one statement that is not the account's, or says no account
+            (ira + individual, "Dana Example", False),
+            (ira + statement_link("January 2022"), "Dana Example", False),
+            # a heading that names another account, whatever the rows say
+            (ira + ira_too, "Individual investing", False),
+            # nothing listed
+            ("", "Dana Example", False)]:
+        html = HUB + "<main>%s%s</main>" % ("<h1>%s</h1>" % heading if heading else "", rows)
+        page = show(html, url=RETIREMENT)
+        assert site.names_account(page, "Retirement") is named, html
+    # No main region, so no heading could be read.
+    page = show(HUB + "<div><h1>Dana Example</h1>%s</div>" % (ira + ira_too), url=RETIREMENT)
+    assert site.names_account(page, "Retirement") is False
 
 
 def test_a_title_shown_twice_is_said_and_a_hidden_twin_is_not(show):

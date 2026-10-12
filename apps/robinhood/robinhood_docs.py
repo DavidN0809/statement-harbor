@@ -163,8 +163,9 @@ def is_crypto_duplicate(source_url: str, key, individual_listed) -> bool:
     listed in this run, title and date alike (#62). The crypto page alone,
     since the retirement page lists its own statements, which can share a
     title and a date with the individual account's and are that account's
-    own. It is told apart by its own heading instead (site.names_account),
-    and a file that is the individual one is refused once saved."""
+    own. It is told apart by its own heading or its statements' own titles
+    instead (site.names_account), and a file that is the individual one is
+    refused once saved."""
     return (site.account_for(source_url) == "Crypto"
             and individual_listed is not None and key in individual_listed)
 

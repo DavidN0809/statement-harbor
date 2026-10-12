@@ -652,13 +652,24 @@ _HEADINGS_JS = r"""() => {
 
 def names_account(page, account: str) -> bool:
     """Whether the page in front of the app names `account` as its own, by
-    a heading in its main region. True for an account no words are kept
-    for, which is read as it always was. False when the headings cannot be
-    read, when none names the account, and when any names another one.
+    a heading in its main region, or, where no heading names it, by the
+    title of every statement it lists. True for an account no words are
+    kept for, which is read as it always was. False when the headings
+    cannot be read, when any names another account, and when neither they
+    nor the statements name this one.
 
-    Only headings. A tab or a link that says Retirement is on every page of
-    the statements hub, and the one for the address open is marked as
-    chosen by the address, whatever list the page shows under it."""
+    Only headings and titles. A tab or a link that says Retirement is on
+    every page of the statements hub, and the one for the address open is
+    marked as chosen by the address, whatever list the page shows under it.
+    On a real account the only heading on every statements page was the
+    account holder's name, so the retirement page was never read. Each
+    statement's own title named its account there, "Consolidated IRA
+    Statement" on the retirement page and "Individual Investing Account
+    Statement" on the individual one. So the page is its account's own when
+    it lists at least one statement and every one names that account and
+    none names another, read as the list is read (_COLLECT_JS), so they are
+    the statements the app would read and press. The individual list shown
+    at the retirement address names the individual account and is not."""
     words = ACCOUNT_NAMES.get(account or "")
     if words is None:
         return True
@@ -669,8 +680,26 @@ def names_account(page, account: str) -> bool:
     if not isinstance(headings, list):
         return False
     said = [str(h) for h in headings]
-    return (any(words.search(h) for h in said)
-            and not any(_OTHER_ACCOUNT_RE.search(h) for h in said))
+    if any(_OTHER_ACCOUNT_RE.search(h) for h in said):
+        return False
+    if any(words.search(h) for h in said):
+        return True
+    titles = _listed_titles(page)
+    return bool(titles) and all(words.search(t) and not _OTHER_ACCOUNT_RE.search(t)
+                                for t in titles)
+
+
+def _listed_titles(page) -> list:
+    """The title of every document the page lists, read as the list is
+    read, or [] when it cannot be read."""
+    try:
+        items = page.evaluate(_COLLECT_JS, False)
+    except Exception:
+        return []
+    if not isinstance(items, list):
+        return []
+    return [str(it.get("title") or "") for it in items
+            if isinstance(it, dict) and it.get("is_pdf")]
 
 
 def at_address(current: str, wanted: str) -> bool:

@@ -7,6 +7,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Robinhood saves IRA statements.** The retirement statements page,
+  read since 0.46.0, was read only when a heading on it named a retirement
+  account, so a statement of the individual account shown at the
+  retirement address would not be saved again as a retirement one. On a real account the only
+  heading on every statements page is the account holder's name, so no IRA
+  statement was saved at all. Each statement's own title names its account
+  there, "Consolidated IRA Statement" on the retirement page and
+  "Individual Investing Account Statement" on the individual one. The page
+  is now also read when no heading names any account and every statement
+  it lists names a retirement account and none names another, and the
+  individual list shown at that address is still never read as
+  retirement statements.
+
 ## [0.48.0] - 2026-10-12
 
 A new control panel, on the desktop and on PaperPull Server, built around

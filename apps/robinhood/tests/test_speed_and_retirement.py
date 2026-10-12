@@ -220,14 +220,18 @@ def _text_pdf(path: Path, lines) -> None:
 
 class _Tab:
     """A tab that goes where it is sent, unless the site sends it on, and
-    shows the headings `headings` gives for the address it is at."""
+    shows the headings `headings` and the statement titles `titles` give
+    for the address it is at."""
 
-    def __init__(self, url="", lands=None, headings=None):
+    def __init__(self, url="", lands=None, headings=None, titles=None):
         self.url, self.lands = url, dict(lands or {})
         self.headings = dict(headings or {})
+        self.titles = dict(titles or {})
         self.opened, self.fronted = [], 0
 
     def evaluate(self, js, arg=None):
+        if js == site._COLLECT_JS and self.url in self.titles:
+            return [{"title": t, "is_pdf": True} for t in self.titles[self.url]]
         return self.headings.get(self.url) if js == site._HEADINGS_JS else None
 
     def goto(self, url, **kw):
@@ -477,6 +481,34 @@ def test_a_retirement_statement_is_not_pressed_on_a_page_naming_no_retirement_ac
     assert "did not name a retirement account" in rec["notes"]
     assert not app._already_done(doc)
     assert _statements_saved(app) == []
+
+
+IRA_TITLE = "January 2010 %s Consolidated IRA Statement" % chr(0x2013)
+
+
+def test_a_retirement_statement_is_pressed_on_a_page_its_statements_name(
+        tmp_path, monkeypatch):
+    """The only heading is the account holder's name, and every statement
+    the page lists names the IRA, so the page is the retirement account's
+    own and the statement is pressed and saved there. Where one statement
+    names the individual account, nothing is pressed."""
+    app = _app(tmp_path)
+    pressed = _presses(monkeypatch, lines=["Robinhood Securities LLC",
+                                           "January 2010 Consolidated IRA Statement",
+                                           RETIREMENT])
+    page = _Tab(headings={RETIREMENT: ["Dana Example"]}, titles={RETIREMENT: [IRA_TITLE]})
+    rec = _take(app, page, _retirement(title=IRA_TITLE))
+    assert pressed == [RETIREMENT]
+    assert rec["state"] == State.COMPLETED.value and rec["downloaded_ok"], rec.get("notes")
+
+    other = "February 2010 %s Individual Investing Account Statement" % chr(0x2013)
+    page = _Tab(headings={RETIREMENT: ["Dana Example"]},
+                titles={RETIREMENT: [IRA_TITLE.replace("January", "February"), other]})
+    doc = _retirement(title=IRA_TITLE.replace("January", "February"), date="2010-02-28")
+    rec = _take(app, page, doc)
+    assert pressed == [RETIREMENT], "nothing is pressed on a page one statement says is not its"
+    assert "did not name a retirement account" in rec["notes"]
+    assert not app._already_done(doc)
 
 
 def test_a_retirement_statement_that_is_the_individual_file_is_refused(tmp_path, monkeypatch):

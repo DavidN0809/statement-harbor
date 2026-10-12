@@ -19,9 +19,11 @@ individual page, and a document on it with the title and date of an
 individual one is refused, and the run says so.
 
 The retirement page, read since #74, is read only at its own address and
-only when a heading of its own names a retirement account, since its
-statements can share a title and a date with the individual ones and the
-list alone cannot say whose they are.
+only when a heading of its own names a retirement account, or no heading
+names any account and every statement it lists names a retirement account
+by its own title, since its statements can share a title and a date with
+the individual ones and a list whose titles name no account cannot say
+whose they are.
 
 The titles here are invented, in the shape the statement links take.
 """
@@ -184,12 +186,13 @@ def test_discovery_keeps_it_under_its_new_key(tmp_path):
 
 class _Tab:
     """A tab that goes where it is sent, unless the site sends it on or the
-    page is `broken`, and shows the headings `headings` gives for the
-    address it is at."""
+    page is `broken`, and shows the headings `headings` and the statement
+    titles `titles` give for the address it is at."""
 
-    def __init__(self, lands=None, broken=(), headings=None):
+    def __init__(self, lands=None, broken=(), headings=None, titles=None):
         self.url, self.lands, self.broken = "", lands or {}, broken
         self.headings = dict(headings or {})
+        self.titles = dict(titles or {})
 
     def goto(self, url, **kw):
         if url in self.broken:
@@ -200,6 +203,8 @@ class _Tab:
         pass
 
     def evaluate(self, js, arg=None):
+        if js == site._COLLECT_JS and self.url in self.titles:
+            return [{"title": t, "is_pdf": True} for t in self.titles[self.url]]
         return self.headings.get(self.url) if js == site._HEADINGS_JS else None
 
 
@@ -273,7 +278,8 @@ def test_a_retirement_page_showing_the_individual_list_is_not_read(tmp_path, mon
     assert listing.last(app) == listing.COMPLETE
 
 
-def test_a_retirement_page_with_no_heading_of_its_own_is_not_read(tmp_path, monkeypatch):
+def test_a_retirement_page_with_no_heading_or_title_naming_it_is_not_read(tmp_path,
+                                                                          monkeypatch):
     for i, headings in enumerate(([], ["Statements"], None)):
         app = _run(tmp_path / str(i), monkeypatch,
                    {INDIVIDUAL: [(TITLE, "2010-01-31")], RETIREMENT: [(TITLE, "2010-01-31")]},
@@ -292,6 +298,40 @@ def test_a_retirement_page_that_names_its_account_is_read(tmp_path, monkeypatch)
     assert by_page[RETIREMENT].account == "Retirement"
     assert by_page[RETIREMENT].summary == "Retirement Monthly Statement"
     assert app.stats["crypto_refused"] == 0
+
+
+IRA_TITLE = "January 2010 %s Consolidated IRA Statement" % chr(0x2013)
+
+
+def test_a_retirement_page_known_by_its_statements_is_read(tmp_path, monkeypatch):
+    """On a real account the only heading was the account holder's name,
+    and the page was never read. Every statement it lists names the IRA,
+    so it is the retirement account's own, and its statements are kept
+    beside the individual ones."""
+    listings = {INDIVIDUAL: [(TITLE, "2010-01-31")], RETIREMENT: [(IRA_TITLE, "2010-01-31")]}
+    app = _run(tmp_path, monkeypatch, listings, headings={RETIREMENT: ["Dana Example"]},
+               titles={RETIREMENT: [IRA_TITLE]})
+    by_page = {d.source_url: d for d in _docs(app).values()}
+    assert sorted(by_page) == [INDIVIDUAL, RETIREMENT], app.stats["notes"]
+    assert by_page[RETIREMENT].account == "Retirement"
+    assert not any("does not name" in n for n in app.stats["notes"])
+    assert listing.last(app) == listing.COMPLETE
+
+
+def test_a_retirement_page_whose_statements_name_another_account_is_not_read(
+        tmp_path, monkeypatch):
+    """The individual list at the retirement address, whose titles name
+    the individual account, or a list where one statement does or names
+    no account, or nothing listed at all."""
+    other = "January 2010 %s Individual Investing Account Statement" % chr(0x2013)
+    for i, titles in enumerate(([other], [IRA_TITLE, other], [IRA_TITLE, TITLE], [])):
+        app = _run(tmp_path / str(i), monkeypatch,
+                   {INDIVIDUAL: [(TITLE, "2010-01-31")],
+                    RETIREMENT: [(t, "2010-01-31") for t in titles]},
+                   headings={RETIREMENT: ["Dana Example"]}, titles={RETIREMENT: titles})
+        assert [d.account for d in _docs(app).values()] == [""], titles
+        assert any("retirement statements page does not name a retirement account" in n
+                   for n in app.stats["notes"]), titles
 
 
 def test_a_retirement_page_that_shows_a_title_twice_is_not_read(tmp_path, monkeypatch):
