@@ -10,6 +10,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **Rename and Review Names finish past a damaged record in progress.json.**
+  A record whose file path or file name was a number, a list or a mapping,
+  from a hand edit or a damaged file, stopped Rename after it had moved the
+  files and rewritten the index, so progress.json kept naming files that
+  were gone. Kroger's Rename stopped before it started, and Review Names
+  stopped right after renaming a receipt whose own record held such a path
+  or whose items were damaged. Such a value is now read as no path at all,
+  as an empty one is, and is left as it was.
 - **Anthem's member documents, ID cards and letters stay inside the year
   or dates a run asks for.** Run All took them after the EOBs in a loop of
   their own that read neither the year nor the dates, nor the configured
