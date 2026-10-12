@@ -195,7 +195,7 @@ def discovered(tmp_path, orders=ORDERS, card_text="Delivered\n$19.69"):
     return records
 
 
-def run(tmp_path, site_pages, *flags, setting="", pilot=True):
+def an_app(tmp_path, site_pages, *flags, setting=""):
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps({
         "owner": "Dana Example", "output_dir": str(tmp_path / "out"),
@@ -204,6 +204,11 @@ def run(tmp_path, site_pages, *flags, setting="", pilot=True):
         "pilot_online": 2, "default_start_date": setting}), encoding="utf-8")
     app = app_mod.App(app_mod.build_parser().parse_args(["--config", str(cfg), *flags]))
     app._context, app._work_page = site_pages.context, site_pages.page
+    return app
+
+
+def run(tmp_path, site_pages, *flags, setting="", pilot=True):
+    app = an_app(tmp_path, site_pages, *flags, setting=setting)
     if pilot:
         app.cmd_pilot(online=True, instore=False)
     else:
@@ -384,3 +389,43 @@ def test_an_order_whose_page_showed_no_date_is_not_opened_again(tmp_path, site_p
     # A run without dates takes it, as it always did.
     run(tmp_path, site_pages, pilot=False)
     assert records(tmp_path, "progress.json")[key(NO_DATE_AT_ALL)]["downloaded_ok"] is True
+
+
+# -- Resume's limit ------------------------------------------------------------------
+
+# The order from 2025 first, then two from 2026, none dated on its card.
+OUTSIDE_FIRST = [ORDERS[1], ORDERS[0], ORDERS[3]]
+
+
+def test_resume_counts_its_limit_as_run_all_does(tmp_path, site_pages, capsys):
+    """Resume for 2026 with --max-purchases 1. It cut its list to one order
+    before any page was open, so the order its page placed in 2025 used the
+    one place and nothing of 2026 was taken. Now an order opened only to
+    learn its date takes no place, as in Pilot and Run All, and what the
+    limit leaves is said."""
+    discovered(tmp_path, OUTSIDE_FIRST)
+    app = an_app(tmp_path, site_pages, "--resume", "--year", "2026", "--max-purchases", "1")
+    app.cmd_resume()
+    out = printed(capsys)
+    progress = records(tmp_path, "progress.json")
+
+    assert site_pages.opened == [OUTSIDE, INSIDE_2026], site_pages.opened
+    assert key(OUTSIDE) not in progress, progress.get(key(OUTSIDE))
+    assert progress[key(INSIDE_2026)]["downloaded_ok"] is True, progress.get(key(INSIDE_2026))
+    assert key(ALSO_2026) not in progress, progress.get(key(ALSO_2026))
+    assert "limit of 1 was reached, so 1 purchase not looked at is left" in out, out
+    assert "1 purchase(s) turned out to be outside the dates asked for" in out, out
+
+
+def test_resume_without_dates_takes_as_many_as_its_limit(tmp_path, site_pages, capsys):
+    """What worked before still works. With no dates every order it opens
+    counts, so it takes the first one and leaves the rest."""
+    discovered(tmp_path, OUTSIDE_FIRST)
+    app = an_app(tmp_path, site_pages, "--resume", "--max-purchases", "1")
+    app.cmd_resume()
+    progress = records(tmp_path, "progress.json")
+
+    assert site_pages.opened == [OUTSIDE], site_pages.opened
+    assert progress[key(OUTSIDE)]["downloaded_ok"] is True, progress.get(key(OUTSIDE))
+    assert len(progress) == 1, progress
+    capsys.readouterr()
