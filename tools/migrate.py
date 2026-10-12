@@ -73,12 +73,12 @@ the key of its title, so a corrected form listed under the same title is
 still told from it. For Target an order filed as its invoices keeps its
 list of those saved, each one's file, which of the order's invoices it is,
 the number Target prints on it, whether it was kept or put aside for review
-and whether it names the order's items, and its size and page count, so an
-order with an invoice still to fetch fetches only that one. The invoice
-number is Target's own, not the order's, and nothing else in the file holds
-it. Each file name holds the order's date and summary, as its PDF path does
-once the order is done. Until then that path is empty, so for an order
-still to finish the list adds them.
+and whether it names the order, and its size and page count, so an order
+with an invoice still to fetch fetches only that one. The invoice number is
+Target's own, not the order's, and nothing else in the file holds it. Each
+file name holds the order's date and summary, which can be the name of its
+one main item, as its PDF path does once the order is done. Until then
+that path is empty, so for an order still to finish the list adds them.
 A record still under a key that left out its account's
 last four, as the apps did past forty characters until 0.34.0 and Chase did
 at any length until 0.17.1, also keeps what its key is built from
@@ -90,10 +90,11 @@ add is the account's whole label and the document's whole title, where the
 key holds the first forty and sixty characters less those a file name cannot
 hold, and for Capital One and Schwab a document's category and the
 provider's id for it. A label ends in the last four, which every key written
-since holds too. On a real archive that took the file from 330 KB to 64 KB
-and removed every item name, order number and purchase total. Be clear about
-what it does NOT remove: the recorded PDF path stays, and filenames embed
-account labels, so a line like
+since holds too. On a real archive that took the file from 330 KB to 64 KB,
+with no list of items and no purchase total left in it. Be clear about what
+it does NOT remove. A receipt's key holds its order number, the recorded PDF
+path stays, and file names embed account labels and a receipt's summary,
+which can be the name of its one main item, so a line like
 "Statements\\2026-08-18 Statement - FREEDOM (...0962).pdf" survives. It is a
 much smaller and much less revealing file, not an anonymous one. The cost is
 that the new machine starts with no history to report on until it runs.
@@ -586,8 +587,9 @@ def export(root: Path, out: Path, minimal: bool = False) -> int:
     _say("This file describes your archive, so keep it as private as the archive.")
     _say("It holds no passwords, cookies or session tokens.")
     if minimal:
-        _say("Written with --minimal, so item names, order numbers, totals and")
-        _say("settings are left out. Recorded filenames remain, and those name accounts.")
+        _say("Written with --minimal, so item lists, totals and settings are left out.")
+        _say("Order and invoice numbers remain, and so do recorded file names, which")
+        _say("can name accounts and items.")
     else:
         _say("It can contain account labels, document titles, order numbers,")
         _say("purchase totals, itemized purchases and account holders' names.")

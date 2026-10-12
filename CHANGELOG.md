@@ -21,7 +21,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   among the order's, the number Target prints on it, whether it was kept
   or put aside and its size and page count. A list filled into a record an
   older file moved names the files under this computer's folder, as a
-  record the import adds does.
+  record the import adds does. What `--minimal` prints when it is done now
+  says that order and invoice numbers stay, and file names, which can name
+  accounts and items.
+- **Target no longer stops on an order whose list of invoices was
+  damaged.** An entry whose file was not text, or a list that was not a
+  list, raised as the order's invoices were walked, so the order failed on
+  every run without its invoices being tried. Such a value now reads as
+  none, as every record value does, and an invoice it no longer names is
+  fetched again.
 
 ## [0.48.0] - 2026-10-12
 

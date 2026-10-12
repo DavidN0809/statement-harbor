@@ -96,6 +96,27 @@ def _among(entry, entries) -> bool:
     return any(entry is e for e in entries)
 
 
+# An invoice's place among its order's, as the walk writes it.
+_PART = re.compile(r"\d+ of \d+")
+
+
+def _listed(entry) -> Optional[dict]:
+    """One entry of an order's list of invoices as the walk reads it, or
+    None for one that names no file. A value a crash or a hand edit left
+    that is not what the walk writes reads as none, as every record value
+    does. An entry whose file is not text names no invoice, so that invoice
+    is fetched again, and one with no place is known by its number. Such an
+    entry raised in the walk, and the order failed on every run without its
+    invoices being tried."""
+    if not (isinstance(entry, dict) and isinstance(entry.get("file"), str)
+            and entry["file"].strip()):
+        return None
+    part, number = entry.get("part"), entry.get("number")
+    return dict(entry, part=part if isinstance(part, str) and _PART.fullmatch(part) else "",
+                number=number.strip() if isinstance(number, str) else "",
+                kept=bool(entry.get("kept", True)), names=bool(entry.get("names")))
+
+
 # ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
@@ -1462,9 +1483,9 @@ class App:
         row in the receipt index, known by what its file says."""
         rec = self.progress.get(purchase.key) or {}
         again = getattr(self.args, "redownload", False)
-        if rec.get("invoices"):
-            entries = [dict(e) for e in rec["invoices"]
-                       if isinstance(e, dict) and e.get("file")]
+        listed = rec.get("invoices")
+        if listed and isinstance(listed, list):
+            entries = [e for e in map(_listed, listed) if e]
             lost = self._follow_renames(purchase, entries)
             # An entry still lost names no file that is this invoice, gone
             # or another order's that took its old name, so it is missing

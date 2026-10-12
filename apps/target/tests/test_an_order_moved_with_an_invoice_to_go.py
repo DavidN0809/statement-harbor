@@ -128,6 +128,53 @@ def test_download_again_leaves_an_invoice_copied_across(tmp_path, minimal):
     assert [(e["number"], e["file"]) for e in on_file] == [(FIRST, str(copy))], on_file
 
 
+SECOND_FILE = "2026-02-11 Target Garden Invoice (2 of 2).pdf"
+
+# A list a crash or a hand edit damaged, which a move carries as it is, and
+# the numbers of the invoices the walk then counts on file.
+DAMAGED = {
+    "a file that is not text": (
+        {"file": 7, "part": "2 of 2", "number": SECOND, "kept": True, "names": True},
+        [FIRST]),
+    "a place that is not text": (
+        {"file": SECOND_FILE, "part": 2, "number": SECOND, "kept": True, "names": True},
+        [FIRST, SECOND]),
+    "an entry holding only its file": ({"file": SECOND_FILE}, [FIRST, ""]),
+    "a list that is not a list": (5, []),
+}
+
+
+@pytest.mark.parametrize("damage", sorted(DAMAGED))
+def test_a_damaged_list_reads_as_none_and_stops_nothing(tmp_path, damage):
+    """A value that is not what the walk writes reads as none, as every
+    record value does. An entry whose file is not text names no invoice, so
+    that invoice is fetched again, and one with no place is known by its
+    number. Such an entry raised in the walk, and the order failed on every
+    run without trying its invoices."""
+    old = tmp_path / "old" / "Target Receipts"
+    saved_one_of_two(old)
+    records = json.loads((old / "progress.json").read_text(encoding="utf-8"))
+    rec = records["Online:" + ORDER]
+    entry, counted = DAMAGED[damage]
+    if isinstance(entry, dict):
+        if entry["file"] == SECOND_FILE:
+            entry = dict(entry, file=str(old / "Invoices" / SECOND_FILE))
+        rec["invoices"].append(entry)
+    else:
+        rec["invoices"] = entry
+    (old / "progress.json").write_text(json.dumps(records), encoding="utf-8")
+
+    new = moved(tmp_path, True)
+    for args in ((), ("--redownload",)):
+        app = an_app(new, *args)
+        on_file = app._invoices_on_file(the_order())
+        if not args:
+            assert [e["number"] for e in on_file] == counted, on_file
+        walk = {"tokens": [], "held": [], "missed": [], "count": 2, "list_page": None,
+                "saved": on_file}
+        assert app._file_invoices(the_order(), walk) is False, "the second is still to fetch"
+
+
 def test_a_newer_file_fills_the_list_into_an_order_an_older_minimal_moved(tmp_path,
                                                                            monkeypatch):
     """An older --minimal brought the order here without its list. A newer
