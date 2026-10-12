@@ -50,6 +50,10 @@ def report_run_result(stats):
         # Rename downloads nothing for Resume to carry on with, and when it
         # stops it has just said what it put back and what to do instead.
         print("\nThis run stopped before it finished.", flush=True)
+    elif result["stopped"] and stats.get("mode") == "discover":
+        # Resume downloads, and Discover was run only to see what is there.
+        print("\nThis run stopped before it finished. Discover downloads nothing, "
+              "so press Discover again rather than Resume.", flush=True)
     elif result["stopped"]:
         print("\nThis run stopped before it finished. Whatever it saved is kept, "
               "and Resume carries on from where it stopped.", flush=True)

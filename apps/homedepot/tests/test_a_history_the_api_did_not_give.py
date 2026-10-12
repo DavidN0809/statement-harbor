@@ -457,9 +457,9 @@ def test_run_all_and_discover_do_not_finish_on_a_history_cut_short(attached, com
     assert "Only 1 page(s) of your purchase history came" in said, said
     assert "Discovery complete" not in said, said
     assert sorted(known(tmp_path)) == keys(NEWER)
+    assert panel_reads(out)["stopped"] == 1, "the panel reads either run as stopped"
     if command[0] == "--all":
         assert downloaded(tmp_path) == keys(NEWER)
-        assert panel_reads(out)["stopped"] == 1
 
 
 # -- what worked before -------------------------------------------------------------------
@@ -475,6 +475,7 @@ def test_a_history_of_several_pages_is_read_to_its_end(attached, tmp_path, capsy
     assert sorted(known(tmp_path)) == keys(NEWER + OLDER)
     assert SITE.asked == [1, 2]
     assert not failure_files(tmp_path)
+    assert panel_reads(out)["stopped"] == 0, "the panel reads the Discover as finished"
 
 
 def test_a_history_with_no_orders_in_it_is_still_read_as_one(attached, tmp_path, capsys):

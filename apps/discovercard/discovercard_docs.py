@@ -1142,6 +1142,7 @@ def main(argv=None):
         elif args.login:
             app.cmd_login()
         elif args.discover:
+            app.stats["mode"] = "discover"
             app.cmd_discover()
         elif args.pilot:
             app.cmd_pilot()
@@ -1173,7 +1174,12 @@ def main(argv=None):
         # summary rewrites new-this-run.txt, and for a mode that
         # downloads nothing that means replacing the real list from
         # the last download run with an empty one.
-        if app.stats["mode"] not in ("", "diagnose", "record"):
+        if app.stats["mode"] == "discover":
+            # Discover downloads nothing, so the run summary and
+            # new-this-run.txt stay as the last download run wrote
+            # them, and only the panel is told how it ended.
+            report_run_result(app.stats)
+        elif app.stats["mode"] not in ("", "diagnose", "record"):
             app.write_run_summary()
         app.close()
     return 0

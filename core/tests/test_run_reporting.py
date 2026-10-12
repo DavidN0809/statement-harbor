@@ -208,3 +208,59 @@ def test_each_provider_writes_its_result_when_its_run_state_is_held(entry, tmp_p
     assert _result(out)["stopped"] == 1
     assert len(tries) == storage._LOCKED_TRIES + 1, "it waited for the file again on its way out"
     assert (tmp_path / "discovery.json").exists(), "the save after it was never reached"
+
+
+def discover_with(entry, ends):
+    """The app's own main for --discover, against an app whose discovery
+    ends the way `ends` says, and what that app was asked to do, in order."""
+    tree = ast.parse(entry.read_text(encoding="utf-8-sig"))
+    main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    did = []
+
+    class FakeApp:
+        def __init__(self, args):
+            self.stats = {"mode": "", "new_files": []}
+            self.progress = SimpleNamespace(save=lambda **_kw: None)
+            self.discovery = SimpleNamespace(save=lambda **_kw: None)
+        def cmd_discover(self, *args, **kwargs):
+            did.append("discover as %r" % self.stats["mode"])
+            ends()
+        def write_run_summary(self): did.append("summary")
+        def close(self): pass
+    args = SimpleNamespace(start_date=None, end_date=None, open_browser=False,
+                           login=False, discover=True, pilot=False, all=False,
+                           pilot_online=False, pilot_instore=False, online=False, instore=False)
+    scope = {"ONLINE": "Online", "IN_STORE": "In-Store", "App": FakeApp,
+             "report_run_result": report_run_result, "pressing": pressing,
+             "build_parser": lambda: SimpleNamespace(parse_args=lambda argv: args)}
+    exec(compile(ast.Module(body=[main], type_ignores=[]), str(entry), "exec"), scope)
+    return scope["main"], did
+
+
+def _stops():
+    raise SystemExit(0)
+
+
+@pytest.mark.parametrize("entry", ENTRIES, ids=lambda p: p.parent.name)
+def test_each_provider_tells_the_panel_how_a_discover_ended(entry, capsys):
+    """Discover set no mode, and main writes the run summary, which carries
+    the panel's result line, only for a mode, so the panel never heard how a
+    Discover ended. One that stopped with its list cut short read "finished,
+    check output" as one that read it whole did, and its failure file was
+    never offered. Discover downloads nothing, so the run summary and
+    new-this-run.txt stay as the last download run wrote them, since
+    PaperPull Server hands that list's files on to its plug-ins."""
+    main, did = discover_with(entry, lambda: None)
+    assert main([]) == 0
+    assert _result(capsys.readouterr().out)["stopped"] == 0
+    assert did == ["discover as 'discover'"], "a failure file names the command it came from"
+
+    main, did = discover_with(entry, _stops)
+    with pytest.raises(SystemExit):
+        main([])
+    out = capsys.readouterr().out
+    assert _result(out)["stopped"] == 1
+    assert "stopped before it finished" in out
+    assert "press Discover again" in out and "Resume carries on" not in out, (
+        "the console sends a stopped Discover to Discover, as the panel does")
+    assert did == ["discover as 'discover'"], "and nothing writes the run summary"

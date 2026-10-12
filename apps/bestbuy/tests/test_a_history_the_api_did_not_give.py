@@ -497,9 +497,9 @@ def test_run_all_and_discover_do_not_finish_on_a_history_cut_short(attached, com
     assert "stopped giving your purchase history at %d" % LAST_YEAR in said, said
     assert "Discovery complete" not in said, said
     assert sorted(known(tmp_path)) == keys(NEWER)
+    assert panel_reads(out)["stopped"] == 1, "the panel reads either run as stopped"
     if command[0] == "--all":
         assert downloaded(tmp_path) == keys(NEWER)
-        assert panel_reads(out)["stopped"] == 1
 
 
 def test_a_year_that_gave_purchases_and_then_failed_is_not_the_end(attached, tmp_path, capsys):
@@ -531,6 +531,7 @@ def test_a_history_of_several_years_is_read_to_its_end(attached, tmp_path, capsy
     assert [y for y, _page in SITE.asked] == [THIS_YEAR, LAST_YEAR, EARLIER, EARLIER - 1,
                                               EARLIER - 2, EARLIER - 3]
     assert not failure_files(tmp_path)
+    assert panel_reads(out)["stopped"] == 0, "the panel reads the Discover as finished"
 
 
 def test_an_error_after_an_empty_year_is_still_the_end_of_the_history(attached, tmp_path, capsys):

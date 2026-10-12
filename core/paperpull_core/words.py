@@ -232,6 +232,7 @@ browser browsers chrome edge firefox safari mobile secure login www2 cdn
 _OURS = """
 paperpull recording recorded survey surveyed diagnose diagnostics failure kind
 provider schema command note notes extra postmortem journal entries entry dropped
+discover pilot resume rename
 oldest limit seen counts bodies read too large unreadable elsewhere matched visible
 counted evaluation engine declared playwright css syntax invalid nodes node signal
 classes has testid box display visibility position len on screen ready overflow

@@ -2068,8 +2068,22 @@ def _latest_failure(meta: dict):
     looking at any more, and offering that would have somebody attach the
     wrong failure to the right issue."""
     import time
+
+    def written(path):
+        # failure-<command>-<YYYYmmdd>-<HHMMSS>.json. The command comes first,
+        # so names sort by command, and a Pilot's older file sorted after a
+        # Discover's newer one. The time the name carries decides, and the
+        # file's own time where a name carries none.
+        parts = path.stem.split("-")
+        stamp = "".join(parts[-2:])
+        if len(parts) >= 4 and len(stamp) == 14 and stamp.isdigit():
+            return stamp
+        try:
+            return time.strftime("%Y%m%d%H%M%S", time.localtime(path.stat().st_mtime))
+        except OSError:
+            return ""
     try:
-        found = sorted(_diagnostics_of(meta).glob("failure-*.json"))
+        found = sorted(_diagnostics_of(meta).glob("failure-*.json"), key=written)
     except OSError:
         return None
     for path in reversed(found):
@@ -3984,8 +3998,11 @@ function run(action, opts) {
       setStatus('err', (code === '130' ? 'interrupted, progress saved' : `exited (code ${code}), check output`) +
                        (again ? '. ' + AGAIN_LEFT : ''));
     } else if (result && result.stopped) {
+      // Resume downloads, and Discover was pressed only to see what is there.
       setStatus('warn', again ? 'stopped before finishing. ' + AGAIN_LEFT
-                              : 'stopped before finishing, see the output, then press Resume');
+        : action === 'discover'
+          ? 'stopped before finishing, see the output, then press Discover again'
+          : 'stopped before finishing, see the output, then press Resume');
     } else if (result && result.attention) {
       const details = [];
       if (result.wrong_document) details.push(`${result.wrong_document} refused as the wrong document`);
