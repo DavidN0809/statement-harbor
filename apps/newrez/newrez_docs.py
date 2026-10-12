@@ -228,7 +228,12 @@ class _DatedByStatement:
         named_by: dict = {}
         for store in (app.progress, app.discovery):
             for name, rec in (getattr(store, "data", None) or {}).items():
-                if isinstance(rec, dict) and rec.get("title") and rec.get("date"):
+                # A title or a date that is not text, which a hand edit or
+                # a damaged file can leave, is none. A list as the title
+                # stopped Rename.
+                if (isinstance(rec, dict) and isinstance(rec.get("title"), str)
+                        and isinstance(rec.get("date"), str)
+                        and rec["title"] and rec["date"]):
                     by_title.setdefault(rec["title"], {}).update(
                         {k: v for k, v in rec.items() if v not in (None, "")})
                     if rec.get("pdf_path"):

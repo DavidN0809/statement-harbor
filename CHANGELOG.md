@@ -10,6 +10,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **Kroger, Chase, Robinhood and NewRez no longer stop on a record holding
+  a number or a list where text belongs.** progress.json can be edited by
+  hand or left damaged by a crash. A store that was not text stopped
+  Kroger's Rename and Review Names, a title or account that was not text
+  stopped every Chase command as its records loaded, and a title or date
+  that was not text stopped the Rename of Robinhood's tax forms and of
+  NewRez's statements. Such a value now reads as none, as an empty one
+  does.
 - **Anthem's member documents, ID cards and letters stay inside the year
   or dates a run asks for.** Run All took them after the EOBs in a loop of
   their own that read neither the year nor the dates, nor the configured
