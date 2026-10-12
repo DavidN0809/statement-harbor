@@ -843,8 +843,11 @@ def test_every_app_keeping_a_list_of_invoices_mends_it_before_a_rename():
                     if isinstance(n, ast.FunctionDef)
                     and n.name in ("cmd_rename", "cmd_review_names")}
         for name in ("cmd_rename", "cmd_review_names"):
-            calls = [c.func.attr for c in ast.walk(commands[name])
-                     if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)]
+            # In the order they stand in the source, which ast.walk is not.
+            calls = [c.func.attr for c in sorted(
+                (c for c in ast.walk(commands[name])
+                 if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)),
+                key=lambda c: (c.lineno, c.col_offset))]
             assert "_mend_invoice_lists" in calls, (app.name, name)
             assert calls.index("_mend_invoice_lists") < min(
                 calls.index(c) for c in ("run_for", "review_names") if c in calls), \

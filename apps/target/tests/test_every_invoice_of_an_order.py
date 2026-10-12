@@ -1128,17 +1128,44 @@ def test_a_list_an_earlier_rename_left_stale_is_mended(command, taken, tmp_path,
 
 def test_a_rename_preview_mends_nothing_on_disk(tmp_path, capsys):
     """A preview changes nothing. It reads the list as it would be mended,
-    so it says what Rename will do, and says the list would be mended."""
+    so it says what Rename will do, and says the list would be mended. It
+    runs through main(), as the panel's Rename preview does, since main()
+    saves progress.json after every command, and that save wrote the
+    preview's mend down."""
     app = an_app(tmp_path)
     left_stale(app, taken=True)
-    before = app.paths.progress_json.read_bytes()
+    before = json.loads(app.paths.progress_json.read_text(encoding="utf-8"))
     capsys.readouterr()
-    app.args.apply = False
-    app.cmd_rename()
+    assert run(tmp_path, "http://127.0.0.1:9", "--rename") == 0
     said = " ".join(capsys.readouterr().out.split())
-    assert app.paths.progress_json.read_bytes() == before
+    assert json.loads(app.paths.progress_json.read_text(encoding="utf-8")) == before
     assert ("1 invoice(s) in the order records name a file an earlier rename moved, and "
             "Rename with --apply writes down where each is now.") in said, said
+    assert "Nothing has been changed." in said, said
+
+
+def test_the_mend_reads_the_index_once(tmp_path, monkeypatch):
+    """An archive whose invoices were deleted once they were imported
+    elsewhere keeps every entry lost, since none is followed. Each such
+    order read the whole index again, so a mend took about a minute at
+    three thousand orders, before every Review Names and Rename."""
+    app = an_app(tmp_path)
+    for k in range(40):
+        number = "9020000000%05d" % k
+        gone = app.paths.invoices / ("deleted %d (1 of 1).pdf" % k)
+        order = Purchase(purchase_type=ONLINE, purchase_date=TIPPED.iso, order_number=number)
+        app.progress.update(order.key, dict(order.to_dict(), invoices=[
+            {"file": str(gone), "part": "1 of 1", "number": "1%016d" % k, "kept": True}]),
+            save=False)
+        index_rows(app, number, gone)
+    app.progress.save()
+    reads = []
+    real = type(app.index_csv).read_all
+    monkeypatch.setattr(type(app.index_csv), "read_all",
+                        lambda self: reads.append(self.path) or real(self))
+    mended = app._mend_invoice_lists(save=True)
+    assert reads.count(app.index_csv.path) == 1, len(reads)
+    assert mended == (0, {}), "a deleted invoice is not followed anywhere"
 
 
 def test_an_invoice_deleted_after_import_keeps_its_entry(tmp_path, monkeypatch):
@@ -1167,3 +1194,18 @@ def test_download_again_does_not_count_another_orders_file_as_this_ones(tmp_path
                                                                     str(renamed)]
     assert [e["file"] for e in app._invoices_on_file(other)] == [
         saved_record(app, other)["invoices"][0]["file"]], "the other order keeps its own"
+
+
+def test_download_again_fetches_an_invoice_whose_own_file_is_gone_too(tmp_path):
+    """The old name was taken by another order's invoice, and this order's
+    renamed file was deleted once it was imported elsewhere. The entry has
+    no file of its own to follow to, and it named the other order's file,
+    which is there, so Download again counted that file as this order's
+    invoice and never fetched it. It is missing now, and fetched. Without
+    --redownload it still counts, as every invoice saved once does."""
+    app = an_app(tmp_path, "--redownload")
+    purchase, other, renamed, entries = left_stale(app, taken=True)
+    renamed.unlink()
+    assert [e["file"] for e in app._invoices_on_file(purchase)] == [entries[0]["file"]]
+    assert [e["number"] for e in an_app(tmp_path)._invoices_on_file(purchase)] == [
+        "10000000000000042", "10000000000000041"]
