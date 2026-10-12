@@ -54,14 +54,18 @@ account numbers, document titles, order numbers and purchase totals, itemized
 purchases, store locations and the account holders' names. It holds no
 passwords, no cookies and no session tokens.
 
---minimal writes only the fields a skip decision reads, and no settings. On a
-real archive that took the file from 330 KB to 64 KB and removed every item
-name, order number and purchase total. Be clear about what it does NOT remove:
-the recorded PDF path stays, and filenames embed account labels, so a line
-like "Statements\\2026-08-18 Statement - FREEDOM (...0962).pdf" survives. It
-is a much smaller and much less revealing file, not an anonymous one. The
-cost is that the new machine starts with no history to report on until it
-runs.
+--minimal writes only the fields a skip decision reads, and no settings. For
+Robinhood those include each document's category, date, title and account,
+the parts its record keys are made of, the key a tax form was saved under
+before its year was read, which of Robinhood's four fixed statement and tax
+pages listed it, and the SHA-256 digest of the saved file, which says nothing
+of what the file holds. On a real archive that took the file from 330 KB to
+64 KB and removed every item name, order number and purchase total. Be clear
+about what it does NOT remove: the recorded PDF path stays, and filenames
+embed account labels, so a line like
+"Statements\\2026-08-18 Statement - FREEDOM (...0962).pdf" survives. It is a
+much smaller and much less revealing file, not an anonymous one. The cost is
+that the new machine starts with no history to report on until it runs.
 """
 from __future__ import annotations
 
@@ -95,6 +99,23 @@ READS = (1, 2)
 # receipt app's skip line says why from them (paperpull_core.not_shown).
 SKIP_FIELDS = ("state", "downloaded_ok", "pdf_path", "discovered_at", "updated_at",
                DAYS_KEY)
+
+# The fields one provider's skip decisions read besides those, by the name
+# its storage.py gives it, carried for that provider alone, since the same
+# field can hold more in another app. Robinhood takes a tax form listed again
+# without its year as the one saved under its undated key, a key shaped like
+# every record's, and a crypto statement saved under its old key as done only
+# when the crypto page listed it, one of Robinhood's four fixed statement and
+# tax pages (_already_done). It moves a form saved without a date to the key
+# of the year its page now lists, or keeps a second copy of it out, by its
+# category, date, title and account, the parts of its key, which hold no
+# account number (_date_saved_forms, _saved_form_of_year). And it knows a
+# statement of one account page that is another's saved one by those and the
+# saved file's digest (_other_accounts_statement). Every app's skip decisions
+# are read against these by
+# core/tests/test_a_minimal_history_skips_what_the_app_did.py.
+PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "date",
+                                      "title", "account", "pdf_sha256")}
 
 # Read out of an install's own storage.py, the same way the status report does,
 # so an install is identified by what it IS rather than what its folder is
@@ -359,11 +380,16 @@ def _done(rec: dict) -> bool:
                 or (rec.get("state") in TERMINAL and not asked_again(rec)))
 
 
-def _skip_fields(rec: dict) -> dict:
-    """The fields a skip decision reads. For a record asked for again that
-    is its last note too, one of the fixed words an older version wrote,
-    which says nothing of the purchase."""
-    out = {f: rec[f] for f in SKIP_FIELDS if f in rec}
+def skip_fields_of(provider: str) -> tuple:
+    """The fields --minimal carries for one provider's records."""
+    return SKIP_FIELDS + PROVIDER_SKIP_FIELDS.get(provider, ())
+
+
+def _skip_fields(rec: dict, provider: str = "") -> dict:
+    """The fields a skip decision reads, the provider's own among them. For
+    a record asked for again that is its last note too, one of the fixed
+    words an older version wrote, which says nothing of the purchase."""
+    out = {f: rec[f] for f in skip_fields_of(provider) if f in rec}
     if asked_again(rec):
         out["notes"] = str(rec.get("notes") or "").rsplit("; ", 1)[-1].strip()
     return out
@@ -373,6 +399,18 @@ def describe(entry: dict) -> str:
     """A provider, and the person when it is not the first one."""
     acct = entry.get("account") or "primary"
     return entry["provider"] if acct == "primary" else "%s (%s)" % (entry["provider"], acct)
+
+
+def _reader(place: dict, places: list) -> str:
+    """The provider whose code reads this place's records. A folder left with
+    records and no app is named for its folder, and a second person's sits
+    beside the install, named "<install> - <name>" by tools/add_account.py,
+    so it would miss its provider's own fields."""
+    if (place["path"] / "storage.py").is_file():
+        return place["provider"]
+    beside = [p for p in places if (p["path"] / "storage.py").is_file()
+              and place["folder"].startswith(p["folder"] + " - ")]
+    return max(beside, key=lambda p: len(p["folder"]))["provider"] if beside else place["provider"]
 
 
 # -- export ------------------------------------------------------------------
@@ -393,7 +431,8 @@ def build(root: Path, minimal: bool = False):
         for place in places:
             recs = place["records"]
             if minimal:
-                recs = {k: _skip_fields(v) for k, v in recs.items()}
+                reader = _reader(place, places)
+                recs = {k: _skip_fields(v, reader) for k, v in recs.items()}
             name, n = place["folder"], 2
             while name.lower() in used:
                 name, n = "%s (%d)" % (place["folder"], n), n + 1

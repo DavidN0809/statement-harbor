@@ -99,6 +99,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   wrote an empty file and then said there was nothing to export. That
   empty file took the place of the last spreadsheet built. Now nothing is
   written, and the last one stays as it was.
+- **A Robinhood history moved with `--minimal` no longer downloads tax
+  forms and crypto statements again.** Robinhood knows a tax form it saved
+  before the year was read, and a crypto statement saved under its old key,
+  by fields the history tool's `--minimal` export left out. These are the
+  undated key, the page that listed the document, its category, date, title
+  and account, and the saved file's digest. So the new computer fetched
+  those again, and could save the individual statement a second time as the
+  crypto one. The export now carries those fields for Robinhood alone,
+  a second person's Robinhood history included. They name no person and no
+  account number, and Robinhood's record keys already hold most of them.
+  The skip checks of the other apps read nothing that `--minimal` leaves out.
 
 ## [0.46.0] - 2026-10-11
 
