@@ -159,19 +159,28 @@ def find_wrong_year_copies(records: dict) -> List[tuple]:
     same month and day, one year later, was saved with exactly the same
     size, and the same page count when both have one. Two real bills a year
     apart do not come out the same to the byte, so nothing else is touched.
+    A record whose account or kind is not text, which a hand edit or a
+    damaged file can leave, names no bill and is left out. Made a key, it
+    stopped every command as the records loaded.
     """
+    def bill(rec):
+        account, category = rec.get("account", ""), rec.get("category", "")
+        if all(v is None or isinstance(v, str) for v in (account, category)):
+            return account, category
+        return None
+
     newer = {}
     for key, rec in records.items():
         size, date = _saved_size(rec), str(rec.get("date") or "")
-        if size and re.fullmatch(r"\d{4}-\d\d-\d\d", date):
-            newer[(rec.get("account", ""), rec.get("category", ""), date)] = rec
+        if size and re.fullmatch(r"\d{4}-\d\d-\d\d", date) and bill(rec):
+            newer[(*bill(rec), date)] = rec
     found = []
     for key, rec in records.items():
         size, date = _saved_size(rec), str(rec.get("date") or "")
-        if not size or not re.fullmatch(r"\d{4}-\d\d-\d\d", date):
+        if not size or not re.fullmatch(r"\d{4}-\d\d-\d\d", date) or not bill(rec):
             continue
         later = f"{int(date[:4]) + 1}{date[4:]}"
-        other = newer.get((rec.get("account", ""), rec.get("category", ""), later))
+        other = newer.get((*bill(rec), later))
         if other is None or _saved_size(other) != size:
             continue
         pages, other_pages = (str(r.get("pdf_pages") or "").strip() for r in (rec, other))

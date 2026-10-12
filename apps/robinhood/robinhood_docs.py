@@ -248,7 +248,7 @@ class _DatedTaxForms:
                     continue
                 # A key, a title or a date that is not text, which a hand
                 # edit or a damaged file can leave, is none. Read as text
-                # it stopped Rename.
+                # or made part of a key, it stopped Rename.
                 undated_key, title, date = (
                     v if isinstance(v, str) else ""
                     for v in (rec.get("undated_key"), rec.get("title"), rec.get("date")))
