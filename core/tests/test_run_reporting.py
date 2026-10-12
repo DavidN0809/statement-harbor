@@ -103,6 +103,20 @@ def test_a_run_leaving_on_an_exception_says_it_stopped(capsys):
     assert "stopped before it finished" in out
 
 
+def test_a_rename_that_stops_does_not_point_to_resume(capsys):
+    """A Rename that put its files back has just asked for Rename again.
+    Resume has nothing of a rename's to carry on with."""
+    with pytest.raises(SystemExit):
+        try:
+            raise SystemExit(1)
+        finally:
+            report_run_result({"mode": "rename", "new_files": []})
+    out = capsys.readouterr().out
+    assert _result(out)["stopped"] == 1
+    assert "This run stopped before it finished." in out
+    assert "Resume" not in out
+
+
 @pytest.mark.parametrize("entry", ENTRIES, ids=lambda p: p.parent.name)
 def test_each_provider_reports_a_quiet_stop_as_stopped(entry, capsys):
     """Every app's own main, with a run that stops the way a mid-run

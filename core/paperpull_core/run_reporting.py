@@ -37,7 +37,11 @@ def report_run_result(stats):
               "wrong document arriving, not a missing one, so it is worth "
               "reporting." % wrong, flush=True)
     result["stopped"] = int(stopped_early())
-    if result["stopped"]:
+    if result["stopped"] and stats.get("mode") == "rename":
+        # Rename downloads nothing for Resume to carry on with, and when it
+        # stops it has just said what it put back and what to do instead.
+        print("\nThis run stopped before it finished.", flush=True)
+    elif result["stopped"]:
         print("\nThis run stopped before it finished. Whatever it saved is kept, "
               "and Resume carries on from where it stopped.", flush=True)
     # Never include account labels, paths, or provider response text.
