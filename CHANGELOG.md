@@ -31,6 +31,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and a second PayPal account on Coinbase's, and the two browsers attached
   to each other's signed-in session. The new port now moves past any port
   another app or account already uses.
+
 ### Security
 - **A link opened from an email, a chat or a PDF no longer starts a run in
   the control panel.** The panel's page asks for everything it does by
