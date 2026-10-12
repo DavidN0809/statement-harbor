@@ -715,8 +715,9 @@ def test_a_chain_whose_free_end_was_taken_stays_where_it_is(tmp_path):
     rows = _wanting(tmp_path, CHAIN_OF_TWO)
     result = renaming.apply(_plan_wanted(tmp_path, rows), say=lambda *a: None)
     (tmp_path / "A.pdf").write_bytes(b"%PDF-1.7 newcomer")
-    assert renaming.put_back(result) == [(tmp_path / "C.pdf", tmp_path / "B.pdf"),
-                                         (tmp_path / "B.pdf", tmp_path / "A.pdf")]
+    # The free end first, the order they would be renamed back by hand.
+    assert renaming.put_back(result) == [(tmp_path / "B.pdf", tmp_path / "A.pdf"),
+                                         (tmp_path / "C.pdf", tmp_path / "B.pdf")]
     assert _holding(tmp_path) == {"A.pdf": "newcomer", "B.pdf": "A.pdf", "C.pdf": "B.pdf"}
 
 
@@ -730,9 +731,9 @@ def test_a_ring_that_cannot_turn_back_is_left_as_it_was(tmp_path, _held_from):
     assert after == {"B.pdf": "A.pdf", "C.pdf": "B.pdf", "A.pdf": "C.pdf"}
     state = _held_from(10 ** 6)
     state["held"].add(str(tmp_path / "B.pdf").lower())
-    assert renaming.put_back(result) == [(tmp_path / "A.pdf", tmp_path / "C.pdf"),
+    assert renaming.put_back(result) == [(tmp_path / "B.pdf", tmp_path / "A.pdf"),
                                          (tmp_path / "C.pdf", tmp_path / "B.pdf"),
-                                         (tmp_path / "B.pdf", tmp_path / "A.pdf")]
+                                         (tmp_path / "A.pdf", tmp_path / "C.pdf")]
     assert _holding(tmp_path) == after
 
 
@@ -745,8 +746,9 @@ def test_a_ring_held_partway_back_keeps_the_rest_where_they_are(tmp_path, _held_
     result = renaming.apply(_plan_wanted(tmp_path, rows), say=lambda *a: None)
     state = _held_from(10 ** 6)
     state["held"].add(str(tmp_path / "C.pdf").lower())
-    assert renaming.put_back(result) == [(tmp_path / "A.pdf.renaming", tmp_path / "C.pdf"),
-                                         (tmp_path / "C.pdf", tmp_path / "B.pdf")]
+    # C.pdf back to B.pdf first, which frees C.pdf for the one put aside.
+    assert renaming.put_back(result) == [(tmp_path / "C.pdf", tmp_path / "B.pdf"),
+                                         (tmp_path / "A.pdf.renaming", tmp_path / "C.pdf")]
     assert _holding(tmp_path) == {"A.pdf": "A.pdf", "C.pdf": "B.pdf",
                                   "A.pdf.renaming": "C.pdf"}
 

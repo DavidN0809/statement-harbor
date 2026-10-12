@@ -541,7 +541,8 @@ _OTHER = -1
 def put_back(result: Result) -> List[tuple]:
     """Every file `apply` moved, back under the name it had, never over
     another file. Returns (where it is now, the path it had) for each file
-    that could not be put back, in the order apply recorded them.
+    that could not be put back, in the order they were tried, each chain
+    from its free end, so renaming them back by hand in that order works.
 
     The renames are undone the way apply did them, turned round. A file
     whose old name another of them holds now waits for that one to go back
@@ -583,7 +584,7 @@ def put_back(result: Result) -> List[tuple]:
             else:
                 stuck[j] = moves[j]
             done.add(j)
-    return [stuck[i] for i in sorted(stuck)]
+    return list(stuck.values())
 
 
 def _moved_by(result: Result) -> List[tuple]:
