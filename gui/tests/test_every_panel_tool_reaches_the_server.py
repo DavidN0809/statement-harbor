@@ -17,11 +17,13 @@ copied by server/Dockerfile into tools/ beside the image's gui folder, and
 able to import what it imports there, or be listed in DESKTOP_ONLY with the
 reason the server goes without it. The loaders come from the panel's code
 too, every function that looks in tools/, and each is called as the
-server with a copy of every script planted in the apps root and the folder
-above it. None of them may run.
+server with a copy of every script planted in the apps root, the folder
+above it and a tools folder in each. None of them may run.
 """
 import ast
+import asyncio
 import importlib.util
+import inspect
 import re
 import sys
 from pathlib import Path, PurePosixPath
@@ -77,10 +79,13 @@ def panel_tools() -> set:
 
 def loaders() -> list:
     """Every function of the panel that looks for a script in tools/, by
-    the place it names or through _tool_places."""
+    the place it names or through _tool_places. A route is left out, since
+    calling one here would do what it does, and a route reaches a script
+    through one of these."""
     found = []
     for node in _trees()["app.py"].body:
-        if not isinstance(node, ast.FunctionDef) or node.name == "_tool_places":
+        if (not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                or node.decorator_list or node.name == "_tool_places"):
             continue
         for inner in ast.walk(node):
             if ((isinstance(inner, ast.Constant) and inner.value == "tools")
@@ -130,11 +135,22 @@ def image_root(copies) -> PurePosixPath:
     return PurePosixPath(panel).parent
 
 
-def importable_in_the_image(copies) -> set:
-    """Top-level names a script in the image can import. The standard
-    library, every package server/requirements.txt pins, PaperPull's core,
-    which the image installs, and a module the image puts beside the
-    panel's folder or in its tools/."""
+def puts_a_folder_on_sys_path(tree) -> bool:
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in ("insert", "append")
+                and ast.unparse(node.func.value) == "sys.path"):
+            return True
+    return False
+
+
+def importable_in_the_image(tree, copies) -> set:
+    """Top-level names a script can import in the image. The panel loads a
+    script by its path, which puts no folder on sys.path, so that is the
+    standard library, every package server/requirements.txt pins and
+    PaperPull's core, which the image installs. A script that puts the
+    program's folder on sys.path itself, as add_account.py does, may also
+    import a module the image keeps there."""
     names = set(sys.stdlib_module_names)
     for line in (SERVER / "requirements.txt").read_text(encoding="utf-8").splitlines():
         line = line.split("#")[0].strip()
@@ -142,17 +158,16 @@ def importable_in_the_image(copies) -> set:
             names.add(re.split(r"[\[=<>~! ]", line)[0].lower().replace("-", "_"))
     if "core" in dict(copies):
         names.add("paperpull_core")
-    root = image_root(copies)
-    for _, dest in copies:
-        p = PurePosixPath(dest)
-        if p.suffix == ".py" and p.parent in (root, root / "tools"):
-            names.add(p.stem)
+    if puts_a_folder_on_sys_path(tree):
+        root = image_root(copies)
+        names |= {PurePosixPath(dest).stem for _, dest in copies
+                  if PurePosixPath(dest).suffix == ".py" and PurePosixPath(dest).parent == root}
     return names
 
 
-def imports_of(script: Path) -> set:
+def imports_of(tree) -> set:
     out = set()
-    for node in ast.walk(ast.parse(script.read_text(encoding="utf-8"))):
+    for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             out |= {a.name.split(".")[0] for a in node.names}
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
@@ -187,7 +202,8 @@ def test_the_image_carries_it_where_the_panel_looks(name):
 
 @pytest.mark.parametrize("name", sorted(panel_tools() - set(DESKTOP_ONLY)))
 def test_what_it_imports_is_in_the_image(name):
-    missing = imports_of(TOOLS / name) - importable_in_the_image(dockerfile_copies())
+    tree = ast.parse((TOOLS / name).read_text(encoding="utf-8"))
+    missing = imports_of(tree) - importable_in_the_image(tree, dockerfile_copies())
     assert not missing, "%s imports %s, which the image does not have" % (name, sorted(missing))
 
 
@@ -198,16 +214,21 @@ PLANTED = ("with open(%r, 'a', encoding='utf-8') as f:\n"
 
 
 def _plant(tmp_path):
-    """A copy of every panel script in the apps root and the folder above
-    it, each noting in ran.txt that it ran."""
+    """A copy of every panel script in the apps root, the folder above it
+    and a tools folder in each, each copy noting in ran.txt that it ran."""
     share = tmp_path / "share"
     data = share / "data"
-    data.mkdir(parents=True)
     ran = tmp_path / "ran.txt"
-    for name in panel_tools():
-        for folder in (data, share):
+    for folder in (data, share, data / "tools", share / "tools"):
+        folder.mkdir(parents=True, exist_ok=True)
+        for name in panel_tools():
             (folder / name).write_text(PLANTED % (str(ran), str(folder / name)), encoding="utf-8")
     return data, ran
+
+
+def _call(name):
+    found = getattr(app_module, name)()
+    return asyncio.run(found) if inspect.iscoroutine(found) else found
 
 
 @pytest.fixture()
@@ -232,8 +253,10 @@ def test_without_its_own_tools_the_server_runs_none_from_the_shared_folder(tmp_p
     monkeypatch.setenv("APPS_ROOT", str(data))
     monkeypatch.setenv("PAPERPULL_SERVER", "1")
 
+    for name in panel_tools():
+        assert app_module._tool_places(name) == (gui.parent / "tools" / name,), name
     for name in loaders():
-        assert getattr(app_module, name)() is None, name
+        assert _call(name) is None, name
     assert not ran.exists(), ran.read_text(encoding="utf-8")
 
 
@@ -244,7 +267,7 @@ def test_the_server_finds_its_own_copy_of_each(tmp_path, monkeypatch, fresh):
     monkeypatch.setattr(sys, "path", list(sys.path))   # add_account.py puts its folder first
 
     for name in loaders():
-        found = getattr(app_module, name)()
+        found = _call(name)
         assert found is not None, name
         assert _where(found).parent == TOOLS.resolve(), (name, _where(found))
     assert not ran.exists(), ran.read_text(encoding="utf-8")
