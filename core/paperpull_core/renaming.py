@@ -1430,8 +1430,9 @@ def review_names(app, ask, words: ReviewWords = WORDS,
             # names none (_text). Handed to Path, it stopped the review with
             # the receipt renamed and its record never written.
             recorded = prog.get("pdf_path")
-            ours = not prog or str(Path(recorded if isinstance(recorded, str) else "")) \
-                == str(old_path)
+            if not isinstance(recorded, (str, os.PathLike)):
+                recorded = ""
+            ours = not prog or str(Path(recorded)) == str(old_path)
             # Completed is for a receipt that was saved and marked for review
             # for its name alone, which its record says with downloaded_ok. A
             # receipt put aside in Manual Review because its PDF failed its
