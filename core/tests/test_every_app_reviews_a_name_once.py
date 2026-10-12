@@ -713,3 +713,151 @@ def test_the_name_a_receipt_had_marks_nothing_once_its_file_is_gone(app, tmp_pat
     assert "It could not be renamed (FileNotFoundError), so it keeps its name." in said, said
     assert inst.index_csv.read_all() == index and inst.order_csv.read_all() == orders
     assert inst.paths.progress_json.read_text(encoding="utf-8") == records
+
+
+def invoices_of_an_order(inst, filed: Path, words: str, confidence: str):
+    """An order split into three invoices as Target keeps one. Its record
+    names the first in pdf_path and every one in its list of invoices, and
+    the third was deleted once it was imported elsewhere."""
+    first = opening_pdf(filed, "2026-05-14 %s Invoice (1 of 3).pdf" % words)
+    second = opening_pdf(filed, "2026-05-14 %s Invoice (2 of 3).pdf" % words)
+    gone = filed / ("2026-05-14 %s Invoice (3 of 3).pdf" % words)
+    purchase = as_a_run_left_it(inst, "ORDER-0001", first, saved=True,
+                                confidence=confidence, summary="Unsure Purchase")
+    entries = [{"file": str(f), "part": "%d of 3" % i, "number": "INV-000%d" % i,
+                "kept": True, "names": i == 1}
+               for i, f in enumerate((first, second, gone), 1)]
+    inst.progress.update(purchase.key, {"invoices": entries})
+    return purchase, first, second, entries
+
+
+@pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
+@pytest.mark.parametrize("spelled", ["as its row spells it", "in another case"])
+def test_a_new_name_follows_into_the_record_s_list_of_invoices(app, spelled, tmp_path,
+                                                               monkeypatch):
+    """Target keeps every invoice of an order split into several in its
+    record's list of invoices, and only one of them in pdf_path. A new name
+    for an invoice corrected its rows and pdf_path and left the list naming
+    the old file, which Review Names, Rename and Target's own walk all read
+    as the order's. Each entry naming a renamed invoice now names it as it
+    is, the one pdf_path names and another alike, and an entry for a file
+    deleted since is left as it was, and an entry spelling its file in
+    another case than the row follows it too, as two spellings of one file
+    are on Windows and macOS. The list is read from the record whatever the
+    app, so every receipt app keeps it right."""
+    import os
+    mod = load(app)
+    inst = runnable(mod, tmp_path / "out")
+    filed = inst.paths.folder_for(ONLINE)
+    purchase, first, second, entries = invoices_of_an_order(inst, filed, "Unsure Purchase",
+                                                            "Low")
+    inst.index_csv.append_rows([index_row("ORDER-0001", second)])
+    if spelled == "in another case":
+        upper = [f.with_name(f.name.upper()) for f in (first, second)]
+        if not all(os.path.exists(u) for u in upper):
+            pytest.skip("this folder tells case apart, so the two spellings are two files")
+        entries[:2] = [dict(e, file=str(u)) for e, u in zip(entries, upper)]
+        inst.progress.update(purchase.key, {"invoices": entries})
+
+    answers = iter(["Garden Hose", "Lamp"])
+    monkeypatch.setattr(mod, "ask", lambda prompt: next(answers))
+    inst.cmd_review_names()
+
+    garden = [p for p in filed.iterdir() if "Garden Hose" in p.name]
+    lamp = [p for p in filed.iterdir() if "Lamp" in p.name]
+    assert len(garden) == len(lamp) == 1 and not first.exists() and not second.exists(), \
+        sorted(p.name for p in filed.iterdir())
+    record = json.loads(inst.paths.progress_json.read_text(encoding="utf-8"))[purchase.key]
+    assert record["pdf_path"] == str(garden[0])
+    assert record["invoices"] == [dict(entries[0], file=str(garden[0])),
+                                  dict(entries[1], file=str(lamp[0])), entries[2]]
+
+
+@pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
+@pytest.mark.parametrize("moving", ["the one pdf_path names", "another",
+                                    "one the list spells in another case"])
+def test_rename_follows_into_the_record_s_list_of_invoices(app, moving, tmp_path):
+    """Rename moves the invoice an index row names to the name the app gives
+    it today, and corrected the row and pdf_path while the list of invoices
+    kept the old name. The entry follows the file now, when pdf_path names
+    it, when pdf_path names another invoice that stays where it is, and
+    when the list spells the file in another case than the row, as two
+    spellings of one file are on Windows and macOS. The entries of files
+    Rename did not move are left as they were."""
+    import os
+    from paperpull_core import renaming
+    mod = load(app)
+    inst = runnable(mod, tmp_path / "out")
+    filed = inst.paths.folder_for(ONLINE)
+    purchase, first, second, entries = invoices_of_an_order(inst, filed, "Older Words",
+                                                            "High")
+    target, at = (second, 1) if moving == "another" else (first, 0)
+    if moving == "another":
+        # The order's only index row names the second invoice.
+        row = index_row("ORDER-0001", second, status="Completed")
+        row["Classification Confidence"] = "High"
+        inst.index_csv.rewrite([row])
+    if moving == "one the list spells in another case":
+        spelled = first.with_name(first.name.upper())
+        if not os.path.exists(spelled):
+            pytest.skip("this folder tells case apart, so the two spellings are two files")
+        entries[0] = dict(entries[0], file=str(spelled))
+        inst.progress.update(purchase.key, {"invoices": entries})
+
+    said = []
+    renaming.run_for(inst, apply_changes=True, say=said.append)
+
+    moved = [p for p in filed.iterdir() if "Unsure Purchase" in p.name]
+    assert len(moved) == 1 and not target.exists(), said
+    assert {p.name for p in filed.iterdir()} == {moved[0].name, (second, first)[at].name}, said
+    record = json.loads(inst.paths.progress_json.read_text(encoding="utf-8"))[purchase.key]
+    assert record["pdf_path"] == str(moved[0] if at == 0 else first), said
+    want = list(entries)
+    want[at] = dict(entries[at], file=str(moved[0]))
+    assert record["invoices"] == want, said
+
+
+def keeps_a_list_of_invoices(tree) -> bool:
+    """Whether an app writes a list of invoices into its records, a dict
+    with an "invoices" key handed to _record_state."""
+    import ast
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "_record_state"):
+            for arg in [*node.args, *(k.value for k in node.keywords)]:
+                for d in ast.walk(arg):
+                    if isinstance(d, ast.Dict) and any(
+                            isinstance(k, ast.Constant) and k.value == "invoices"
+                            for k in d.keys):
+                        return True
+    return False
+
+
+def test_every_app_keeping_a_list_of_invoices_mends_it_before_a_rename():
+    """Review Names and Rename left a record's list of invoices naming the
+    files they renamed until the list followed its files, and both read the
+    list as naming the order's files. An app whose records keep such a list
+    mends it (_mend_invoice_lists) in cmd_rename and in cmd_review_names,
+    before either reads it. Apps are found by what they write, and at least
+    one does, so this is not passing on no app at all."""
+    import ast
+    keeping = []
+    for app in APPS:
+        tree = ast.parse(entry_of(app).read_text(encoding="utf-8"))
+        if not keeps_a_list_of_invoices(tree):
+            continue
+        keeping.append(app.name)
+        commands = {n.name: n for n in ast.walk(tree)
+                    if isinstance(n, ast.FunctionDef)
+                    and n.name in ("cmd_rename", "cmd_review_names")}
+        for name in ("cmd_rename", "cmd_review_names"):
+            # In the order they stand in the source, which ast.walk is not.
+            calls = [c.func.attr for c in sorted(
+                (c for c in ast.walk(commands[name])
+                 if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)),
+                key=lambda c: (c.lineno, c.col_offset))]
+            assert "_mend_invoice_lists" in calls, (app.name, name)
+            assert calls.index("_mend_invoice_lists") < min(
+                calls.index(c) for c in ("run_for", "review_names") if c in calls), \
+                (app.name, name, "mends before it renames")
+    assert keeping, "no app keeps a list of invoices, so this checks nothing"

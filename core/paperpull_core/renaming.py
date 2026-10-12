@@ -831,17 +831,23 @@ def update_progress(progress, result: Result, *,
     for key, rec in list(data.items()):
         if not isinstance(rec, dict):
             continue
+        patch = {}
         recorded = _text(rec.get(path_field))
         if recorded:
             new_path = moved(recorded)
-            if not new_path:
-                continue
-            patch = {path_field: new_path, filename_field: Path(new_path).name}
+            if new_path:
+                patch = {path_field: new_path, filename_field: Path(new_path).name}
         else:
             new_name = result.names.get(_text(rec.get(filename_field)))
-            if not new_name:
-                continue
-            patch = {filename_field: new_name}
+            if new_name:
+                patch = {filename_field: new_name}
+        # Whether or not pdf_path moved, since it names one invoice of an
+        # order split into several and Rename may move another.
+        invoices = _follow_invoices(rec.get("invoices"), moved)
+        if invoices is not None:
+            patch["invoices"] = invoices
+        if not patch:
+            continue
         progress.update(key, patch, save=False)
         touched += 1
     if touched:
@@ -858,6 +864,28 @@ def _text(value) -> str:
     if isinstance(value, os.PathLike):
         value = os.fspath(value)
     return value.strip() if isinstance(value, str) else ""
+
+
+def _follow_invoices(invoices, moved: Callable[[str], Optional[str]]) -> Optional[list]:
+    """A record's list of invoices with each entry whose file moved naming
+    it where it went (`moved` gives that, or None), and None when no entry
+    changed.
+
+    Target keeps every invoice of an order split into several in this list,
+    and only one of them in pdf_path. A rename corrected the rows and
+    pdf_path and left the list naming the old file, which Review Names,
+    Rename and Target's own walk all read as the order's, so a later file
+    given that freed name was taken for this order's as well."""
+    if not isinstance(invoices, list):
+        return None
+    out, changed = [], False
+    for e in invoices:
+        raw = _text(e.get("file")) if isinstance(e, dict) else ""
+        new = moved(raw) if raw else None
+        if new and new != raw:
+            e, changed = dict(e, file=new), True
+        out.append(e)
+    return out if changed else None
 
 
 def _moved(result: Result):
@@ -1427,6 +1455,11 @@ class _Known:
         raws = [(r.get("PDF Full Path") or "").strip() for r in rows]
         raws += [_text(rec.get("pdf_path")) for rec in records.values()
                  if isinstance(rec, dict)]
+        # Each invoice of a record's list as well, which update_progress
+        # carries to where its file went (_follow_invoices).
+        raws += [_text(e.get("file")) for rec in records.values()
+                 if isinstance(rec, dict) and isinstance(rec.get("invoices"), list)
+                 for e in rec["invoices"] if isinstance(e, dict)]
         out = {}
         for raw in raws:
             for old in moving.get(self._file(raw), ()):
@@ -1505,29 +1538,31 @@ def held_receipt(row: dict, paths) -> Optional[Path]:
     return held_document(row.get("PDF Full Path"), paths.filing_folders())
 
 
-def _numbers_naming(rows: Iterable[dict], records: dict) -> dict:
+def _numbers_naming(rows: Iterable[dict], records: dict, lists: bool = True) -> dict:
     """Each file the index rows and progress records name (_same_file of
     it), with each spelling naming it and the order number of the purchase
     whose row or record it is. A record's number is its order_number, or
     what its key, Purchase.key, has after the purchase type. A record names
     its pdf_path, and each file of its invoices as well, since Target keeps
     every invoice of an order split into several there and only one of them
-    in pdf_path and the order's index row."""
+    in pdf_path and the order's index row. Without `lists`, the list of
+    invoices is left out. Each comes with the list's entry that names it, or
+    None for a row or a pdf_path."""
     out = {}
     named = [((r.get("PDF Full Path") or "").strip(),
-              (r.get("Order or Receipt Number") or "").strip()) for r in rows]
+              (r.get("Order or Receipt Number") or "").strip(), None) for r in rows]
     for key, rec in records.items():
         if not isinstance(rec, dict):
             continue
         number = str(rec.get("order_number") or str(key).partition(":")[2]).strip()
-        invoices = rec.get("invoices")
-        files = [rec.get("pdf_path")] + [e.get("file") for e in (
+        invoices = rec.get("invoices") if lists else None
+        named.append((_text(rec.get("pdf_path")), number, None))
+        named += [(_text(e.get("file")), number, e) for e in (
             invoices if isinstance(invoices, list) else ()) if isinstance(e, dict)]
-        named += [(_text(f), number) for f in files]
-    for raw, number in named:
+    for raw, number, entry in named:
         where = _same_file(raw) if raw else ""
         if where:
-            out.setdefault(where, []).append((raw, number))
+            out.setdefault(where, []).append((raw, number, entry))
     return out
 
 
@@ -1563,6 +1598,31 @@ def _say_review_undone(e: BaseException, writing: str, moved: bool, stuck: list,
               "renamed.")
     if isinstance(e, PermissionError):
         print("Close any program that has %s open and run Review Names again." % writing)
+
+
+def named_by_another(rows: Iterable[dict], records: dict, lists: bool = True,
+                     claims: Optional[Callable[[dict, str], bool]] = None
+                     ) -> Callable[[str, str], bool]:
+    """Whether a file is named by an index row or progress record of
+    another purchase than the one whose order number is given, asked as
+    another(path, number). A record names its pdf_path and each file of its
+    list of invoices (_numbers_naming), or only its pdf_path without
+    `lists`, since rows and pdf_path follow every rename and a list an
+    earlier rename left behind may name an old file. `claims(entry, path)`,
+    when given, says whether another purchase's list entry naming the file
+    is a claim on it, asked only of a file asked about. Two spellings are
+    one file only when they are shown to be (_one_file)."""
+    numbers = _numbers_naming(rows, records, lists)
+
+    def another(raw: str, number: str) -> bool:
+        raw = str(raw or "").strip()
+        number = str(number or "").strip()
+        where = _same_file(raw) if raw else ""
+        return bool(where) and any(
+            n != number and _one_file(r, raw)
+            and (entry is None or claims is None or claims(entry, raw))
+            for r, n, entry in numbers.get(where, ()))
+    return another
 
 
 def review_names(app, ask, words: ReviewWords = WORDS,
@@ -1601,7 +1661,7 @@ def review_names(app, ask, words: ReviewWords = WORDS,
     so an older copy of a purchase whose record names another copy leaves
     that record as it is."""
     rows = app.index_csv.read_all()
-    numbers = _numbers_naming(rows, getattr(app.progress, "data", None) or {})
+    another = named_by_another(rows, getattr(app.progress, "data", None) or {})
     # A row somebody already renamed is left out, even one renamed before
     # its confidence was marked High as well (#47).
     review, offered, left_out, shared = [], set(), 0, 0
@@ -1613,9 +1673,7 @@ def review_names(app, ask, words: ReviewWords = WORDS,
         path = held_receipt(r, app.paths)
         if path is None:
             left_out += 1
-        elif any(number != (r.get("Order or Receipt Number") or "").strip()
-                 and _one_file(raw, str(path))
-                 for raw, number in numbers.get(_same_file(str(path)), ())):
+        elif another(str(path), r.get("Order or Receipt Number")):
             # A file deleted once it was imported elsewhere leaves its name
             # free, and a later purchase of the same day and summary is
             # saved under it. Whose receipt the file is cannot be told, and
@@ -1693,6 +1751,15 @@ def review_names(app, ask, words: ReviewWords = WORDS,
             rows_before = [dict(row) for row in rows]
             order_rows_before = [dict(orow) for orow in order_rows]
             moved = Result()
+            # Each entry of the record's list of invoices naming this file,
+            # however it is spelled, told while the file is there to be
+            # compared, since afterwards two spellings that read alike may
+            # be two files where a folder tells case apart.
+            invoices = prog.get("invoices")
+            spelled = {_text(e.get("file"))
+                       for e in (invoices if isinstance(invoices, list) else ())
+                       if isinstance(e, dict)}
+            spelled = {raw for raw in spelled if raw and _one_file(raw, str(old_path))}
             try:
                 # The file does not stand in its own way. Asked for a free
                 # name as though it were another file's, the summary it
@@ -1783,13 +1850,23 @@ def review_names(app, ask, words: ReviewWords = WORDS,
                             orow["Processing Status"] = "Completed"
                 app.order_csv.rewrite(order_rows, backup=not written)
                 done.append((app.order_csv, order_rows_before))
+                # An entry of the record's list of invoices naming this file
+                # follows it, whether or not the record speaks for it
+                # otherwise, since it names this very file (_follow_invoices).
+                invoices = _follow_invoices(
+                    invoices, lambda raw: str(new_path) if raw in spelled else None)
                 if ours:
                     writing = _name_of(app.progress)
                     named = {"summary": new_summary, "pdf_filename": new_path.name,
                              "pdf_path": str(new_path), "confidence": "High"}
                     if saved:
                         named["state"] = State.COMPLETED.value
+                    if invoices is not None:
+                        named["invoices"] = invoices
                     app.progress.update(key, named)  # key (purchase identifier) unchanged
+                elif invoices is not None:
+                    writing = _name_of(app.progress)
+                    app.progress.update(key, {"invoices": invoices})
             except BaseException as e:
                 stopped = True
                 stuck, unwritten = _undo(records, done, moved)

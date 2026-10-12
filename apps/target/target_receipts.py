@@ -82,9 +82,24 @@ def _part_order(entry: dict):
     return int(part.split(" of ")[0]) if part else 99
 
 
+def _there(path) -> bool:
+    """Whether a file is there, and False for one that cannot be asked
+    about, in a folder the person may not read for instance."""
+    try:
+        return Path(path).exists()
+    except OSError:
+        return False
+
+
+def _among(entry, entries) -> bool:
+    """Whether this very entry is one of these, by identity, not by value."""
+    return any(entry is e for e in entries)
+
+
 # ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
+
 
 class App:
     _journal = None
@@ -1450,24 +1465,32 @@ class App:
         if rec.get("invoices"):
             entries = [dict(e) for e in rec["invoices"]
                        if isinstance(e, dict) and e.get("file")]
-            self._follow_renames(purchase, entries)
+            lost = self._follow_renames(purchase, entries)
+            # An entry still lost names no file that is this invoice, gone
+            # or another order's that took its old name, so it is missing
+            # wherever a missing file is fetched again, under --redownload
+            # and for a copy put aside. Kept and not asked for again, it
+            # still counts, the promise every download here makes.
             return [e for e in entries
-                    if (receipt_pdf.validate_pdf(Path(e["file"]),
-                                                 self.config["min_pdf_bytes"]).ok
+                    if (not _among(e, lost)
+                        and receipt_pdf.validate_pdf(Path(e["file"]),
+                                                     self.config["min_pdf_bytes"]).ok
                         if not e.get("kept", True)
-                        else not again or Path(e["file"]).exists())]
+                        else not again or (Path(e["file"]).exists()
+                                           and not _among(e, lost)))]
         return self._indexed_invoices(purchase)
 
-    def _indexed_invoices(self, purchase: Purchase) -> list:
+    def _indexed_invoices(self, purchase: Purchase, rows=None) -> list:
         """The order's invoices its rows in the receipt index name, each
-        known by what its file says, and only files that are there."""
+        known by what its file says, and only files that are there. `rows`
+        is the index as read already, or this order's rows of it."""
         entries, seen = [], set()
-        for row in self.index_csv.read_all():
+        for row in (self.index_csv.read_all() if rows is None else rows):
             path = (row.get("PDF Full Path") or "").strip()
             if (row.get("Order or Receipt Number") != purchase.order_number
                     or row.get("Purchase Type") != purchase.purchase_type
                     or row.get("Document Type") != "Invoice"
-                    or not path or path in seen or not Path(path).exists()):
+                    or not path or path in seen or not _there(path)):
                 continue
             seen.add(path)
             text = receipt_pdf.pdf_text(Path(path))
@@ -1480,33 +1503,169 @@ class App:
                     "size": row.get("PDF File Size", ""), "pages": row.get("PDF Page Count", "")})
         return entries
 
-    def _follow_renames(self, purchase: Purchase, entries: list) -> None:
+    def _follow_renames(self, purchase: Purchase, entries: list, another=None,
+                        rows=None, held=None) -> list:
         """Point an invoice's entry at the name its file has now.
 
         Review Names and Rename give the file an index row names a new name
         and correct the row, and the record's list of invoices kept the old
-        name, so --redownload took the invoice for missing and saved it a
-        second time. The record's own pdf_path is no help, since the run has
-        written the purchase over it before the walk starts. Only an entry
-        whose file is gone is followed, and only to a file of the order's
+        name until the list followed its files, so --redownload took the
+        invoice for missing and saved it a second time. The record's own
+        pdf_path is no help, since the run has written the purchase over it
+        before the walk starts. An entry whose file is gone is followed, and
+        so is one whose old name a later order's file has taken since, which
+        another order's rows or record name and which does not say it is
+        this invoice (_lost). Each is followed only to a file of the order's
         index rows that says it is that invoice, by the rule the walk uses.
         Neither rename moves a file to another folder, so one put aside is
         followed only to a file in Manual Review, and one kept only to a
-        file outside it."""
-        gone = [e for e in entries if not Path(e["file"]).exists()]
+        file outside it. `another` is _another over the index and the
+        records, read here only when an entry's file is there to be asked
+        about, and `rows` the index as read already. A file another order
+        claims (`held`, `another` when not given) is followed to only by a
+        number both carry, as _lost asks of a file an entry names, since one
+        of the order's own rows may still name a name its file left, deleted
+        once it was imported elsewhere, that a later order's file took
+        since. The entries still lost, which name no file that is their
+        invoice."""
+        if another is None:
+            built = []
+
+            def another(raw, number):
+                if not built:
+                    built.append(self._another(
+                        self.index_csv.read_all(), getattr(self.progress, "data", None) or {}))
+                return built[0](raw, number)
+        gone = [e for e in entries if self._lost(e, purchase, another)]
         if not gone:
-            return
+            return []
+        held = held or another
         named = {e["file"] for e in entries}
-        for found in self._indexed_invoices(purchase):
+        for found in self._indexed_invoices(purchase, rows):
             if found["file"] in named:
                 continue
             part = tuple(int(n) for n in found["part"].split(" of ")) if found["part"] else None
+            taken = held(found["file"], purchase.order_number)
             for e in gone:
                 if (found["kept"] == e.get("kept", True)
-                        and self._on_file({"saved": [e]}, part, found["number"])):
+                        and self._on_file({"saved": [e]}, part, found["number"])
+                        and not (taken and not (found["number"]
+                                                and found["number"] == e.get("number")))):
                     e["file"] = found["file"]
                     gone.remove(e)
                     break
+        return gone
+
+    def _lost(self, entry: dict, purchase: Purchase, another) -> bool:
+        """Whether an entry of the order's list no longer names its invoice.
+        Its file is gone, or another order claims that file (_another) and
+        the file does not carry this invoice's number. Where neither carries
+        a number, neither order keeps the file, as whose it is cannot be
+        told, and a mend that follows the stale order's entry to its own file
+        first gives the file back to the other. A file
+        that cannot be asked about, in a folder the person may not read for
+        instance, is left as it is, and so is its entry."""
+        path = Path(entry["file"])
+        try:
+            if not path.exists():
+                return True
+        except OSError:
+            return False
+        if not another(entry["file"], purchase.order_number):
+            return False
+        # Only a number both carry. Two orders' invoices of one place, "1 of
+        # 1", read alike where either lacks a number, so a stale entry was
+        # taken to name its own invoice in the later order's file and was
+        # never mended. One whose number did not read is followed to the
+        # order's own file instead, and stays as it is where there is none.
+        _, number = site.invoice_identity(receipt_pdf.pdf_text(path))
+        return not (number and str(entry.get("number") or "") == number)
+
+    def _another(self, rows, data):
+        """renaming.named_by_another over the index and the records, where
+        another order's list entry claims its file only by a number the file
+        carries, or where the entry carries none and whose the file is cannot
+        be told. Target writes one index row per order, naming the invoice in
+        pdf_path, so a tip or a second shipment is named only in the order's
+        list, and a later order's such invoice under a freed name is a claim
+        on it. An entry an earlier rename left naming an old file carries the
+        number of its own invoice, not of the file there now, so it is none.
+        One with no number claims a file that says its place, or says none."""
+        read = {}
+
+        def claims(entry, raw):
+            if raw not in read:
+                read[raw] = site.invoice_identity(receipt_pdf.pdf_text(Path(raw)))
+            part, number = read[raw]
+            mine = str(entry.get("number") or "").strip()
+            if mine:
+                return number == mine
+            # No number, so its place, where the file says one.
+            return part is None or str(entry.get("part") or "") == "%d of %d" % part
+        return renaming.named_by_another(rows, data, claims=claims)
+
+    def _mend_invoice_lists(self, save: bool, before: Optional[dict] = None) -> int:
+        """Point each order's list of invoices at its files as they are now,
+        before Review Names or Rename reads it, and write it down when
+        `save`. How many entries moved. Each mended record is kept in
+        `before` as it was, by its key, as it is mended, for a preview to put
+        back however the mend or the rename after it ends.
+
+        An earlier Review Names or Rename left the list naming the old file
+        of each invoice it renamed. Review Names and Rename read the list as
+        naming the order's files, so a later order's file given such a freed
+        name was taken for this order's as well. Each entry is followed as
+        the walk follows one (_follow_renames), so an entry whose file was
+        deleted once it was imported elsewhere is left as it is. A preview
+        mends the list only in memory, so it says what Rename will do. The
+        index is read once, so an archive whose files were deleted after
+        import, whose entries all stay lost, is not read again per order.
+
+        Twice. First by the claims of other orders' rows and pdf_path, which
+        follow every rename, so a stale list is mended before it is asked to
+        claim anything, and the order whose file it named keeps it. Then
+        with other orders' lists as well (_another), where a later order's
+        invoice named only in its list claims its file."""
+        data = getattr(self.progress, "data", None) or {}
+        rows = self.index_csv.read_all()
+        orders = {}
+        for row in rows:
+            orders.setdefault((row.get("Purchase Type"), row.get("Order or Receipt Number")),
+                              []).append(row)
+        moved_entries = set()
+        before = {} if before is None else before
+        for lists in (False, True):
+            # Where an entry may be followed to is asked of every claim, the
+            # lists' too, in both passes.
+            held = self._another(rows, data)
+            another = held if lists else renaming.named_by_another(rows, data, lists=False)
+            for key, rec in list(data.items()):
+                invoices = rec.get("invoices") if isinstance(rec, dict) else None
+                if not isinstance(invoices, list):
+                    continue
+                listed = [e for e in invoices
+                          if isinstance(e, dict) and isinstance(e.get("file"), str)
+                          and e["file"].strip()]
+                if not listed:
+                    continue
+                was = [e["file"] for e in listed]
+                kept_as = dict(rec, invoices=[dict(e) if isinstance(e, dict) else e
+                                              for e in invoices])
+                purchase = Purchase(
+                    purchase_type=str(rec.get("purchase_type") or str(key).partition(":")[0]),
+                    order_number=str(rec.get("order_number") or str(key).partition(":")[2]))
+                # In place, so the second pass reads the list as mended.
+                self._follow_renames(purchase, listed, another,
+                                     orders.get((purchase.purchase_type, purchase.order_number),
+                                                []), held)
+                moved = [e for e, old in zip(listed, was) if e["file"] != old]
+                if moved:
+                    before.setdefault(key, kept_as)
+                    self.progress.update(key, {"invoices": invoices}, save=False)
+                    moved_entries.update(id(e) for e in moved)
+        if moved_entries and save:
+            self.progress.save()
+        return len(moved_entries)
 
     def _on_file(self, walk: dict, part, number: str) -> bool:
         """Whether this invoice is one of the order's already saved. By its
@@ -1709,7 +1868,23 @@ class App:
         nothing is asked of the provider here (#43, #49). A preview
         unless --apply is given."""
         self.stats["mode"] = "rename"
-        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
+        apply = bool(getattr(self.args, "apply", False))
+        before = {}
+        try:
+            mended = self._mend_invoice_lists(save=apply, before=before)
+            if mended and apply:
+                print("%d invoice(s) in the order records named a file an earlier rename "
+                      "moved, and now name it as it is." % mended)
+            elif mended:
+                print("%d invoice(s) in the order records name a file an earlier rename "
+                      "moved, and Rename with --apply writes down where each is now."
+                      % mended)
+            renaming.run_for(self, apply_changes=apply)
+        finally:
+            if not apply:
+                # main() saves progress.json after every command, a preview
+                # included, so each record a preview mended is put back.
+                self.progress.data.update(before)
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"
@@ -1741,6 +1916,10 @@ class App:
                 print(f"  {k}: {c} rows")
 
     def cmd_review_names(self):
+        mended = self._mend_invoice_lists(save=True)
+        if mended:
+            print("%d invoice(s) in the order records named a file an earlier rename "
+                  "moved, and now name it as it is." % mended)
         renaming.review_names(self, ask)
 
     @property
