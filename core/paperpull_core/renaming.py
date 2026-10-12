@@ -1254,46 +1254,56 @@ def held_receipt(row: dict, paths) -> Optional[Path]:
     return held_document(row.get("PDF Full Path"), paths.filing_folders())
 
 
-def _numbers_naming(rows: Iterable[dict], records: dict) -> dict:
+def _numbers_naming(rows: Iterable[dict], records: dict, lists: bool = True) -> dict:
     """Each file the index rows and progress records name (_same_file of
     it), with each spelling naming it and the order number of the purchase
     whose row or record it is. A record's number is its order_number, or
     what its key, Purchase.key, has after the purchase type. A record names
     its pdf_path, and each file of its invoices as well, since Target keeps
     every invoice of an order split into several there and only one of them
-    in pdf_path and the order's index row."""
+    in pdf_path and the order's index row. Without `lists`, the list of
+    invoices is left out. Each comes with the list's entry that names it, or
+    None for a row or a pdf_path."""
     out = {}
     named = [((r.get("PDF Full Path") or "").strip(),
-              (r.get("Order or Receipt Number") or "").strip()) for r in rows]
+              (r.get("Order or Receipt Number") or "").strip(), None) for r in rows]
     for key, rec in records.items():
         if not isinstance(rec, dict):
             continue
         number = str(rec.get("order_number") or str(key).partition(":")[2]).strip()
-        invoices = rec.get("invoices")
-        files = [rec.get("pdf_path")] + [e.get("file") for e in (
+        invoices = rec.get("invoices") if lists else None
+        named.append((str(rec.get("pdf_path") or "").strip(), number, None))
+        named += [(str(e.get("file") or "").strip(), number, e) for e in (
             invoices if isinstance(invoices, list) else ()) if isinstance(e, dict)]
-        named += [(str(f or "").strip(), number) for f in files]
-    for raw, number in named:
+    for raw, number, entry in named:
         where = _same_file(raw) if raw else ""
         if where:
-            out.setdefault(where, []).append((raw, number))
+            out.setdefault(where, []).append((raw, number, entry))
     return out
 
 
-def named_by_another(rows: Iterable[dict], records: dict) -> Callable[[str, str], bool]:
+def named_by_another(rows: Iterable[dict], records: dict, lists: bool = True,
+                     claims: Optional[Callable[[dict, str], bool]] = None
+                     ) -> Callable[[str, str], bool]:
     """Whether a file is named by an index row or progress record of
     another purchase than the one whose order number is given, asked as
     another(path, number). A record names its pdf_path and each file of its
-    list of invoices (_numbers_naming). Two spellings are one file only when
-    they are shown to be (_one_file)."""
-    numbers = _numbers_naming(rows, records)
+    list of invoices (_numbers_naming), or only its pdf_path without
+    `lists`, since rows and pdf_path follow every rename and a list an
+    earlier rename left behind may name an old file. `claims(entry, path)`,
+    when given, says whether another purchase's list entry naming the file
+    is a claim on it, asked only of a file asked about. Two spellings are
+    one file only when they are shown to be (_one_file)."""
+    numbers = _numbers_naming(rows, records, lists)
 
     def another(raw: str, number: str) -> bool:
         raw = str(raw or "").strip()
         number = str(number or "").strip()
         where = _same_file(raw) if raw else ""
-        return bool(where) and any(n != number and _one_file(r, raw)
-                                   for r, n in numbers.get(where, ()))
+        return bool(where) and any(
+            n != number and _one_file(r, raw)
+            and (entry is None or claims is None or claims(entry, raw))
+            for r, n, entry in numbers.get(where, ()))
     return another
 
 

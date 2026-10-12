@@ -1209,6 +1209,10 @@ def test_download_again_fetches_an_invoice_whose_own_file_is_gone_too(tmp_path):
     assert [e["file"] for e in app._invoices_on_file(purchase)] == [entries[0]["file"]]
     assert [e["number"] for e in an_app(tmp_path)._invoices_on_file(purchase)] == [
         "10000000000000042", "10000000000000041"]
+    # The stale entry carries its own invoice's number, not the one the
+    # other order's file carries, so it is no claim on that file, and the
+    # other order's invoice is on file, not fetched a second time.
+    assert [e["file"] for e in app._invoices_on_file(other)] == [entries[1]["file"]]
 
 
 def test_an_entry_that_cannot_be_asked_about_stops_nothing(tmp_path, monkeypatch, capsys):
@@ -1243,3 +1247,251 @@ def test_an_entry_that_cannot_be_asked_about_stops_nothing(tmp_path, monkeypatch
     assert saved_record(app, purchase)["invoices"] == [
         entries[0], dict(entries[1], file=str(renamed))]
     assert saved_record(app, later)["invoices"][0]["file"] == str(locked)
+
+
+
+def unnumbered_invoice(path, line):
+    """A saved invoice whose number did not read, so it says only its place."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(testkit.text_pdf(["Invoice 1 of 1", line, "Invoice total $4.32"]))
+    return path
+
+
+def left_stale_unnumbered(app, kept: bool):
+    """left_stale with the name taken, for invoices that carry no number,
+    kept or put aside. TIPPED's one invoice was renamed and its list names
+    the old file, which a later order's one invoice took since, and both
+    say only "1 of 1". The later order also has a copy of its invoice that
+    Download again left, beside the one its record names."""
+    folder = app.paths.invoices if kept else app.paths.manual_review
+    purchase = tipped_purchase()
+    renamed = unnumbered_invoice(folder / "Wooden Puzzle Box.pdf", "Invented Wooden Puzzle Box")
+    old = unnumbered_invoice(folder / "Games.pdf", "Invented Other Thing")
+    copy = unnumbered_invoice(folder / "Games (2).pdf", "Invented Other Thing")
+    entry = {"part": "1 of 1", "number": "", "kept": kept, "names": True}
+    app.progress.update(purchase.key, dict(purchase.to_dict(), state="Completed",
+                                           downloaded_ok=True, pdf_path=str(renamed),
+                                           pdf_filename=renamed.name,
+                                           invoices=[dict(entry, file=str(old))]))
+    index_rows(app, purchase.order_number, renamed)
+    other = Purchase(purchase_type=ONLINE, purchase_date=TIPPED.iso, order_number=OTHER,
+                     summary="Games", items=[Item(name="Invented Other Thing")])
+    app.progress.update(other.key, dict(other.to_dict(), state="Completed",
+                                        downloaded_ok=True, pdf_path=str(old),
+                                        pdf_filename=old.name,
+                                        invoices=[dict(entry, file=str(old))]))
+    index_rows(app, OTHER, old, confidence="Low", status="Review Needed")
+    index_rows(app, OTHER, copy)
+    return purchase, other, renamed, old
+
+
+@pytest.mark.parametrize("kept", [True, False], ids=["kept", "put aside"])
+def test_an_unnumbered_invoice_is_not_taken_for_another_orders_of_its_place(
+        kept, tmp_path, monkeypatch):
+    """Two orders' invoices of one place, "1 of 1", read alike where
+    neither carries a number, so the stale entry was taken to name its own
+    invoice in the later order's file, and was never mended. A file another
+    order claims is this order's only by a number both carry, so the
+    stale entry is followed to the order's own file, and Download again
+    counts that file, not the other order's. The mend follows the stale
+    entry first, by the claims of rows and pdf_path, which follow every
+    rename, so the later order keeps its file. Its entry does not move to
+    its own copy, Download again counts it, and a copy put aside counts.
+    Until that mend, neither order's entry can be told to be the file's, so
+    Download again may fetch the later order's invoice once more, a second
+    copy and never one written over."""
+    app = an_app(tmp_path)
+    purchase, other, renamed, old = left_stale_unnumbered(app, kept)
+    again = an_app(tmp_path, "--redownload")
+    assert [e["file"] for e in again._invoices_on_file(purchase)] == [str(renamed)]
+
+    monkeypatch.setattr(app_mod, "ask", lambda prompt: "")
+    app.cmd_review_names()
+    assert [e["file"] for e in saved_record(app, purchase)["invoices"]] == [str(renamed)]
+    assert [e["file"] for e in saved_record(app, other)["invoices"]] == [str(old)], \
+        "not moved to its own copy"
+    for args in ((), ("--redownload",)):
+        assert [e["file"] for e in an_app(tmp_path, *args)._invoices_on_file(other)] \
+            == [str(old)], args
+
+
+
+def tips_taken_since(app, kept: bool):
+    """TIPPED's two invoices, its tip named only in its list as Target
+    writes one index row per order, were deleted once they were imported
+    elsewhere. A later order of the same day and summary took both freed
+    names, its own tip again named only in its list."""
+    folder = app.paths.invoices if kept else app.paths.manual_review
+    tip, doc = folder / "Games (1 of 2).pdf", folder / "Games (2 of 2).pdf"
+    purchase = tipped_purchase()
+    app.progress.update(purchase.key, dict(purchase.to_dict(), state="Completed",
+                                           downloaded_ok=kept, pdf_path=str(doc),
+                                           pdf_filename=doc.name, invoices=[
+        {"file": str(tip), "part": "1 of 2", "number": "10000000000000042", "kept": kept},
+        {"file": str(doc), "part": "2 of 2", "number": "10000000000000041", "kept": kept}]))
+    index_rows(app, purchase.order_number, doc)
+    invoice_pdf(tip, "1 of 2", "10000000000000098", "10000098 - shipt_tip")
+    invoice_pdf(doc, "2 of 2", "10000000000000099", "10000099 - Invented Other Thing")
+    other = Purchase(purchase_type=ONLINE, purchase_date=TIPPED.iso, order_number=OTHER,
+                     summary="Games")
+    app.progress.update(other.key, dict(other.to_dict(), state="Completed",
+                                        downloaded_ok=kept, pdf_path=str(doc),
+                                        pdf_filename=doc.name, invoices=[
+        {"file": str(tip), "part": "1 of 2", "number": "10000000000000098", "kept": kept},
+        {"file": str(doc), "part": "2 of 2", "number": "10000000000000099", "kept": kept}]))
+    index_rows(app, OTHER, doc)
+    return purchase, other, tip, doc
+
+
+@pytest.mark.parametrize("kept", [True, False], ids=["kept", "put aside"])
+def test_a_later_orders_tip_named_only_in_its_list_is_its_own(kept, tmp_path, monkeypatch):
+    """Another order's tip, named only in its list, is a claim on its file.
+    Counted as none, the earlier order's stale entry took that tip for its
+    own, so Download again never fetched the earlier order's tip, and a
+    copy put aside was never fetched again. Another order's list entry
+    claims its file by the number the file carries."""
+    app = an_app(tmp_path)
+    purchase, other, tip, doc = tips_taken_since(app, kept)
+    args = ("--redownload",) if kept else ()
+    assert an_app(tmp_path, *args)._invoices_on_file(purchase) == [], \
+        "both of the earlier order's invoices are missing and fetched again"
+    assert [e["file"] for e in an_app(tmp_path, *args)._invoices_on_file(other)] \
+        == [str(tip), str(doc)], "the later order's are on file"
+
+    monkeypatch.setattr(app_mod, "ask", lambda prompt: "")
+    before = {f: f.read_bytes() for f in (tip, doc)}
+    app.cmd_review_names()
+    assert {f: f.read_bytes() for f in (tip, doc)} == before
+    assert [e["file"] for e in saved_record(app, other)["invoices"]] == [str(tip), str(doc)]
+
+
+@pytest.mark.parametrize("kept", [True, False], ids=["kept", "put aside"])
+def test_a_stale_tip_is_mended_off_a_later_orders_tip(kept, tmp_path, monkeypatch):
+    """The earlier order's tip was renamed, not deleted, and an index row
+    names it under its new name, as an archive from when Target wrote a row
+    for every invoice does. Its list still names the old name, which the
+    later order's tip took, named only in that order's list. The mend
+    follows the stale entry to the earlier order's own renamed tip once the
+    later order's list is read as a claim, which its rows and pdf_path alone
+    never make."""
+    app = an_app(tmp_path)
+    purchase, other, tip, doc = tips_taken_since(app, kept)
+    folder = app.paths.invoices if kept else app.paths.manual_review
+    renamed = invoice_pdf(folder / "Shipt Tip (1 of 2).pdf", "1 of 2", "10000000000000042",
+                          "10000042 - shipt_tip")
+    index_rows(app, purchase.order_number, renamed)
+    monkeypatch.setattr(app_mod, "ask", lambda prompt: "")
+    app.cmd_review_names()
+    assert [e["file"] for e in saved_record(app, purchase)["invoices"]] == [str(renamed),
+                                                                           str(doc)]
+    assert [e["file"] for e in saved_record(app, other)["invoices"]] == [str(tip), str(doc)]
+
+
+def test_a_numbered_stale_entry_is_no_claim_on_an_unnumbered_invoice(tmp_path):
+    """The earlier order's stale entry carries its own invoice's number, and
+    its renamed file was deleted once it was imported elsewhere, so no mend
+    moves it. The later order's invoice under the freed name carries no
+    number. The stale entry's number is not the one that file carries, so
+    it is no claim on it, and Download again counts the later order's
+    invoice as on file rather than fetching it a second time."""
+    app = an_app(tmp_path)
+    purchase, other, renamed, old = left_stale_unnumbered(app, kept=True)
+    record = app.progress.get(purchase.key)
+    app.progress.update(purchase.key, {"invoices": [
+        dict(record["invoices"][0], number="10000000000000041")]})
+    renamed.unlink()
+    again = an_app(tmp_path, "--redownload")
+    assert again._invoices_on_file(purchase) == []
+    assert [e["file"] for e in again._invoices_on_file(other)] == [str(old)]
+
+
+def numbered_or_not(path, number, line):
+    if number:
+        return invoice_pdf(path, "1 of 1", number, line)
+    return unnumbered_invoice(path, line)
+
+
+@pytest.mark.parametrize("kept", [True, False], ids=["kept", "put aside"])
+@pytest.mark.parametrize("mine, theirs", [("", ""), ("10000000000000041", ""),
+                                          ("", "10000000000000099"),
+                                          ("10000000000000041", "10000000000000099")],
+                         ids=["neither numbered", "mine numbered", "theirs numbered", "both"])
+def test_an_entry_is_not_followed_onto_another_orders_file(mine, theirs, kept, tmp_path,
+                                                           monkeypatch):
+    """Rename gave the earlier order's one invoice a new name, its row and
+    pdf_path followed and its list kept the old one, and the renamed file
+    was deleted once it was imported elsewhere. A later order's invoice was
+    saved under that freed name, which its own row, pdf_path and list name.
+    The stale entry's file is gone, so it was followed to the earlier
+    order's row, which still names the freed name, and so to the later
+    order's file, taken for this order's invoice. That invoice was then
+    never fetched again, under --redownload or, put aside, at all. A file
+    another order claims is followed to only by a number both carry."""
+    app = an_app(tmp_path)
+    folder = app.paths.invoices if kept else app.paths.manual_review
+    purchase = tipped_purchase()
+    freed, old = folder / "Games.pdf", folder / "Old Games.pdf"
+    entry = {"part": "1 of 1", "number": mine, "kept": kept, "names": True}
+    app.progress.update(purchase.key, dict(purchase.to_dict(), state="Completed",
+                                           downloaded_ok=kept, pdf_path=str(freed),
+                                           pdf_filename=freed.name,
+                                           invoices=[dict(entry, file=str(old))]))
+    index_rows(app, purchase.order_number, freed)
+    numbered_or_not(freed, theirs, "10000099 - Invented Other Thing")
+    other = Purchase(purchase_type=ONLINE, purchase_date=TIPPED.iso, order_number=OTHER,
+                     summary="Games")
+    app.progress.update(other.key, dict(other.to_dict(), state="Completed",
+                                        downloaded_ok=kept, pdf_path=str(freed),
+                                        pdf_filename=freed.name, invoices=[
+        dict(entry, file=str(freed), number=theirs)]))
+    index_rows(app, OTHER, freed)
+
+    args = ("--redownload",) if kept else ()
+    assert an_app(tmp_path, *args)._invoices_on_file(purchase) == [], \
+        "the earlier order's invoice is missing and fetched again"
+    monkeypatch.setattr(app_mod, "ask", lambda prompt: "")
+    app.cmd_review_names()
+    assert [e["file"] for e in saved_record(app, purchase)["invoices"]] == [str(old)]
+    assert [e["file"] for e in saved_record(app, other)["invoices"]] == [str(freed)]
+
+
+def test_an_index_row_that_cannot_be_asked_about_stops_nothing(tmp_path, monkeypatch):
+    """One of the order's index rows names a file in a folder the person
+    may not read, and asking whether it is there raised, which stopped
+    Review Names on every try whenever an entry of that order was lost.
+    Such a row is left out of what an entry may be followed to."""
+    app = an_app(tmp_path)
+    purchase, _, renamed, entries = left_stale(app, taken=False)
+    locked = app.paths.invoices / "locked" / "Games (2 of 2).pdf"
+    index_rows(app, purchase.order_number, locked)
+    real = Path.exists
+
+    def exists(self, *args, **kwargs):
+        if self.name == locked.name and self.parent.name == "locked":
+            raise PermissionError(13, "Access is denied", str(self))
+        return real(self, *args, **kwargs)
+    monkeypatch.setattr(Path, "exists", exists)
+    monkeypatch.setattr(app_mod, "ask", lambda prompt: "")
+    app.cmd_review_names()
+    assert saved_record(app, purchase)["invoices"] == [
+        entries[0], dict(entries[1], file=str(renamed))]
+
+
+def test_an_unnumbered_entry_claims_only_a_file_of_its_place(tmp_path):
+    """Another order's list entry with no number is a claim on its file,
+    since whose the file is cannot be told, but only where the file says
+    the entry's place or says none. An entry of "1 of 2" naming a file that
+    says "2 of 2" names another invoice than its own, so it claims nothing,
+    and the order that file is the invoice of keeps it."""
+    app = an_app(tmp_path)
+    second = unnumbered_invoice(app.paths.invoices / "Games (2 of 2).pdf", "Invented Thing")
+    second.write_bytes(testkit.text_pdf(["Invoice 2 of 2", "Invented Thing"]))
+    plain = app.paths.invoices / "Plain.pdf"
+    plain.write_bytes(testkit.text_pdf(["Invented Thing"]))
+    stale = Purchase(purchase_type=ONLINE, purchase_date=TIPPED.iso, order_number=OTHER)
+    app.progress.update(stale.key, dict(stale.to_dict(), invoices=[
+        {"file": str(second), "part": "1 of 2", "number": "", "kept": True},
+        {"file": str(plain), "part": "1 of 2", "number": "", "kept": True}]))
+    another = app._another(app.index_csv.read_all(), app.progress.data)
+    assert another(str(second), TIPPED.number) is False, "a file of another place"
+    assert another(str(plain), TIPPED.number) is True, "a file that says no place"
