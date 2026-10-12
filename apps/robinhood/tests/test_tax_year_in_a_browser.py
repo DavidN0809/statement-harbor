@@ -356,6 +356,9 @@ def test_the_retirement_page_is_known_by_its_statements_when_no_heading_names_it
             # one statement that is not the account's, or says no account
             (ira + individual, "Dana Example", False),
             (ira + statement_link("January 2022"), "Dana Example", False),
+            # one that names the IRA and another account alike
+            (ira + account_row("August 2026", "Individual Investing and IRA"),
+             "Dana Example", False),
             # a heading that names another account, whatever the rows say
             (ira + ira_too, "Individual investing", False),
             # nothing listed
