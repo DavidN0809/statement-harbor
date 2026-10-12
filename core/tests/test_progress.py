@@ -177,6 +177,7 @@ def test_a_file_let_go_after_the_run_waited_for_it_is_written_on_the_way_out(tmp
     assert _saved_keys(store) == ["Online:1", "Online:2"]
     held.files.add(store.path)
     held.tries.clear()
+    store.update("Online:3", {"state": "Completed"}, save=False)
     store.save(leaving=True)
     assert len(held.tries) == storage._LOCKED_TRIES, (
         "a file written since it was held is waited for again")
@@ -212,3 +213,31 @@ def test_a_run_whose_run_state_was_not_written_is_not_reported_finished(tmp_path
     line = [ln for ln in out.splitlines() if ln.startswith(run_reporting.PREFIX)][-1]
     assert _json.loads(line[len(run_reporting.PREFIX):])["stopped"] == 1, out
     assert "run state could not be written" in out and "Resume" not in out, out
+
+
+def test_a_run_that_changed_nothing_writes_nothing_on_its_way_out(tmp_path, monkeypatch, capsys):
+    """A Rename preview or a Verify with progress.json held changed no
+    record, so its save on the way out writes nothing, says nothing and
+    leaves the run reported as it ended, never as one whose run state was
+    lost. A run that did change a record is still told."""
+    import json as _json
+    from paperpull_core import run_reporting, storage
+    path = tmp_path / "progress.json"
+    path.write_text(_json.dumps({"k": {"state": "Completed"}}), encoding="utf-8")
+    store = storage.JsonStore(path)
+    store.load()
+
+    def refused(*args, **kwargs):
+        raise PermissionError(13, "held", str(path))
+    monkeypatch.setattr(storage, "atomic_write_json", refused)
+    store.save(leaving=True)
+    assert storage.unsaved_on_leaving() == []
+    run_reporting.report_run_result({})
+    out = capsys.readouterr().out
+    line = [ln for ln in out.splitlines() if ln.startswith(run_reporting.PREFIX)][-1]
+    assert _json.loads(line[len(run_reporting.PREFIX):])["stopped"] == 0, out
+    assert "could not be written" not in out, out
+
+    store.update("k", {"state": "Needs Manual Review"}, save=False)
+    store.save(leaving=True)
+    assert storage.unsaved_on_leaving() == [str(path)]

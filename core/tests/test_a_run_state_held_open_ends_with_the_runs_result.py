@@ -67,15 +67,16 @@ def renamed(home):
 
 
 def ended_with_its_result(home, names: dict, code, out: str, progress: Path) -> None:
-    """Rename stopped and said why, the save on the way out said in one
-    line where the file is, the result was written and says the run
-    stopped, and every file keeps the name its ledgers give it."""
+    """Rename stopped and said why, before it changed a record, so the save
+    on the way out had nothing to write and neither waited nor said a word
+    more, the result was written and says the run stopped, and every file
+    keeps the name its ledgers give it."""
     said = " ".join(out.split())
     assert code == 1, said[-1500:]
     assert "Nothing was renamed, since progress.json could not be written" in said, (
         said[-1500:])
     assert ("  ! %s could not be written, so it keeps what was last saved in it. Close any "
-            "program that has it open before the next run." % progress) in out.splitlines(), (
+            "program that has it open before the next run." % progress) not in out.splitlines(), (
         said[-1500:])
     results = [json.loads(line[len(PREFIX):]) for line in out.splitlines()
                if line.startswith(PREFIX)]

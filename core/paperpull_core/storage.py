@@ -642,6 +642,13 @@ class JsonStore:
         self.backups_dir = backups_dir
         self.data: Dict[str, dict] = {}
         self._loaded = False
+        # The records as the file holds them, read or last written, or None
+        # when that is not known. The save on the way out writes nothing
+        # when the records are still these.
+        self._as_written: Optional[str] = None
+
+    def _canonical(self) -> str:
+        return json.dumps(self.data, sort_keys=True, ensure_ascii=False, default=str)
 
     def load(self) -> Dict[str, dict]:
         if self.path.exists():
@@ -651,6 +658,7 @@ class JsonStore:
                     raw = json.load(f)
                 if isinstance(raw, dict):
                     self.data = raw
+                    self._as_written = self._canonical()
                 else:
                     # Valid JSON of the wrong shape, a list or a bare null.
                     # This used to fall through and leave data empty, so the
@@ -701,12 +709,19 @@ class JsonStore:
             backup_file(self.path, self.backups_dir)
         if not leaving:
             atomic_write_json(self.path, self.data)
+            self._as_written = self._canonical()
+            return
+        # A run that changed nothing, a preview or a Verify, has nothing to
+        # write, and a held file then costs it nothing and is not reported.
+        now = self._canonical()
+        if now == self._as_written:
             return
         try:
             if _held_key(self.path) in _HELD:
                 atomic_write_json(self.path, self.data, tries=1)
             else:
                 atomic_write_json(self.path, self.data)
+            self._as_written = now
         except PermissionError:
             _UNSAVED.append(str(self.path))
             print("  ! %s could not be written, so it keeps what was last saved in it. "
