@@ -471,6 +471,8 @@ body.docked .dock { display: flex; }
   .top-in { padding: 8px 16px; }
   .view { padding: 20px 16px 40px; }
   h1 { font-size: 25px; }
+  .head > div { flex-basis: 200px; }
+  .tile-mono.lg { width: 44px; height: 44px; font-size: 20px; border-radius: 11px; }
   .samplebar, .notice { width: calc(100% - 32px); }
   .acct { padding: 14px 12px 14px 14px; }
   .acct .do { width: 100%; margin-left: 0; }
