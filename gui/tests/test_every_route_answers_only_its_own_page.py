@@ -270,6 +270,14 @@ ROUTES = {
                               desktop="changes", server="changes"),
     ("POST", "/api/run"): dict(body={"app": "Kroger Receipts", "action": "pilot"},
                                desktop="changes", server="changes"),
+    # Review Names starts the app as a run does, the list step included, so
+    # a real receipt provider for the same reason as a run.
+    ("POST", "/api/review-names"): dict(body={"app": "Kroger Receipts"},
+                                        desktop="changes", server="changes"),
+    ("POST", "/api/review-names/apply"): dict(
+        body={"app": "Kroger Receipts",
+              "answers": [{"id": "x", "number": "1", "summary": "Garden Hose"}]},
+        desktop="changes", server="changes"),
     ("GET", "/api/naming"): dict(ask="/api/naming?app=Shop%20Receipts",
                                  desktop="reads", server="reads"),
     ("POST", "/api/naming/preview"): dict(body={"app": SHOP, "pattern": "{date} {provider}"},

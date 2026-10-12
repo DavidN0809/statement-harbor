@@ -9,6 +9,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Review names in the panel, and on PaperPull Server.** Every receipt
+  app asks for a better name for each receipt it was unsure how to name,
+  and it only ever asked in a console, from the `review_names` file in its
+  folder. PaperPull Server has no console, so it had no way to do it. A
+  receipt provider's More now has **Review names**, on the desktop and the
+  server alike. It lists the receipts waiting, with each one's date, order
+  number and items, and renames each one you type a better summary for,
+  with its rows in the receipt index and order history and its record in
+  progress.json following it. A blank box keeps its name, and a summary
+  is taken as one line of at most 120 characters. The app runs the review
+  the console one runs, with what you typed, so it renames only what that
+  review would, and a name typed for a receipt that stopped waiting
+  meanwhile does nothing and is said. The double-click
+  file still works as before.
+
 ### Fixed
 - **Robinhood saves IRA statements.** The retirement statements page,
   read since 0.46.0, was read only when a heading on it named a retirement

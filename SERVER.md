@@ -161,6 +161,9 @@ documents that run saved are copied into it.
   a second time.
 - **Never half a file.** Each copy is written under a hidden name and then
   renamed, and Paperless skips hidden names.
+- **Renaming afterward stays in PaperPull.** Rename existing files and
+  Review names rename PaperPull's own copies. A document already copied to
+  Paperless keeps the title it has there, and is not copied again.
 - **A folder per provider, if you like.** With `PAPERLESS_SUBFOLDERS: "1"`
   in the environment, each provider's documents go in a folder of that
   provider's name inside the consume folder. Paperless turns those folders

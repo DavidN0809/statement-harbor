@@ -30,6 +30,7 @@ import re
 import shutil
 import subprocess
 import sysconfig
+import tempfile
 import threading
 import time
 from typing import Optional
@@ -756,6 +757,7 @@ def discover_apps():
                 "has_venv": False,
                 "needs_setup": False,
                 "runnable": tmpl is not None,
+                "reviews_names": _reviews_names(tmpl_entry),
             }
             continue
         apps[d.name] = {
@@ -777,8 +779,16 @@ def discover_apps():
             "needs_setup": (_SAMPLE is None and _venv_python(d) is None
                             and not _is_packaged() and not _runs_apps()),
             "runnable": True,
+            "reviews_names": _reviews_names(script),
         }
     return apps
+
+
+def _reviews_names(script) -> bool:
+    """Whether an app has Review Names, which every receipt app has and no
+    document app does (core/tests/test_every_app_reviews_a_name_once.py
+    counts them). On the server it is the image's own script that says."""
+    return bool(script) and Path(script).name.endswith("_receipts.py")
 
 
 @app.get("/api/apps", dependencies=[Depends(_same_origin_only)])
@@ -2571,6 +2581,12 @@ def _build_cmd(app_meta: dict, account: str, action: str, scope_flags=(), redown
         if redownload is not True or action not in REDOWNLOAD_ACTIONS:
             raise ValueError("%s goes only on %s" % (REDOWNLOAD_FLAG, " and ".join(REDOWNLOAD_ACTIONS)))
         flags.append(REDOWNLOAD_FLAG)
+    return _command(app_meta, account, flags)
+
+
+def _command(app_meta: dict, account: str, flags: list) -> list:
+    """The command that runs an app's own script with these flags, for
+    this account."""
     interp = [app_meta["python"]]
     if server_mode.enabled():
         # -P keeps the current directory and the script's own directory off
@@ -2582,6 +2598,19 @@ def _build_cmd(app_meta: dict, account: str, action: str, scope_flags=(), redown
     if account != "primary":
         cmd += ["--config", f"config.{account}.json"]
     return cmd
+
+
+def _review_cmd(app_meta: dict, account: str) -> list:
+    """Review Names for one account, which only a receipt app has. It is
+    kept out of ACTIONS, the table every app is sent, and is reached only
+    through /api/review-names, which hands it what it would otherwise ask
+    in a console (renaming.REVIEW_LIST_ENV, REVIEW_ANSWERS_ENV)."""
+    if not app_meta.get("reviews_names"):
+        raise HTTPException(400, "%s has no Review Names. Only receipt providers do."
+                            % app_meta.get("name", "This provider"))
+    if account not in app_meta["accounts"]:
+        raise HTTPException(400, "unknown account")
+    return _command(app_meta, account, ["--review-names"])
 
 
 def _run_env(meta: dict) -> dict:
@@ -2646,7 +2675,182 @@ async def api_run_body(request: Request):
                                     asked["action"], scope, again)
 
 
-def _start_run(app: str, account: str, action: str, scope_flags, redownload=False):
+# -- Review Names --------------------------------------------------------------
+#
+# Every receipt app asks, in a console, for a better name for each receipt it
+# was unsure of (core renaming.review_names). The panel has no console, and
+# PaperPull Server has none at all, so the panel asks in two steps instead.
+# The first has the app write the receipts it would ask about to a file of
+# the panel's own and rename nothing, and the page shows them. The second
+# hands the app what the person typed, in a file of that run's own, and the
+# app renames each receipt given a new name by the very rules a console
+# review follows. The app reads where each file is from these two, the same
+# names core renaming reads (gui/tests/test_review_names.py holds them alike).
+REVIEW_LIST_ENV = "PAPERPULL_REVIEW_LIST"
+REVIEW_ANSWERS_ENV = "PAPERPULL_REVIEW_ANSWERS"
+HANDED = "review.json"
+# A list longer than a person types in one go is refused, as are fields far
+# longer than any receipt's. The app cuts a summary to its own limit.
+REVIEW_MOST = 2000
+REVIEW_FIELD_MOST = {"id": 4096, "number": 200, "summary": 1000}
+REVIEW_LIST_SECONDS = 120
+
+
+def _hand_over(text: str) -> Path:
+    """A folder only this user can read, holding `text` for one run."""
+    folder = Path(tempfile.mkdtemp(prefix="paperpull-review-"))
+    try:
+        (folder / HANDED).write_text(text, encoding="utf-8")
+    except BaseException:
+        _drop(folder)
+        raise
+    return folder
+
+
+def _drop(folder) -> None:
+    if folder is not None:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def _review_body(body) -> dict:
+    """What a Review Names request holds, each field checked for its kind."""
+    if not isinstance(body, dict):
+        raise HTTPException(400, "expected a JSON object")
+    for key in ("app", "account"):
+        if key in body and type(body[key]) is not str:
+            raise HTTPException(400, "%s is text" % key)
+    if not body.get("app"):
+        raise HTTPException(400, "Review Names needs its app")
+    return {"app": body["app"], "account": body.get("account") or "primary"}
+
+
+def _review_answers(raw) -> list:
+    """The new summaries a person typed, as a list of {id, number, summary},
+    every field text. A blank summary keeps its name and is left out."""
+    if not isinstance(raw, list):
+        raise HTTPException(400, "answers is a list")
+    if len(raw) > REVIEW_MOST:
+        raise HTTPException(400, "at most %d answers at a time" % REVIEW_MOST)
+    out = []
+    for a in raw:
+        if not isinstance(a, dict) or set(a) != set(REVIEW_FIELD_MOST):
+            raise HTTPException(400, "each answer holds id, number and summary")
+        for key, most in REVIEW_FIELD_MOST.items():
+            if type(a[key]) is not str or len(a[key]) > most:
+                raise HTTPException(400, "an answer's %s is text of at most %d characters"
+                                    % (key, most))
+        if a["id"] and a["summary"].strip():
+            out.append({k: a[k] for k in REVIEW_FIELD_MOST})
+    return out
+
+
+def _review_list(app: str, account: str) -> dict:
+    """The receipts the app would ask about, as it writes them, with what it
+    said while finding them (rows it leaves out, and why)."""
+    apps = discover_apps()
+    if app not in apps:
+        raise HTTPException(404, "unknown app")
+    meta = apps[app]
+    if server_mode.enabled() and not meta.get("runnable", True):
+        raise HTTPException(409, "This install does not match a provider PaperPull ships, "
+                                 "so it will not be run.")
+    blocked = setup_needed(meta)
+    if blocked:
+        raise HTTPException(409, blocked.splitlines()[0] if blocked.strip() else "setup needed")
+    cmd = _review_cmd(meta, account)
+    folder = None
+    try:
+        try:
+            folder = Path(tempfile.mkdtemp(prefix="paperpull-review-"))
+        except OSError as e:
+            raise HTTPException(500, "Review Names had nowhere to list into, %s" % e)
+        env = dict(_run_env(meta), **{REVIEW_LIST_ENV: str(folder / HANDED)})
+        try:
+            # A closed pipe, as a run has, so the app asks nothing. What it
+            # says on stderr stays with the rest, so a crash says why.
+            done = subprocess.run(cmd, cwd=meta["dir"], input="", stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                  errors="replace", env=env, timeout=REVIEW_LIST_SECONDS)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(504, "Review Names did not finish listing in %d seconds."
+                                % REVIEW_LIST_SECONDS)
+        except OSError as e:
+            raise HTTPException(500, "Review Names could not start, %s" % e)
+        said = [line.rstrip() for line in (done.stdout or "").splitlines()
+                if line.strip() and run_result.parse(line) is None]
+        try:
+            listed = json.loads((folder / HANDED).read_text(encoding="utf-8"))
+            receipts = listed["receipts"]
+            if not isinstance(receipts, list):
+                raise ValueError("not a list")
+        except (OSError, ValueError, KeyError, TypeError):
+            raise HTTPException(500, " ".join(said[-3:]) or
+                                "Review Names ended with code %s and listed nothing."
+                                % done.returncode)
+        return {"receipts": receipts, "said": said}
+    finally:
+        _drop(folder)
+
+
+async def _review_json(request: Request):
+    """A Review Names request's body, which is JSON, as a run's is."""
+    kind = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if kind != "application/json":
+        raise HTTPException(415, "Review Names is asked for with a JSON body")
+    try:
+        return await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+
+
+@app.post("/api/review-names", dependencies=[Depends(_same_origin_only)])
+async def api_review_names(request: Request):
+    """The receipts an app would ask a better name for. Renames nothing it
+    names, but an app may write its own records while it reads them (Target
+    mends an order's list of invoices), so the list counts as a run of that
+    account, refused while one goes or a history is imported, and holding
+    off both while it lists. Checked and claimed with nothing awaited
+    between, as _start_run claims a run."""
+    body = await _review_json(request)
+    asked = _review_body(body)
+    if set(body) - {"app", "account"}:
+        raise HTTPException(400, "a Review Names list holds only app and account")
+    app_name, account = asked["app"], asked["account"]
+    if _IMPORTING.locked():
+        raise HTTPException(409, "A history file is being imported. Review names once it "
+                                 "has finished.")
+    if (app_name, account) in _RUNS:
+        raise HTTPException(409, "%s is running for this account. Review names once it has "
+                                 "finished." % app_name)
+    _RUNS[(app_name, account)] = {"action": "review_names_list",
+                                  "started": datetime.now().isoformat(timespec="seconds")}
+    _RUNNING.add(app_name)
+    try:
+        return await to_thread.run_sync(_review_list, app_name, account)
+    finally:
+        _RUNS.pop((app_name, account), None)
+        if not any(a == app_name for a, _ in _RUNS):
+            _RUNNING.discard(app_name)
+
+
+@app.post("/api/review-names/apply", dependencies=[Depends(_same_origin_only)])
+async def api_review_names_apply(request: Request):
+    """Rename each receipt given a new summary, streamed as a run is."""
+    body = await _review_json(request)
+    asked = _review_body(body)
+    if set(body) - {"app", "account", "answers"}:
+        raise HTTPException(400, "Review Names holds only app, account and answers")
+    answers = _review_answers(body.get("answers"))
+    return await to_thread.run_sync(_start_run, asked["app"], asked["account"],
+                                    "review_names", (), False,
+                                    json.dumps({"answers": answers}))
+
+
+def _start_run(app: str, account: str, action: str, scope_flags, redownload=False,
+               review: Optional[str] = None):
+    """A run of one app for one account, streamed to the page. `review` is
+    Review Names' new summaries as JSON, handed to the app in a file of this
+    run's own that is gone once the run ends (_hand_over)."""
     apps = discover_apps()
     if app not in apps:
         raise HTTPException(404, "unknown app")
@@ -2670,7 +2874,8 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
                                           "X-Accel-Buffering": "no"})
 
     blocked = setup_needed(meta)
-    cmd = _build_cmd(meta, account, action, scope_flags, redownload)
+    cmd = (_review_cmd(meta, account) if review is not None
+           else _build_cmd(meta, account, action, scope_flags, redownload))
 
     if blocked:
         # Said here rather than let the app start under an interpreter
@@ -2728,6 +2933,7 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         _RUNS[(app, account)] = {"action": action,
                                  "started": datetime.now().isoformat(timespec="seconds")}
         noted = False
+        handed = None
 
         def note(code, result, closed=False):
             if root is None:
@@ -2744,6 +2950,9 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
                 pass
         try:
             _RUNNING.add(app)
+            if review is not None:
+                handed = _hand_over(review)
+                env[REVIEW_ANSWERS_ENV] = str(handed / HANDED)
             proc = subprocess.Popen(
                 cmd, cwd=meta["dir"],
                 # No stdin. The panel cannot answer a prompt, so an app must
@@ -2777,6 +2986,7 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             except OSError:
                 pass
         except Exception as e:
+            _drop(handed)
             _RUNS.pop((app, account), None)
             if not any(a == app for a, _ in _RUNS):
                 _RUNNING.discard(app)
@@ -2849,6 +3059,7 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
                     proc.kill()
             if proc.stdout:
                 proc.stdout.close()
+            _drop(handed)
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
