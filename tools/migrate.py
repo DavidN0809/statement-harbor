@@ -79,6 +79,9 @@ Target's own, not the order's, and nothing else in the file holds it. Each
 file name holds the order's date and summary, which can be the name of its
 one main item, as its PDF path does once the order is done. Until then
 that path is empty, so for an order still to finish the list adds them.
+An Apple purchase not saved yet keeps the start times of the runs on which
+Apple refused its receipt or it was not asked, so the third refusal still
+saves a record of the purchase, and one saved keeps neither.
 A record still under a key that left out its account's
 last four, as the apps did past forty characters until 0.34.0 and Chase did
 at any length until 0.17.1, also keeps what its key is built from
@@ -181,6 +184,16 @@ def _optum_form(rec: dict) -> bool:
 # site (optum_docs.hold_known_forms), and no statement is read there.
 PROVIDER_KIND_FIELDS = {"Optum Bank": (_optum_form, ("href", "account", "title",
                                                      "document_id"))}
+
+# Fields one provider reads off a purchase it has not finished, to go on
+# from where an earlier run stopped, carried only while the purchase is not
+# done and filled in together. Apple counts the separate runs on which it
+# refused a purchase's receipt, and those on which it did not ask, each by
+# the time the run started, and saves a record of the purchase on the third
+# (_apple_refused, _would_make_a_record), saying how many it was not asked
+# on. Read and run through the tool by
+# core/tests/test_an_unfinished_purchase_goes_on_after_a_minimal_move.py.
+PROVIDER_UNFINISHED_FIELDS = {"Apple": ("refused_runs", "not_asked_runs")}
 
 # What an app builds a document's key from, and compares with a record
 # already under the new key, to move a record off a key that cut the account
@@ -472,7 +485,9 @@ def _own_fields(rec: dict, provider: str) -> tuple:
     """The fields one provider's own checks read off this record, besides
     those every app's skip decision reads."""
     which, fields = PROVIDER_KIND_FIELDS.get(provider, (None, ()))
-    return PROVIDER_SKIP_FIELDS.get(provider, ()) + (fields if fields and which(rec) else ())
+    unfinished = () if _done(rec) else PROVIDER_UNFINISHED_FIELDS.get(provider, ())
+    return (PROVIDER_SKIP_FIELDS.get(provider, ()) + (fields if fields and which(rec) else ())
+            + unfinished)
 
 
 def _skip_fields(rec: dict, provider: str = "") -> dict:
@@ -883,6 +898,13 @@ def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None,
         # or emptied it on purpose.
         here = _moved(inc, old_bases, new_base)
         lacking = {f: here[f] for f in _own_fields(inc, provider) if f in inc and f not in cur}
+        # Where a run stopped on the old computer goes on here only for a
+        # purchase this install has not finished either, and only when it
+        # holds none of it, since its own runs counted with one list and not
+        # the other would say they were not asked on runs never refused.
+        unfinished = PROVIDER_UNFINISHED_FIELDS.get(provider, ())
+        if _done(cur) or any(f in cur for f in unfinished):
+            lacking = {f: v for f, v in lacking.items() if f not in unfinished}
         if lacking:
             cur.update(lacking)
             changed = True

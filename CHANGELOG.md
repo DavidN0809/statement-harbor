@@ -30,6 +30,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   every run without its invoices being tried. Such a value now reads as
   none, as every record value does, and an invoice it no longer names is
   fetched again.
+- **An Apple purchase whose receipt Apple refused keeps its count of
+  refusals through a move with `--minimal`.** Apple saves a record of the
+  purchase in place of its receipt once it has refused the receipt on three
+  separate runs. `--minimal` left out the runs counted so far, so on the
+  new computer the purchase took three more refusals before its record was
+  saved. The export now carries them, and the runs it was not asked on, for
+  a purchase not saved yet, and a newer file fills them in for one an older
+  file moved without them.
 
 ## [0.48.0] - 2026-10-12
 

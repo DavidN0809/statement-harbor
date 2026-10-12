@@ -13,6 +13,7 @@ These keep such a purchase with the app's own downloader over an output
 folder on disk, move the history with the tool and ask the app's own code
 on the new computer. Every name and number is invented.
 """
+import ast
 import importlib.util
 import json
 import zipfile
@@ -129,3 +130,16 @@ def test_only_its_own_provider_carries_them():
     for provider in ("", "Kroger", "Robinhood", "Target"):
         cut = migrate._skip_fields(dict(REFUSED), provider)
         assert not {"refused_runs", "not_asked_runs"} & set(cut), (provider, cut)
+
+
+@pytest.mark.parametrize("provider", sorted(migrate.PROVIDER_UNFINISHED_FIELDS))
+def test_every_field_carried_for_an_unfinished_purchase_is_read_by_its_app(provider):
+    """A provider named is an app's, and its app still reads each field,
+    or a list nobody reads would carry for nothing."""
+    apps = {migrate._provider_kind(a)[0]: a for a in census.APPS}
+    assert provider in apps, provider
+    tree = ast.parse(census.entry_of(apps[provider]).read_text(encoding="utf-8"))
+    words = {n.value for n in ast.walk(tree)
+             if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    missing = set(migrate.PROVIDER_UNFINISHED_FIELDS[provider]) - words
+    assert not missing, (provider, missing)
