@@ -9,7 +9,48 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Get new for all.** When several accounts may have something new, one
+  button runs them one after another, and pauses at one that does not
+  finish so you can sign in again, try once more or skip it.
+- **Each account remembers its last runs.** The panel notes every run it
+  starts in `panel-runs.json` in the account's folder, how it ended and
+  which files it saved, so a row can say a run stopped partway and an
+  account shows its recent runs. A run closed with its page counts as
+  stopped.
+
 ### Changed
+- **A new control panel, built around what needs you.** The home page,
+  Accounts, lists every provider and person, most in need first, each with
+  one plain status (Overdue, New one likely, Possible gap, Stopped partway,
+  Needs a look, Up to date, Not started) and one button for the next step.
+  Each account has a page of its own with two steps, Open sign-in window
+  and Get new documents, and Which dates as one choice of all dates, one
+  year or a range. Try the newest few first and Only check what's there sit
+  beside the main button, Continue appears after a run that stopped, and
+  everything rarer is under More, each item saying in a line what it does.
+  A run leads with its outcome and the files it saved, keeps the full
+  output under Technical details, and offers a problem report where it
+  ended, and a bar follows you to other pages while it goes. The panel's
+  words follow, Login is Sign in, Pilot is Try the newest few first,
+  Discover is Only check what's there, Run All is Get new documents and
+  Resume is Continue, while the terminal's commands keep their names.
+  Spreadsheets, File names and Settings are pages of their own. Light by
+  default, dark when the system or Settings asks, and it fits a phone.
+- **Download again is Restore deleted files**, a dialog of its own under
+  More. It still needs a year or both a From and a To date, says what
+  happens to files you still have and applies to one run, and it is never
+  a box that changes what the next run does.
+- **The welcome is three steps**, where to save, which providers and whose
+  documents they are. Providers can be searched and grouped, and the
+  account holder's name is asked on the page instead of in a browser
+  prompt.
+- **File names shows the name first.** Its parts are chips you add, remove
+  and move, separator and date style are chosen by example, and the
+  pattern can still be written by hand under Edit as text.
+- **On PaperPull Server the sign-in window docks beside the page** when a
+  sign-in starts, and the Browser Screen button is now Sign-in window. The
+  header says when new files go to Paperless.
 - **The welcome list says what each provider downloads in one plain line.**
   It showed the provider table from PROVIDERS.md, which is written for
   GitHub, so someone choosing their bank read who tested it, issue numbers
@@ -19,6 +60,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Capital One.
 
 ### Fixed
+- **A second run of the same account is refused while one is going.** Two
+  tabs could start two downloaders on one account's records, browser and
+  folder at once.
 - **PaperPull Server's footer no longer says it runs locally or offers the
   Store edition.** It names PaperPull Server and its version, says it runs
   on your own server, and keeps the Ko-fi link.

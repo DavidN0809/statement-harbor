@@ -88,10 +88,12 @@ Google.
 5. **Add your providers** from the panel. Each one gets a folder in the data
    folder. Coming from the desktop app, bring them instead, see
    [Coming from the desktop app](#coming-from-the-desktop-app).
-6. **Sign in.** Pick a provider and press Login. Its sign-in window opens on
-   the Browser Screen, which the **Browser Screen** button at the top of the
-   panel opens. Sign in there as you would on a new computer, then come back
-   to the panel and run Pilot, then Run All.
+6. **Sign in.** Open a provider and press **Open sign-in window**. Its
+   sign-in page opens in the sign-in window, the browser on the server's
+   screen, docked beside the panel. The **Sign-in window** button at the
+   top opens it at any time, and Full screen gives it a tab of its own.
+   Sign in there as you would on a new computer, press **I'm signed in**,
+   then **Try the newest few first** and **Get new documents**.
 
 ### Coming from the desktop app
 
@@ -99,21 +101,21 @@ Bring your providers and the record of what they already downloaded, so
 the server does not download those documents again, or hand them to
 Paperless a second time.
 
-1. On the desktop, open the panel's **Status** tab and press **Export
+1. On the desktop, open the panel's **Settings** and press **Export
    history**. Your browser saves a file named like
    `PaperPull history 2026-10-11.ppz`.
 2. On the server's welcome page, choose **Moving from another computer?
    Bring its providers and history**, then that file. The panel shows what
    it will do, and **Set up and import** does it. Once providers are set
-   up, the same is under **Import a history file** on the Status tab.
+   up, the same is under **Import a history file** in Settings.
 
 Each provider and person in the file is set up with their settings, the
 account holder's name, file name patterns, the start date and the like,
 and every document they already downloaded is marked as downloaded.
 Folders, browser profiles and debugging ports are the server's own. A
 provider or person already set up keeps its settings and gains only the
-history. No sign-in comes with the file, so sign in to each provider on the
-Browser Screen, as in step 6.
+history. No sign-in comes with the file, so sign in to each provider in the
+sign-in window, as in step 6.
 
 The file holds no password, sign-in or PDF. It does list document titles,
 order numbers, totals and the account holders' names, so keep it as
@@ -150,9 +152,9 @@ documents that run saved are copied into it.
 
 - **Copied, never moved.** PaperPull keeps its own files and its record of
   what it downloaded. Deleting them later never makes it download a
-  document again. The desktop panel's Download again box is not offered
-  here, since every document it fetched would reach Paperless a second
-  time.
+  document again. The desktop panel's Restore deleted files is not
+  offered here, since every document it fetched would reach Paperless a
+  second time.
 - **Only what that run saved.** A run that saved nothing copies nothing,
   and a run that stopped early does not hand over the last run's documents
   a second time.
@@ -166,14 +168,14 @@ documents that run saved are copied into it.
 What happened is in each run's output, a line such as "Copied 3 new
 documents to Paperless".
 
-## Signing in on the Browser Screen
+## Signing in on the server
 
 - **Pasting a password.** Open noVNC's side panel, the small tab on the left
-  edge of the Browser Screen, paste into its clipboard box, then press
+  edge of the sign-in window, paste into its clipboard box, then press
   Ctrl+V in the page. Chrome on the server does not save passwords, so keep
   them in your own password manager.
 - **"Robot or human?"** Some providers check, especially Walmart. Press and
-  hold the button on the Browser Screen yourself. PaperPull never answers
+  hold the button in the sign-in window yourself. PaperPull never answers
   one for you.
 - **How long you stay signed in** depends on the provider. In testing, Best
   Buy stayed signed in for more than a day and through a restart, Verizon

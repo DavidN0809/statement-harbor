@@ -28,7 +28,7 @@ Paperless-ngx. You use it from a browser on any computer in the house,
 sign in to each provider on a browser screen it shows you, and each run's
 new documents can go straight into Paperless. Both are free.
 
-![The PaperPull control panel after a pilot run on a sample archive. Every name and amount is invented.](docs/panel.png)
+![The PaperPull control panel's Accounts page on the sample archive, each provider with its status and one button. Every name and amount is invented.](docs/panel.png)
 
 **Watch it:** a [75-second demo](https://youtu.be/_wZToSSMRPU) on the real panel with made-up accounts. **Website:** [paperpull.net](https://paperpull.net), with the [getting-started guide](https://paperpull.net/guide.html), the [provider directory](https://paperpull.net/providers.html) and the [Paperless-ngx tutorial](https://paperpull.net/paperless.html). **Download:** the [latest release](https://github.com/rheeloaded/paperpull/releases/latest), Windows 10 or 11 and macOS on Apple Silicon, Linux from source. **Self-hosting** takes the Docker image `ghcr.io/rheeloaded/paperpull-server` and [three steps](#paperpull-server-beta).
 
@@ -176,7 +176,7 @@ signed-in browsers can sit open at once without colliding. Those profiles
 are separate from your everyday browser on purpose, so each starts with no
 extensions and no saved logins. They are real browser profiles, though, so
 a password manager installed into one, from the extension store in the
-window Login opens, stays there for every Login of that provider after.
+sign-in window, stays there for every later sign-in to that provider.
 It is one profile per provider, so the extension goes in once for each
 provider you set up, not once for all of them.
 
@@ -211,10 +211,11 @@ That last step is what makes a re-run safe. `downloaded_ok` is keyed to the
 document, not to the file on disk, so you can import everything into
 paperless-ngx, delete the PDFs, and the next run still skips them. It only
 fetches what is genuinely new, and lists it in `new-this-run.txt`. To fetch
-them again anyway, tick **Download again** under Scope in the control panel
-and choose a year, or both a From and a To date, or add `--redownload` to a
-run from a terminal. Nothing is overwritten. A file still there stays as it
-is, and the app may save a second copy beside it.
+them again anyway, open the provider in the control panel, choose
+**Restore deleted files** under More and pick a year, or both a From and a
+To date, or add `--redownload` to a run from a terminal. Nothing is
+overwritten. A file still there stays as it is, and the app may save a
+second copy beside it.
 
 ### Read-only by construction
 
@@ -288,14 +289,14 @@ PaperPull.
 These steps are for the desktop app. The server's are
 [above](#paperpull-server-beta).
 
-**Want to see it first?** The panel's welcome screen offers **See a sample
-archive**, a folder of invented statements and receipts. The Status tab
+**Want to see it first?** The panel's welcome screen offers **Open the
+sample**, a folder of invented statements and receipts. The Accounts page
 fills in and both spreadsheets build from it, so you can see exactly what
 PaperPull produces before you sign in to anything. Nothing downloads while
 you are in it, and *Leave the sample* puts you back. Every document in it
 says on its face that it is invented.
 
-![Quick start](docs/quickstart.gif)
+![The welcome screen, choosing providers with a search box and groups.](docs/panel-welcome.png)
 
 **One-shot setup**, one Python environment that the control panel and every
 app share, with the shared core in it.
@@ -308,14 +309,15 @@ setup-all.bat        REM Windows
 ./setup-all.command  # macOS / Linux
 ```
 
-Then either drive everything from the **[GUI control panel](gui)**, pick an
-app and account, click an action, and watch the live output:
+Then either drive everything from the **[GUI control panel](gui)**, which
+lists every provider and person with what needs you, and gets new documents
+with one button per account:
 
 ```bat
 gui\run_gui.bat
 ```
 
-![PaperPull control panel](docs/control-panel.gif)
+![One provider's page in the control panel, sign in and then get new documents, with rarer actions under More.](docs/panel-account.png)
 
 …or run a single app from the terminal, with one command for all of them
 (using `amex` as the example):
@@ -338,11 +340,14 @@ on the same installs the panel does. It finds the app by folder name,
 slug or provider, runs it on the right Python, and passes anything else
 straight through, so `paperpull chase all --year 2025 --account spouse` works.
 The commands are `setup`, `login`, `discover`, `pilot`, `all`, `resume`,
-`verify`, `diagnose` and `dry-run`. The panel offers the six of those a
-person uses day to day, plus a Scope row (one year, or a date range) that
-becomes the same `--year`, `--start-date` and `--end-date` every app takes,
-and a **Download again** box under it that adds `--redownload` to one Pilot
-or Run All scoped to a year or to both ends of a range, after asking.
+`verify`, `diagnose` and `dry-run`. The panel names them for what they do.
+Sign in, Get new documents, Try the newest few first and Only check what's
+there sit on each provider's page, Continue appears after a run that
+stopped, and the rest are under More, each with a line saying what it does.
+Which dates (one year, or a date range) becomes the same `--year`,
+`--start-date` and `--end-date` every app takes, and **Restore deleted
+files** adds `--redownload` to one run scoped to a year or to both ends of
+a range.
 
 Each app also has its own README with provider-specific details and quirks.
 
@@ -357,7 +362,9 @@ inside each app folder.
 
 `tools/status.py` reads the state each app already keeps and reports how current
 every archive is. Copy it and `status.bat` next to your install folders and run
-it. It downloads nothing and changes nothing.
+it. It downloads nothing and changes nothing. The control panel's Accounts
+page shows the same, one row per provider and person, most in need first,
+each with the button that fixes it.
 
 ```
 PROVIDER                     DOCS  NEWEST          AGE  ISSUES     STATUS
@@ -435,8 +442,8 @@ Excel can sum them. Nothing reads a PDF and it takes about a second.
 python tools/export_purchases.py --root "C:\path\to\your\installs"
 ```
 
-The panel has the same thing on its **Spreadsheet** tab, one button, with a
-dropdown for one provider at a time (`Amazon Purchases.xlsx`). The file is
+The panel has the same thing on its **Spreadsheets** page, one button, with
+a choice of one provider at a time (`Amazon Purchases.xlsx`). The file is
 rebuilt from scratch each time, so edit a copy, not the original.
 
 ## The transactions inside your statements
@@ -468,21 +475,23 @@ market movement, and the sheet says so.
 Amounts are the effect on the balance. Money in is positive, money out is
 negative, for a bank account and a card alike. Each PDF is read once and
 remembered in a cache beside the installs, so the first build of a big
-archive takes minutes and the next takes seconds. The panel's Spreadsheet
-tab has this too, under Statements, streaming its progress.
+archive takes minutes and the next takes seconds. The panel's Spreadsheets
+page has this too, as Bank transactions, showing its progress.
 
 ## Naming your files your way
 
 Files are named `2026-03-09 Target Coffee Receipt.pdf` unless you say
-otherwise. The panel's **File names** tab builds your own pattern from
-parts, the date in the shape you like, the provider, the order or
-document number, the account, the total and more, each shown with how
-many of your own files carry it. A part can be skipped when a document
-does not have it, so no name ends in a stray dash, and the three newest
-files you already have are shown under the new pattern as you type.
+otherwise. The panel's **File names** page shows the name your newest file
+would get, and builds it from parts you add, remove and move, the date in
+the shape you like, the provider, the order or document number, the
+account, the total and more, each shown with how many of your own files
+carry it. A part can be skipped when a document does not have it, so no
+name ends in a stray dash, and your newest files are shown under the new
+pattern as you change it. The pattern can still be written by hand under
+Edit as text.
 
 One pattern covers every receipts app or every statements app, or any
-single app can have its own. After you save, the tab offers to rename
+single app can have its own. After you save, the page offers to rename
 the files you already have to match, a preview first and then the
 rename, and nothing is downloaded again. The pattern language is in
 [docs/file-naming.md](docs/file-naming.md).
@@ -491,10 +500,10 @@ rename, and nothing is downloaded again. The pattern language is in
 
 The record of what each provider already downloaded is what keeps
 PaperPull from downloading a document twice, and it can move with you. On
-the old computer, press **Export history** on the panel's Status tab. On
+the old computer, press **Export history** in the panel's Settings. On
 the new one, or on [PaperPull Server](SERVER.md#coming-from-the-desktop-app),
 choose that file under **Moving from another computer?** on the welcome
-page, or under **Import a history file** on the Status tab. Every provider
+page, or under **Import a history file** in Settings. Every provider
 and person in it is set up with their settings, and nothing they already
 downloaded is downloaded again. No sign-in or PDF travels in the file, so
 you sign in to each provider once on the new machine. It does list
