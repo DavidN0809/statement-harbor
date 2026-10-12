@@ -7,6 +7,15 @@ sends with a body. The Browser Screen of PaperPull Server is a page that
 shows noVNC's page in a frame, and every answer now says who may frame it,
 so it is opened here too.
 
+The API also refuses a request the browser marks Sec-Fetch-Site none,
+which it sends when it opens an address by itself, for a link opened from
+an email, a chat or a PDF. So an address of the API opened that way is
+shown refused, with the header the browser really sent, and the page's own
+spreadsheet and failure file on PaperPull Server, the two addresses of the
+API the page sends the browser to, are shown still handed over. The
+server's forms that choose a password and sign in and out ask the same
+question as the API, so they are posted here too.
+
 Playwright's own headless Chromium, never a browser of the person's,
 against the real panel served on a free local port, with every setting
 under a temp folder. The one app is a script that notes it ran.
@@ -128,6 +137,123 @@ def test_the_panel_works_at_its_own_addresses(browser, port, shop, name):
     refused = [(status, url) for status, url in answers if status in (400, 401, 403)]
     assert not refused, refused
     assert any(url.startswith(base + "/api/run?") for _, url in answers)
+
+
+def signed_in_context(browser, base: str, **options):
+    """A context holding a session of PaperPull Server's, in a cookie made
+    the way the server makes it."""
+    context = browser.new_context(**options)
+    context.add_cookies([{"name": server_mode.SESSION_COOKIE, "value": server_mode.new_session(),
+                          "url": base, "httpOnly": True, "sameSite": "Strict"}])
+    return context
+
+
+def opened_by_the_browser(tab, url: str):
+    """The answer to an address the browser opened by itself, which is what
+    Playwright opening it is, after checking the browser said so."""
+    answer = tab.goto(url)
+    assert answer.request.header_value("sec-fetch-site") == "none"
+    return answer
+
+
+@pytest.mark.parametrize("name", ["127.0.0.1", "localhost"])
+def test_a_link_to_the_api_opened_from_outside_the_browser_starts_nothing(browser, port, shop,
+                                                                          name):
+    """A link to /api/run opened from an email, a chat or a PDF used to
+    start that run. The panel itself still opens from a link."""
+    base = "http://%s:%d" % (name, port)
+    context = browser.new_context()
+    try:
+        tab = context.new_page()
+        answer = opened_by_the_browser(tab, base + "/api/run?app=Shop%20Receipts&action=pilot")
+        assert answer.status == 403, answer.text()
+        assert "link" in answer.json()["detail"]
+        answer = opened_by_the_browser(tab, base + "/")
+        assert answer.status == 200 and tab.title() == "PaperPull"
+    finally:
+        context.close()
+    assert not (shop / "ran.txt").exists(), "a link started a run"
+
+
+def test_on_the_server_such_a_link_is_refused_in_a_signed_in_browser(browser, port, shop,
+                                                                     monkeypatch):
+    """The session cookie is SameSite=Strict, and the browser sends it all
+    the same for an address it opened by itself, so the sign-in gate, which
+    would answer 401, lets the link through. The API answers 403."""
+    monkeypatch.setenv("PAPERPULL_SERVER", "1")
+    server_mode.set_password(PASSWORD)
+    base = "http://127.0.0.1:%d" % port
+    context = signed_in_context(browser, base)
+    try:
+        tab = context.new_page()
+        answer = opened_by_the_browser(tab, base + "/api/run?app=Shop%20Receipts&action=pilot")
+        assert answer.status == 403, answer.text()
+        assert "link" in answer.json()["detail"]
+        answer = opened_by_the_browser(tab, base + "/")
+        assert answer.status == 200 and tab.title() == "PaperPull"
+    finally:
+        context.close()
+    assert not (shop / "ran.txt").exists(), "a link started a run"
+
+
+def test_on_the_server_the_page_still_hands_over_its_spreadsheet_and_failure_file(
+        browser, port, shop, tmp_path, monkeypatch):
+    """PaperPull Server's page hands both to the browser by sending itself
+    to their address under /api/, a navigation its own script starts, which
+    the browser marks same-origin. Refused, the browser would show the
+    refusal instead and download nothing."""
+    monkeypatch.setenv("PAPERPULL_SERVER", "1")
+    server_mode.set_password(PASSWORD)
+    sheet = tmp_path / "All Purchases.xlsx"
+    sheet.write_bytes(b"an invented spreadsheet")
+    monkeypatch.setattr(app_module, "_LAST_EXPORT", sheet)
+    (shop / "Diagnostics").mkdir()
+    (shop / "Diagnostics" / "failure-run-1.json").write_text('{"step": "a step"}',
+                                                             encoding="utf-8")
+    base = "http://127.0.0.1:%d" % port
+    context = signed_in_context(browser, base, accept_downloads=True)
+    try:
+        tab = context.new_page()
+        tab.goto(base + "/")
+        tab.wait_for_function("() => document.getElementById('app').options.length > 0")
+        with tab.expect_download(timeout=15000) as handed:
+            tab.evaluate("revealSpreadsheet()")
+        assert Path(handed.value.path()).read_bytes() == b"an invented spreadsheet"
+        tab.evaluate("failureApp = 'Shop Receipts'")
+        with tab.expect_download(timeout=15000) as handed:
+            tab.evaluate("revealFailure()")
+        assert Path(handed.value.path()).read_bytes() == b'{"step": "a step"}'
+    finally:
+        context.close()
+
+
+def test_on_the_server_its_own_forms_still_set_the_password_and_sign_in_and_out(
+        browser, port, shop, monkeypatch):
+    """Each is a form a page of the server's posts, which the browser marks
+    same-origin, and each asks the same question as the API. Refused, nobody
+    could choose a password or sign in."""
+    monkeypatch.setenv("PAPERPULL_SERVER", "1")
+    base = "http://127.0.0.1:%d" % port
+    context = browser.new_context()
+    try:
+        tab = context.new_page()
+        tab.goto(base + "/")
+        assert tab.url == base + "/setup"
+        tab.fill("#code", server_mode.setup_code())
+        tab.fill("#password", PASSWORD)
+        tab.fill("#again", PASSWORD)
+        with tab.expect_navigation():
+            tab.get_by_role("button", name="Set the password").click()
+        assert tab.url == base + "/"
+        with tab.expect_navigation():
+            tab.get_by_role("button", name="Sign out").click()
+        assert tab.url == base + "/login"
+        tab.fill("#password", PASSWORD)
+        with tab.expect_navigation():
+            tab.get_by_role("button", name="Sign in").click()
+        assert tab.url == base + "/" and tab.title() == "PaperPull"
+    finally:
+        context.close()
 
 
 def test_the_browser_screen_still_shows_novnc_in_its_frame(browser, port, shop, tmp_path,

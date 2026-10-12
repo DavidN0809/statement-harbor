@@ -17,8 +17,12 @@ the panel's own page would send has to be seen changing something on a
 route said to change things, which is what gives the rest of the census
 its meaning there, and has to change nothing on a route said to read. A
 page, a route a browser opens by its address, is spared the Origin checks
-only because it is seen to change nothing. Then every request that has to
-be refused goes to every route, and each one has to be refused, change
+only because it is seen to change nothing. Every other route is asked for
+by a page of the panel's own, by script or by a form, which the browser
+marks same-origin, so a request it marks none, the browser opening an
+address by itself as it does for a link opened from an email, a chat or a
+PDF, is one of those refused there. Then every request that has to be
+refused goes to every route, and each one has to be refused, change
 nothing and still say that no other site may frame it.
 
 Changing something means writing, moving or deleting a file, starting a
@@ -456,6 +460,7 @@ def to_refuse(edition: str, page: bool) -> list:
         ("another site's Origin", [("host", own), ("origin", "https://evil.example")]),
         ("another site's Referer", [("host", own), ("referer", "https://evil.example/page")]),
         ("another site, by Sec-Fetch-Site", [("host", own), ("sec-fetch-site", "cross-site")]),
+        ("a link opened from outside the browser", [("host", own), ("sec-fetch-site", "none")]),
     ]
 
 
@@ -558,8 +563,9 @@ def test_every_route_of_the_api_carries_the_guard():
 
 def test_a_page_is_only_a_route_that_changes_nothing():
     """A route a browser opens by its address cannot ask where the request
-    came from, so the census spares it the Origin checks. That is safe only
-    for a route that changes nothing, in either edition."""
+    came from, so the census spares it the Origin checks and lets the
+    browser say it opened the address by itself. That is safe only for a
+    route that changes nothing, in either edition."""
     for key, how in ROUTES.items():
         if how.get("page"):
             assert how["desktop"] == how["server"] == "reads", key

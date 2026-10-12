@@ -393,7 +393,9 @@ server_mode.install(app)
 #   request was made to tells the two apart.
 #
 #   Sec-Fetch-Site, which every current browser sends and no page can set,
-#   says same-origin or none.
+#   says same-origin. It says none when the browser opened the address by
+#   itself, typed in or from a link in an email, and only a page is opened
+#   that way, so the API refuses it.
 #
 #   Origin and Referer, when sent, name the very address the request was
 #   made to.
@@ -427,7 +429,8 @@ def _host_allowed(value) -> bool:
 
 
 def _same_origin_only(request: Request) -> None:
-    """Refuse anything a different site set off.
+    """Refuse anything a different site set off, and anything the browser
+    opened by itself.
 
     Origin and Referer answer this whenever they are sent, and a page can
     arrange for neither to be. An <img> does not carry an Origin, and a
@@ -437,11 +440,19 @@ def _same_origin_only(request: Request) -> None:
 
     Sec-Fetch-Site is the one that closes it. Every current browser sends
     it on every request, page script cannot set it, and it says plainly
-    where the request came from: same-origin for the panel's own page,
-    cross-site for somebody else's, none for an address typed in. It is
-    absent from curl and from browsers old enough not to know it, and
-    those are allowed through, because the header being missing is not
-    the same as it saying cross-site.
+    where the request came from, same-origin for the panel's own page and
+    cross-site for somebody else's. It says none when the browser opened
+    the address by itself, for an address typed into the bar or a link
+    opened from an email, a chat or a PDF, and such a request carries no
+    Origin or Referer either. The panel's own page never asks for the API
+    that way, since its script uses fetch and EventSource, and the
+    download buttons of PaperPull Server send the page to an address by
+    script, which the browser marks same-origin. So none is refused here,
+    where it let such a link start a run, and only the pages a browser
+    opens by their address take it. The header is absent from curl and
+    from browsers old enough not to know it, Safari before 16.4 among
+    them, and those are allowed through, because the header being missing
+    is not the same as it saying cross-site.
 
     None of that tells the panel's page from a page that pointed a name of
     its own at this computer, since the browser takes the two for one
@@ -455,6 +466,11 @@ def _same_origin_only(request: Request) -> None:
     """
     headers = {k.lower(): v for k, v in request.headers.items()}
     if not (_host_allowed(headers.get("host")) and server_mode.same_origin(headers)):
+        # The one refusal a person meets by doing something ordinary,
+        # opening an address of the API by hand, so it says why.
+        if (headers.get("sec-fetch-site") or "").strip().lower() == "none":
+            raise HTTPException(403, "only the panel's own page asks for this, never a link "
+                                     "or an address typed in")
         raise HTTPException(403, "cross-origin request refused")
 
 

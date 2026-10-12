@@ -260,12 +260,17 @@ def _cookie(headers: dict, name: str) -> str:
 def same_origin(headers: dict) -> bool:
     """Whether a request came from the panel's own page, on the desktop and
     on the server alike. Sec-Fetch-Site says so plainly in every current
-    browser, and Origin and Referer, when sent, have to name the very
-    address the request was made to. An Origin of null, which a browser
-    sends for a page that keeps its address to itself, names no address,
-    and neither does an empty one, so both are refused."""
+    browser, same-origin for a request the panel's page made. It says none
+    when the browser opened an address by itself, typed into the bar or a
+    link opened from an email, a chat or a PDF. That is how a page is
+    opened, and every request asked about here is one a page makes, to the
+    API, the server's sign-in and sign-out and the Browser Screen's
+    connection, so none is refused too. Origin and Referer, when sent, have
+    to name the very address the request was made to. An Origin of null,
+    which a browser sends for a page that keeps its address to itself,
+    names no address, and neither does an empty one, so both are refused."""
     site = (headers.get("sec-fetch-site") or "").lower()
-    if site and site not in ("same-origin", "none"):
+    if site and site != "same-origin":
         return False
     host = (headers.get("host") or "").lower()
     origin = headers.get("origin")

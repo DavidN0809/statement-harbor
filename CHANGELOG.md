@@ -189,6 +189,25 @@ several providers.
   and importing a file made now over a history an older `--minimal` file
   already moved gives those records what they were missing.
 
+### Security
+- **A link opened from an email, a chat or a PDF no longer starts a run in
+  the control panel.** The panel's page asks for everything it does by
+  script, and the browser marks each such request as coming from the
+  panel's own page. A link opened from another program is marked instead
+  as an address the browser opened by itself, as one typed into the
+  address bar is, and the panel answered that, since nothing about it
+  pointed to another site. A run starts from a plain address, so a link to
+  that address opened while the panel was running started the run, on
+  PaperPull Server too in a browser signed in to it. Every address of the
+  panel's API now refuses a request the browser opened by itself, on the
+  desktop and on PaperPull Server, and so do the server's sign-in, its
+  sign-out and its Browser Screen connection, which only its own pages ask
+  for. The panel itself still opens from a link, a bookmark or the address
+  bar. An address of the API typed in by hand is refused with a note
+  saying only the panel's own page asks for it. A tool such as curl, which
+  says nothing about where a request came from, is answered as before, and
+  so is a browser too old to say, Safari before 16.4 among them.
+
 ## [0.46.0] - 2026-10-11
 
 Three new apps. Interactive Brokers is the 63rd, with monthly Activity
