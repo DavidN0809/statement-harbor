@@ -21,6 +21,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from paperpull_core import ready as R
+from paperpull_core import testkit
 from paperpull_core.journal import Journal, summarize
 from paperpull_core.ready import (count_reaches, count_settles, has, load,
                                   load_complete, network_idle, ready,
@@ -183,43 +185,54 @@ def test_a_page_held_up_by_an_image_needs_the_full_load(site, page):
                                   ("dom_loaded", "not_satisfied")]
 
 
-def test_a_page_already_ready_costs_one_question(site, page):
+def test_a_page_already_ready_costs_one_question(site, page, monkeypatch):
     """Every working run is this case, and it must stay as fast as it was
     before anything here existed."""
     page.goto(site + "/done")
-    got = ready(page, [network_idle(), count_settles("p.row")],
-                invariant=ROWS_3, budget_ms=15000)
+    with testkit.Waits(monkeypatch).counted() as taken:
+        got = ready(page, [network_idle(), count_settles("p.row")],
+                    invariant=ROWS_3, budget_ms=15000)
     assert got.ready and got.winner == "already"
     assert _outcomes(got) == [("already", "satisfied")]
-    assert got.elapsed_ms < 2000, "one question, not a wait"
+    # The waits are counted, not timed, so a slow machine cannot fail it.
+    assert taken == [], "one question, not a wait: %s" % taken
 
 
 # -- the budget ---------------------------------------------------------------
 
-def test_the_budget_is_for_the_whole_call_not_for_each_guess(site, page):
+def test_the_budget_is_for_the_whole_call_not_for_each_guess(site, page, monkeypatch):
     """Four guesses at a page that never comes right, one budget of a
     second. Summed per strategy that would be four seconds or more, and
     an app that used to give up in ten would give up in forty."""
     page.goto(site + "/done")
-    t0 = time.monotonic()
-    got = ready(page, [url_changes(), count_reaches(".never"),
-                       network_idle(), count_settles(".never")],
-                invariant=has(".never"), budget_ms=1000)
-    took = (time.monotonic() - t0) * 1000
+    # The budget is kept on a clock that moves only by the waits taken, so a
+    # slow machine neither eats it nor stretches it.
+    waits = testkit.Waits(monkeypatch)
+    waits.clock(monkeypatch, R)
+    with waits.counted() as taken:
+        got = ready(page, [url_changes(), count_reaches(".never"),
+                           network_idle(), count_settles(".never")],
+                    invariant=has(".never"), budget_ms=1000)
+    waited = sum(w.ms for w in taken)
     assert not got.ready
-    # Four guesses each given the whole second would take over four.
-    assert took < 2800, "took %dms on a 1000ms budget" % took
+    # Four guesses each given the whole second would wait over four.
+    assert waited <= 1000, "waited %dms on a 1000ms budget" % waited
     assert got.attempts[0].outcome == "timed_out"
     assert {a.outcome for a in got.attempts[1:]} == {"no_budget"}
 
 
-def test_a_guess_that_could_hang_can_be_given_a_smaller_share(site, page):
+def test_a_guess_that_could_hang_can_be_given_a_smaller_share(site, page, monkeypatch):
     page.goto(site + "/timer")
-    got = ready(page, [url_changes(within_ms=300), count_reaches("p.row", 3)],
-                invariant=ROWS_3, budget_ms=15000)
+    # Shares are kept on a clock that moves only by the waits taken.
+    waits = testkit.Waits(monkeypatch)
+    waits.clock(monkeypatch, R)
+    with waits.counted():
+        got = ready(page, [url_changes(within_ms=300), count_reaches("p.row", 3)],
+                    invariant=ROWS_3, budget_ms=15000)
     assert got.ready and got.winner == "count_reached"
     first = got.attempts[0]
-    assert first.outcome == "timed_out" and first.ms < 3000, "not the 8s budget"
+    assert first.outcome == "timed_out" and first.ms <= 300, \
+        "waited %d ms, more than its 300 ms share" % first.ms
 
 
 # -- what it tells the maintainer ---------------------------------------------

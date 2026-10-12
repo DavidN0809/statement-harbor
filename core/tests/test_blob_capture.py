@@ -323,28 +323,34 @@ def test_a_tab_asked_for_after_arming_again_is_waited_for(page, monkeypatch):
 
 
 @pytest.mark.parametrize("button", ["#nothing", "#gone"], ids=["no tab", "a tab that closed itself"])
-def test_a_press_with_no_tab_still_open_is_not_held_up(page, button):
-    import time
+def test_a_press_with_no_tab_still_open_is_not_held_up(page, button, monkeypatch):
+    from paperpull_core.testkit import Waits
     _tabs_page(page)
     before = set(page.context.pages)
     assert blob_capture.arm(page)
     page.click(button)
-    t0 = time.monotonic()
-    blob_capture.close_new_tabs(page, before, wait_ms=5000)
-    assert time.monotonic() - t0 < 4, "waited for a tab that was never coming"
+    # The waits are counted, not timed, so a slow machine cannot fail it.
+    with Waits(monkeypatch).counted() as taken:
+        blob_capture.close_new_tabs(page, before, wait_ms=5000)
+    assert taken == [], "waited for a tab that was never coming: %s" % taken
 
 
 def test_a_tab_that_never_comes_is_waited_for_no_longer_than_asked(page, monkeypatch):
-    import time
+    from paperpull_core.testkit import Waits
     _tabs_page(page)
     before = set(page.context.pages)
     late, heard = _late(page, monkeypatch)
     assert blob_capture.arm(page)
     page.click("#tab")
-    t0 = time.monotonic()
-    blob_capture.close_new_tabs(page, before, wait_ms=700)
-    took = time.monotonic() - t0
-    assert 0.6 < took < 4, took
+    # Its deadline is kept on a clock that moves only by the waits it takes,
+    # so a slow machine neither ends the wait early nor makes it long.
+    waits = Waits(monkeypatch)
+    waits.clock(monkeypatch, blob_capture)
+    with waits.counted() as taken:
+        blob_capture.close_new_tabs(page, before, wait_ms=700)
+    waited = sum(w.ms for w in taken)
+    assert waited >= 700, "it gave up before its 700 ms: %s" % taken
+    assert waited - taken[-1].ms < 700, "it waited again once its 700 ms were up: %s" % taken
     late.let_through()
     for p in _heard(page, heard):
         p.close()

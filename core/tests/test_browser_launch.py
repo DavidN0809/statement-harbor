@@ -156,16 +156,35 @@ def said(capsys):
     return " ".join(capsys.readouterr().out.split())
 
 
+def _looks(monkeypatch) -> list:
+    """What the wait for the debugging port heard each time it asked whether
+    the browser was still running, in order. Read rather than timing the
+    wait, so a slow machine cannot fail a wait that ended at the right look."""
+    asked = []
+    real = browser.wait_for_debug_port
+
+    def wait(port, timeout=20.0, alive=None):
+        def still_running():
+            asked.append(alive())
+            return asked[-1]
+        return real(port, timeout, alive=None if alive is None else still_running)
+    monkeypatch.setattr(browser, "wait_for_debug_port", wait)
+    return asked
+
+
 def test_a_chromium_without_its_sandbox_is_named_at_once(monkeypatch, tmp_path, port, capsys):
     """No browser of their own, so the bundled Chromium was the only one. It
     has to say what happened, without the twenty seconds, and what to do."""
     monkeypatch.setattr(browser.sys, "platform", "linux")
     monkeypatch.setattr(browser, "_real_browsers", lambda: [])
     monkeypatch.setattr(browser.subprocess, "Popen", _Ended(SANDBOX_REFUSED))
-    began = time.monotonic()
+    asked = _looks(monkeypatch)
     assert browser._try_each([(browser.CHROMIUM, "/x/chrome")], tmp_path / "p", port,
                              "https://bank.example/") is None
-    assert time.monotonic() - began < 10, "it waited for a port although Chromium had ended"
+    # Ended at the look that found Chromium gone, not when its twenty
+    # seconds were up.
+    assert asked and asked[-1] is False and asked.count(False) == 1, \
+        "it waited for a port although Chromium had ended: %s" % asked
     words = said(capsys)
     assert "closed right after it started" in words
     assert "could not start its sandbox" in words and "Ubuntu 23.10" in words
@@ -352,9 +371,9 @@ def test_a_real_chromium_that_ends_without_its_sandbox(monkeypatch, tmp_path, po
     exe.chmod(0o755)
     monkeypatch.setattr(browser.sys, "platform", "linux")
     monkeypatch.setattr(browser, "_real_browsers", lambda: [])
-    began = time.monotonic()
+    asked = _looks(monkeypatch)
     assert browser._try_each([(browser.CHROMIUM, str(exe))], tmp_path / "p", port,
                              "https://bank.example/") is None
-    assert time.monotonic() - began < 10
+    assert asked and asked[-1] is False and asked.count(False) == 1, asked
     words = said(capsys)
     assert "could not start its sandbox" in words and "Install Google Chrome" in words

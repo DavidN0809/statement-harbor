@@ -35,6 +35,10 @@ that has only just started can abort its first navigation. With only_tab
 that tab is the browser's only one, for an app that works in the first tab
 it finds.
 
+Waits counts the waits code takes, a pause or a wait of Playwright's that
+ran out, for a test of how long code waited that a slow machine cannot
+fail, and can give a module a clock that moves only by those waits.
+
 Nothing here is used by a run. It is in the package so every app's tests
 can import it the same way they import everything else.
 """
@@ -44,9 +48,12 @@ import inspect
 import io
 import itertools
 import json
+import re
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from . import delivery as _delivery
 
@@ -276,6 +283,122 @@ class TabsHeardLate:
             page._loop.call_later(seconds, self.let_through)
         else:
             page._loop.call_soon(self.let_through)
+
+
+# -- the waits code takes, counted rather than timed ---------------------------
+
+class Wait(NamedTuple):
+    """One wait. `what` is "paused", "slept", or for a wait that ran out the
+    first line of Playwright's own word for it, and `ms` how long it was."""
+    what: str
+    ms: float
+
+
+_RAN_OUT_MS = re.compile(r"Timeout (\d+)ms exceeded")
+
+
+class Waits:
+    """The waits code takes, counted rather than timed.
+
+    A test that times code counts every stall of the machine it runs on. A
+    slow CI runner once stopped for about 53 s in a drive whose one wait was
+    500 ms, and a check of its seconds failed with everything the drive did
+    right. This counts what the code itself waited for instead. A pause,
+    page.wait_for_timeout or time.sleep, is noted with the time it asked
+    for, and a wait of Playwright's that ran out, an action waiting for its
+    control or a wait for an event, with the time it was given, read from
+    the first line of Playwright's own word for it ("Locator.click: Timeout
+    500ms exceeded."). A read that answered waited for nothing.
+
+    Every call of Playwright's sync API goes through SyncBase._sync, and
+    every wait on an event, expect_download say, through EventInfo.value.
+    Both are private parts of Playwright, so a Playwright that renames them
+    fails the test that installs this rather than letting it count nothing.
+    Only the thread that opened counted() is noted, so a test's own server
+    sleeping in a thread of its own is not.
+
+    clock() gives a module a clock that reads the time waited so far, so a
+    deadline the module keeps is kept in what it waited, and a stall of the
+    machine neither ends a wait early nor makes it long.
+
+        waits = Waits(monkeypatch)
+        with waits.counted() as taken:
+            site.find_printing_frame(page)
+        assert taken == []
+    """
+
+    def __init__(self, monkeypatch):
+        import time
+        from playwright._impl import _sync_base
+        from playwright.sync_api import Frame, Page, TimeoutError as PlaywrightTimeout
+
+        self.waited_ms = 0.0
+        self._taken = None
+        self._thread = None
+        own_sync = _sync_base.SyncBase._sync
+        own_value = _sync_base.EventInfo.value.fget
+        own_sleep = time.sleep
+
+        def _sync(base, coro):
+            try:
+                return own_sync(base, coro)
+            except PlaywrightTimeout as e:
+                self._ran_out(e)
+                raise
+
+        def value(event):
+            try:
+                return own_value(event)
+            except PlaywrightTimeout as e:
+                self._ran_out(e)
+                raise
+
+        def sleep(seconds):
+            self._note("slept", seconds * 1000)
+            return own_sleep(seconds)
+        monkeypatch.setattr(_sync_base.SyncBase, "_sync", _sync)
+        monkeypatch.setattr(_sync_base.EventInfo, "value", property(value))
+        monkeypatch.setattr(time, "sleep", sleep)
+        for cls in (Page, Frame):
+            def pause(on, timeout, own=cls.wait_for_timeout):
+                self._note("paused", timeout)
+                return own(on, timeout)
+            monkeypatch.setattr(cls, "wait_for_timeout", pause)
+
+    def _note(self, what: str, ms) -> None:
+        if self._taken is not None and threading.get_ident() == self._thread:
+            self._taken.append(Wait(what, float(ms)))
+            self.waited_ms += float(ms)
+
+    def _ran_out(self, error) -> None:
+        said = (str(error).splitlines() or [""])[0]
+        given = _RAN_OUT_MS.search(said)
+        self._note(said, given.group(1) if given else 0)
+
+    @contextmanager
+    def counted(self):
+        """The waits taken on this thread inside the block, in order."""
+        taken: list = []
+        self._taken, self._thread = taken, threading.get_ident()
+        try:
+            yield taken
+        finally:
+            self._taken = self._thread = None
+
+    def clock(self, monkeypatch, *modules) -> None:
+        """Each module's `time` reads the time waited so far as its
+        monotonic clock, and everything else from time itself."""
+        import time
+        waits = self
+
+        class _Clock:
+            def monotonic(self):
+                return waits.waited_ms / 1000
+
+            def __getattr__(self, name):
+                return getattr(time, name)
+        for module in modules:
+            monkeypatch.setattr(module, "time", _Clock())
 
 
 # -- a browser to attach to, ready before the app attaches ---------------------

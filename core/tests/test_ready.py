@@ -7,6 +7,7 @@ bank, checked against a page that answers whatever the test tells it to.
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -83,17 +84,18 @@ def test_an_invariant_of_your_own_is_refused_too():
         R.Invariant(lambda p: True)
 
 
-def test_a_page_that_comes_right_mid_wait_ends_the_wait_and_says_so():
+def test_a_page_that_comes_right_mid_wait_ends_the_wait_and_says_so(monkeypatch):
     """A guess that was never going to come used to run its whole share
     on a page that was already ready, and then got the credit."""
-    import time as _time
     page = Page(counts=(0,))
+    # The budget is kept on a clock that reads what the page was asked to
+    # wait, so a slow machine neither eats it nor stretches it.
+    monkeypatch.setattr(R, "time", SimpleNamespace(monotonic=lambda: page.slept / 1000))
     answers = iter([False, False, False, True])
-    t0 = _time.monotonic()
     got = R.ready(page, [R.url_changes()],
                   invariant=R._invariant(lambda p: next(answers, True)),
                   budget_ms=5000)
-    assert _time.monotonic() - t0 < 3.0, "it waited out the 5s budget"
+    assert page.slept < 5000, "it waited out the 5s budget"
     assert got.ready and got.winner == "url_changed"
     assert got.attempts[-1].outcome == "satisfied_while_waiting"
 

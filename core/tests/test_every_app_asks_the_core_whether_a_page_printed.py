@@ -21,7 +21,6 @@ import os
 import re
 import sys
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -29,7 +28,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from paperpull_core import receipt_pdf
+from paperpull_core import receipt_pdf, testkit
 
 REPO = Path(__file__).resolve().parents[2]
 CORE = REPO / "core" / "paperpull_core"
@@ -202,14 +201,15 @@ def printed_page():
 
 @pytest.mark.parametrize("app", LOOKING, ids=lambda d: d.name)
 def test_the_frame_that_printed_is_found_before_one_that_only_looks_like_a_receipt(
-        app, printed_page):
+        app, printed_page, monkeypatch):
     marked = [f.name for f in printed_page.frames
               if f != printed_page.main_frame and receipt_pdf.was_print_called(f)]
     assert marked == ["printed"], "the page is as described, only one frame printed"
     site = site_of(app)
-    started = time.monotonic()
-    frame = site.find_printing_frame(printed_page, wait_ms=2000)
-    took = time.monotonic() - started
+    with testkit.Waits(monkeypatch).counted() as taken:
+        frame = site.find_printing_frame(printed_page, wait_ms=2000)
     assert frame is not None and frame.name == "printed", \
         "%s took the frame %r" % (app.name, frame.name if frame else None)
-    assert took < 1.5, "%s looked for %.1f s for a frame that had printed" % (app.name, took)
+    # Found at the first look, before any pause. The waits are counted, not
+    # timed, so a slow machine cannot fail it.
+    assert taken == [], "%s waited %s for a frame that had printed" % (app.name, taken)

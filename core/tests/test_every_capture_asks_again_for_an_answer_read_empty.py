@@ -242,6 +242,7 @@ class Provider:
                     give_up = time.monotonic() + 30
                     while not provider.let_go and time.monotonic() < give_up:
                         time.sleep(0.02)
+                    provider.held_answered.append(path)
                     self._send(provider.statement(path), "application/pdf")
                 elif host == PROVIDER and path.startswith("/doc/"):
                     self._statement(path)
@@ -281,6 +282,8 @@ class Provider:
         self.looks = 0
         self.open_at = self.other_at = self.let_go_at = 0
         self.gate_open = self.other_open = self.let_go = False
+        # The path of each held answer let go so far.
+        self.held_answered = []
         # The look at which the test's own listener heard an answer it was
         # waiting for, the capture's listener being beside it.
         self.heard_at = None
@@ -733,10 +736,23 @@ def test_asking_again_gives_up_in_its_time_when_the_page_drops_the_signal(
     pages.append(page)
     page.goto(provider.address("wrapped"), wait_until="load")
     url = "http://%s:%d/doc/w?slow=1" % (PROVIDER, provider.port)
-    started = time.monotonic()
+    # What the server had let go when the page's ask ended, read right then
+    # rather than timed, so a slow machine cannot fail it.
+    let_go_by_then = []
+    own_evaluate = page.evaluate
+
+    def evaluate(*args, **kwargs):
+        try:
+            return own_evaluate(*args, **kwargs)
+        finally:
+            let_go_by_then.append(list(provider.held_answered))
+    monkeypatch.setattr(page, "evaluate", evaluate)
     try:
         assert capture.ask_again(page, [("GET", url)], tmp_path / "s.pdf", lambda u: True) is False
-        assert time.monotonic() - started < 10, "the time limit did not hold"
+        # It gave up while the address still held its answer, which goes only
+        # once the test lets it or thirty seconds have passed.
+        assert let_go_by_then and "/doc/w" not in let_go_by_then[-1], \
+            "the time limit did not hold"
     finally:
         provider.let_go = True
 
