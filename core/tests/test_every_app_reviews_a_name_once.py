@@ -321,13 +321,17 @@ def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, cap
 
 @pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
 @pytest.mark.parametrize("trouble", ["ctrl c in a write", "progress fails", "index locked"])
-def test_a_rename_is_written_down_when_writing_it_goes_wrong(app, trouble, tmp_path,
-                                                            monkeypatch):
+def test_a_rename_that_cannot_be_written_down_is_put_back(app, trouble, tmp_path,
+                                                          monkeypatch):
     """Something goes wrong after the first receipt is renamed. Ctrl+C lands
     while the index is written, saving progress.json fails, or the index
-    stays open in another program. The review stops with that error, and
-    the CSVs name the file as it now is, the order history even when the
-    index cannot be written."""
+    stays open in another program. The file used to stay renamed with the
+    order history naming it so and the index still naming it by the name it
+    had, so Verify reported it missing. Now the file goes back under the
+    name it had, what was written for it is written back, and the review
+    stops before the next question, as Ctrl+C or with exit code 1. Both CSVs
+    name each file as it is (core test_review_names_with_a_ledger_held_open.py
+    has the rest)."""
     mod = load(app)
     inst = app_in(mod, tmp_path / "out")
     filed = inst.paths.folder_for("Online")
@@ -354,17 +358,21 @@ def test_a_rename_is_written_down_when_writing_it_goes_wrong(app, trouble, tmp_p
         def update(key, record, save=True):
             raise PermissionError(13, "progress.json is open in another program")
         monkeypatch.setattr(inst.progress, "update", update)
-    monkeypatch.setattr(mod, "ask", lambda prompt: "Garden Hose")
+    asked = []
+    monkeypatch.setattr(mod, "ask", lambda prompt: asked.append(prompt) or "Garden Hose")
 
     with pytest.raises(KeyboardInterrupt if trouble == "ctrl c in a write"
-                       else PermissionError):
+                       else SystemExit) as stop:
         inst.cmd_review_names()
 
-    garden = [p.name for p in filed.iterdir() if "Garden Hose" in p.name]
-    assert len(garden) == 1 and not first.exists() and second.is_file()
-    assert [r["PDF Filename"] for r in inst.order_csv.read_all()] == [garden[0], second.name]
-    if trouble != "index locked":
-        assert [r["PDF Filename"] for r in inst.index_csv.read_all()] == [garden[0], second.name]
+    if trouble != "ctrl c in a write":
+        assert stop.value.code == 1
+    assert len(asked) == 1, "the review went on after a write failed"
+    assert sorted(p.name for p in filed.iterdir()) == sorted([first.name, second.name])
+    for csv in (inst.index_csv, inst.order_csv):
+        assert [r["PDF Filename"] for r in csv.read_all()] == [first.name, second.name], \
+            csv.path.name
+    assert [r["PDF Full Path"] for r in inst.index_csv.read_all()] == [str(first), str(second)]
 
 
 @pytest.mark.parametrize("app", APPS, ids=[a.name for a in APPS])
