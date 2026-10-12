@@ -1098,3 +1098,66 @@ def test_diagnose_finds_each_bill_again_by_its_account_part(billing_site, tmp_pa
     links = {b["card"].split(" ")[0]: b["statement_links"] for b in info["bills"]}
     assert links == {"Auto": len(DATES["A"]), "Renters": len(DATES["D"])}
     assert tabs_left(s.page) == []
+
+
+# -- a history moved to another computer ----------------------------------------------
+
+def moved_history(old, new, minimal):
+    """The history of the app at `old` moved by tools/migrate.py into a fresh
+    install at `new`, with no PDF copied across. The tool finds an install
+    by the storage.py beside its progress.json."""
+    sys.path.insert(0, str(APP.parents[1] / "tools"))
+    import migrate
+    for base in (old, new):
+        out = base / "out"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "storage.py").write_bytes((APP / "storage.py").read_bytes())
+        if not (out / "progress.json").exists():
+            (out / "progress.json").write_text("{}", encoding="utf-8")
+    archive = old / "history.ppz"
+    assert migrate.export(old, archive, minimal=minimal) == 0
+    assert migrate.do_import(archive, new, assume_yes=True) == 0
+
+
+@pytest.mark.parametrize("minimal", [False, True], ids=["whole", "minimal"])
+def test_another_bills_bytes_are_known_after_a_move(billing_site, tmp_path, minimal):
+    """A's statements were saved on one computer and the history moved to
+    another without the files. There B's statement of 09/12/2026 opens A's
+    PDF of that date. A's saved record says by its digest, date and account
+    part that those bytes are A's, so neither copy is trusted, as on the
+    computer that saved them."""
+    old, new = tmp_path / "old", tmp_path / "new"
+    old.mkdir()
+    new.mkdir()
+    run(app_on(billing_site(billing_page({"A": "route"})).page, old))
+    assert set(saved(old)) == set(expected("A"))
+    moved_history(old, new, minimal)
+
+    s = billing_site(billing_page({"A": "route", "B": "route"},
+                                  wrong={"B|09/12/2026": ("A", "09/12/2026")}))
+    app = app_on(s.page, new)
+    run(app)
+    got = states(app)
+    assert got[(part_of("B"), "2026-09-12")] == (REVIEW, False), got
+    assert got[(part_of("A"), "2026-09-12")] == (REVIEW, False), got
+    assert name_of("B", "09/12/2026") not in saved(new), "A's bytes were saved as B's statement"
+    assert saved(new) == {name_of("B", "08/28/2026"): pdf("B", "08/28/2026")}
+
+
+@pytest.mark.parametrize("minimal", [False, True], ids=["whole", "minimal"])
+def test_a_bills_own_bytes_again_after_a_move_are_its_own(billing_site, tmp_path, minimal):
+    """Download again of A's statements on the new computer brings back the
+    very bytes A's moved records name. They are A's own, not another
+    bill's, so each is saved and stays downloaded."""
+    old, new = tmp_path / "old", tmp_path / "new"
+    old.mkdir()
+    new.mkdir()
+    run(app_on(billing_site(billing_page({"A": "route"})).page, old))
+    moved_history(old, new, minimal)
+
+    app = app_on(billing_site(billing_page({"A": "route"})).page, new)
+    app.args.redownload = True
+    run(app)
+    assert saved(new) == expected("A")
+    assert {k: v for k, v in states(app).items()} == {
+        (part_of("A"), iso(d)): (State.COMPLETED.value, True) for d in DATES["A"]}

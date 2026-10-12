@@ -154,6 +154,15 @@ several providers.
   now keeps those fields, every other record carries what it did before,
   and importing a file made now over a history an older `--minimal` file
   already moved gives those records what they were missing.
+- **American Family still catches one bill's statement handed over as
+  another's after a history moves with `--minimal`.** When a statement it
+  takes has the very bytes of another bill's statement of that date, it
+  trusts neither copy and sends both to Manual Review. It finds the other
+  one by each saved statement's digest, date and account part, which
+  `--minimal` left out, so on the new computer the statement was saved
+  under the wrong bill. The export now carries those three for American
+  Family. The account part is the masked last four its record keys and
+  file names already hold.
 
 ## [0.46.0] - 2026-10-11
 

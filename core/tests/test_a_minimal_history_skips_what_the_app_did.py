@@ -12,15 +12,21 @@ key through the page that listed it, and --minimal carried neither.
 So it is asked two ways. By reading, every record field each app's
 _already_done reads, followed through what it calls in the app's own
 modules and in the core, is one the tool carries for that app's provider.
-By running, each app's own _already_done answers the same for a record and
-for that record as --minimal cuts it, over every state, marker, note, day
-and review copy a record holds, and Robinhood's two records go through a
-real export and import. Every name and number is invented.
+So is every field read off a record any method of the app walks to among
+all the saved ones, since American Family looks there for another bill's
+statement with the very bytes it just took, and with nothing to compare
+saved a statement of one bill as another's. By running, each app's own
+_already_done answers the same for a record and for that record as
+--minimal cuts it, over every state, marker, note, day and review copy a
+record holds, and Robinhood's records go through a real export and import,
+as American Family's do in its own suite. Every name and number is
+invented.
 """
 import argparse
 import ast
 import importlib
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -52,6 +58,16 @@ DECIDES_NOTHING = {
     "robinhood": {
         "period": "copied onto a form moved to the key of its year",
         "tax_year": "read off the page's listing of the form, not a saved record",
+    },
+}
+
+# Methods that walk the saved records only to put right what Rename reads,
+# never to decide a download, each with why. A record without the fields
+# matches nothing there and changes nothing. One that no longer walks fails.
+WALKS_FOR_RENAME = {
+    "golden1": {
+        "_carry_index_rows": "gives an index row the title its record was carried to, "
+                             "and the index does not move with a history",
     },
 }
 
@@ -243,14 +259,114 @@ def test_every_field_a_skip_decision_reads_goes_with_minimal(app):
         "then carries" % (app.name, left_out))
 
 
+# -- every walk of the saved records ------------------------------------------
+
+# A loop or comprehension over every saved record, by its records or by its
+# keys and records, however the progress store is spelled around it.
+WALK = re.compile(r"self\.progress\.data(?: or \{\}\))?\.(items|values)\(\)")
+
+
+def _record_reads(scope, names, mod: Module, modules: dict):
+    """Each field read off a record bound to one of `names` in `scope`. A
+    field written is not read."""
+    for obj, key in _reads(scope, mod, modules):
+        if obj in names:
+            yield key
+
+
+def _walks(fn):
+    """(the loop or comprehension's scope, the name it binds to each record)
+    for each walk of the saved records in `fn`."""
+    parents = {child: node for node in ast.walk(fn) for child in ast.iter_child_nodes(node)}
+    for node in ast.walk(fn):
+        if not isinstance(node, (ast.For, ast.comprehension)):
+            continue
+        found = WALK.search(ast.unparse(node.iter))
+        target = node.target
+        if found and found.group(1) == "items" and isinstance(target, ast.Tuple):
+            target = target.elts[-1]
+        if found and isinstance(target, ast.Name):
+            yield (node if isinstance(node, ast.For) else parents[node]), target.id
+
+
+def walk_reads(app: Path) -> dict:
+    """{field: {method}} for every field read off a saved record that a
+    method of the app's App walks to, followed into what it hands that
+    record to in the app's own modules and the core. By what the code does,
+    whatever the method is called, as American Family's download_one looks
+    for another bill's statement with the very bytes just taken."""
+    modules = modules_of(app)
+    mod = modules[entry_of(app).stem]
+    todo = [(name[len("App."):], mod, scope, frozenset([bound]))
+            for name, fn in sorted(mod.funcs.items()) if name.startswith("App.")
+            for scope, bound in _walks(fn)]
+    found, seen = {}, set()
+    while todo:
+        start, mod, scope, names = todo.pop()
+        if (id(scope), names) in seen:
+            continue
+        seen.add((id(scope), names))
+        for key in _record_reads(scope, names, mod, modules):
+            found.setdefault(key, set()).add(start)
+        for call in ast.walk(scope):
+            if not isinstance(call, ast.Call):
+                continue
+            at = [i for i, a in enumerate(call.args) if isinstance(a, ast.Name) and a.id in names]
+            named = {k.arg for k in call.keywords
+                     if k.arg and isinstance(k.value, ast.Name) and k.value.id in names}
+            reached = _callee(call, mod, modules) if (at or named) else None
+            if reached is None:
+                continue
+            cmod, cfn = reached
+            params = [a.arg for a in cfn.args.args]
+            if params and params[0] in ("self", "cls"):
+                params = params[1:]
+            bound = {params[i] for i in at if i < len(params)} | named
+            if bound:
+                todo.append((start, cmod, cfn, frozenset(bound)))
+    return found
+
+
+@pytest.mark.parametrize("app", APPS, ids=IDS)
+def test_every_walk_of_the_saved_records_reads_what_minimal_carries(app):
+    read = walk_reads(app)
+    idle = WALKS_FOR_RENAME.get(app.name, {})
+    walking = {start for starts in read.values() for start in starts}
+    assert set(idle) <= walking, (app.name, "no longer walks", set(idle) - walking)
+    idle_fields = DECIDES_NOTHING.get(app.name, {})
+    carried = set(migrate.skip_fields_of(provider_of(app)))
+    left_out = {k: sorted(v) for k, v in read.items()
+                if k not in carried and k not in idle_fields and not v <= set(idle)}
+    assert not left_out, (
+        "%s walks its saved records and reads %s, which --minimal leaves out, "
+        "so on a new computer that check finds nothing. Carry it in "
+        "tools/migrate.py (PROVIDER_SKIP_FIELDS) if it names no person or "
+        "account, and say so in the tool's docstring" % (app.name, left_out))
+
+
+def test_the_walk_census_reads_american_familys_twin_check():
+    """Not a census of nothing. The check that found American Family's
+    statement with another bill's bytes, and Robinhood's of a crypto
+    statement with the individual one's."""
+    amfam = walk_reads(REPO / "apps" / "amfam")
+    assert {"pdf_sha256", "date", "account"} <= {k for k, v in amfam.items()
+                                                 if "download_one" in v}, amfam
+    robinhood = walk_reads(REPO / "apps" / "robinhood")
+    assert {"pdf_sha256", "source_url"} <= {k for k, v in robinhood.items()
+                                            if "_other_accounts_statement" in v}, robinhood
+
+
 def test_a_provider_list_carries_only_what_that_app_reads():
-    """Every field carried for one provider is a field its skip decision
-    reads, and every provider named is an app's, or a name nobody uses
-    would carry nothing and a field nobody reads would carry for nothing."""
+    """Every field carried for one provider is a field its skip decisions
+    or a walk of its saved records read, and every provider named is an
+    app's, or a name nobody uses would carry nothing and a field nobody
+    reads would carry for nothing."""
     by_provider = {provider_of(app): app for app in APPS}
     for provider, fields in migrate.PROVIDER_SKIP_FIELDS.items():
         assert provider in by_provider, provider
-        assert set(fields) <= set(fields_read(by_provider[provider])), (provider, fields)
+        app = by_provider[provider]
+        read = set(fields_read(app)) | set(walk_reads(app))
+        assert set(fields) <= read, (provider, set(fields) - read)
 
 
 def test_every_app_is_read():
