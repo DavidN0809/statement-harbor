@@ -807,3 +807,46 @@ def test_rename_follows_into_the_record_s_list_of_invoices(app, moving, tmp_path
     want = list(entries)
     want[at] = dict(entries[at], file=str(moved[0]))
     assert record["invoices"] == want, said
+
+
+def keeps_a_list_of_invoices(tree) -> bool:
+    """Whether an app writes a list of invoices into its records, a dict
+    with an "invoices" key handed to _record_state."""
+    import ast
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "_record_state"):
+            for arg in [*node.args, *(k.value for k in node.keywords)]:
+                for d in ast.walk(arg):
+                    if isinstance(d, ast.Dict) and any(
+                            isinstance(k, ast.Constant) and k.value == "invoices"
+                            for k in d.keys):
+                        return True
+    return False
+
+
+def test_every_app_keeping_a_list_of_invoices_mends_it_before_a_rename():
+    """Review Names and Rename left a record's list of invoices naming the
+    files they renamed until the list followed its files, and both read the
+    list as naming the order's files. An app whose records keep such a list
+    mends it (_mend_invoice_lists) in cmd_rename and in cmd_review_names,
+    before either reads it. Apps are found by what they write, and at least
+    one does, so this is not passing on no app at all."""
+    import ast
+    keeping = []
+    for app in APPS:
+        tree = ast.parse(entry_of(app).read_text(encoding="utf-8"))
+        if not keeps_a_list_of_invoices(tree):
+            continue
+        keeping.append(app.name)
+        commands = {n.name: n for n in ast.walk(tree)
+                    if isinstance(n, ast.FunctionDef)
+                    and n.name in ("cmd_rename", "cmd_review_names")}
+        for name in ("cmd_rename", "cmd_review_names"):
+            calls = [c.func.attr for c in ast.walk(commands[name])
+                     if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)]
+            assert "_mend_invoice_lists" in calls, (app.name, name)
+            assert calls.index("_mend_invoice_lists") < min(
+                calls.index(c) for c in ("run_for", "review_names") if c in calls), \
+                (app.name, name, "mends before it renames")
+    assert keeping, "no app keeps a list of invoices, so this checks nothing"

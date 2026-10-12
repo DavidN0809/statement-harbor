@@ -1480,20 +1480,27 @@ class App:
                     "size": row.get("PDF File Size", ""), "pages": row.get("PDF Page Count", "")})
         return entries
 
-    def _follow_renames(self, purchase: Purchase, entries: list) -> None:
+    def _follow_renames(self, purchase: Purchase, entries: list, another=None) -> None:
         """Point an invoice's entry at the name its file has now.
 
         Review Names and Rename give the file an index row names a new name
         and correct the row, and the record's list of invoices kept the old
-        name, so --redownload took the invoice for missing and saved it a
-        second time. The record's own pdf_path is no help, since the run has
-        written the purchase over it before the walk starts. Only an entry
-        whose file is gone is followed, and only to a file of the order's
+        name until the list followed its files, so --redownload took the
+        invoice for missing and saved it a second time. The record's own
+        pdf_path is no help, since the run has written the purchase over it
+        before the walk starts. An entry whose file is gone is followed, and
+        so is one whose old name a later order's file has taken since, which
+        another order's rows or record name and which does not say it is
+        this invoice (_lost). Each is followed only to a file of the order's
         index rows that says it is that invoice, by the rule the walk uses.
         Neither rename moves a file to another folder, so one put aside is
         followed only to a file in Manual Review, and one kept only to a
-        file outside it."""
-        gone = [e for e in entries if not Path(e["file"]).exists()]
+        file outside it. `another` is renaming.named_by_another over the
+        index and the records, read here when not given."""
+        if another is None:
+            another = renaming.named_by_another(self.index_csv.read_all(),
+                                                getattr(self.progress, "data", None) or {})
+        gone = [e for e in entries if self._lost(e, purchase, another)]
         if not gone:
             return
         named = {e["file"] for e in entries}
@@ -1507,6 +1514,57 @@ class App:
                     e["file"] = found["file"]
                     gone.remove(e)
                     break
+
+    def _lost(self, entry: dict, purchase: Purchase, another) -> bool:
+        """Whether an entry of the order's list no longer names its invoice.
+        Its file is gone, or another order's rows or record name that file
+        and the file does not say it is this invoice. A file both orders'
+        lists name stays with the order whose invoice it says it is."""
+        path = Path(entry["file"])
+        if not path.exists():
+            return True
+        if not another(entry["file"], purchase.order_number):
+            return False
+        part, number = site.invoice_identity(receipt_pdf.pdf_text(path))
+        return not self._on_file({"saved": [entry]}, part, number)
+
+    def _mend_invoice_lists(self, save: bool) -> int:
+        """Point each order's list of invoices at its files as they are now,
+        before Review Names or Rename reads it, and write it down when
+        `save`. How many entries moved.
+
+        An earlier Review Names or Rename left the list naming the old file
+        of each invoice it renamed. Review Names and Rename read the list as
+        naming the order's files, so a later order's file given such a freed
+        name was taken for this order's as well. Each entry is followed as
+        the walk follows one (_follow_renames), so an entry whose file was
+        deleted once it was imported elsewhere is left as it is. A preview
+        mends the list only in memory, so it says what Rename will do."""
+        data = getattr(self.progress, "data", None) or {}
+        another = renaming.named_by_another(self.index_csv.read_all(), data)
+        mended = 0
+        for key, rec in list(data.items()):
+            invoices = rec.get("invoices") if isinstance(rec, dict) else None
+            if not isinstance(invoices, list):
+                continue
+            entries = [dict(e) if isinstance(e, dict) else e for e in invoices]
+            listed = [e for e in entries
+                      if isinstance(e, dict) and isinstance(e.get("file"), str)
+                      and e["file"].strip()]
+            if not listed:
+                continue
+            was = [e["file"] for e in listed]
+            purchase = Purchase(
+                purchase_type=str(rec.get("purchase_type") or str(key).partition(":")[0]),
+                order_number=str(rec.get("order_number") or str(key).partition(":")[2]))
+            self._follow_renames(purchase, listed, another)
+            moved = sum(1 for e, old in zip(listed, was) if e["file"] != old)
+            if moved:
+                self.progress.update(key, {"invoices": entries}, save=False)
+                mended += moved
+        if mended and save:
+            self.progress.save()
+        return mended
 
     def _on_file(self, walk: dict, part, number: str) -> bool:
         """Whether this invoice is one of the order's already saved. By its
@@ -1704,7 +1762,15 @@ class App:
         nothing is asked of the provider here (#43, #49). A preview
         unless --apply is given."""
         self.stats["mode"] = "rename"
-        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
+        apply = bool(getattr(self.args, "apply", False))
+        mended = self._mend_invoice_lists(save=apply)
+        if mended and apply:
+            print("%d invoice(s) in the order records named a file an earlier rename "
+                  "moved, and now name it as it is." % mended)
+        elif mended:
+            print("%d invoice(s) in the order records name a file an earlier rename "
+                  "moved, and Rename with --apply writes down where each is now." % mended)
+        renaming.run_for(self, apply_changes=apply)
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"
@@ -1736,6 +1802,10 @@ class App:
                 print(f"  {k}: {c} rows")
 
     def cmd_review_names(self):
+        mended = self._mend_invoice_lists(save=True)
+        if mended:
+            print("%d invoice(s) in the order records named a file an earlier rename "
+                  "moved, and now name it as it is." % mended)
         renaming.review_names(self, ask)
 
     @property

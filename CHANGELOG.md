@@ -39,7 +39,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   then taken for this order's too, so Review Names left it out of the
   review and Rename kept its name. Each invoice in the list now names its
   file as it is, whichever invoice was renamed. A list an earlier rename
-  left behind still names the old files.
+  left behind is mended when Review Names or Rename next runs, each entry
+  following the order's own file that says it is that invoice, and Download
+  again no longer counts another order's file under such a name as this
+  order's. An invoice deleted once it was imported elsewhere keeps its
+  entry, so it is not downloaded again.
 
 ## [0.46.0] - 2026-10-11
 

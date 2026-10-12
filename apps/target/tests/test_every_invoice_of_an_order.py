@@ -1021,3 +1021,149 @@ def test_an_invoice_control_that_does_something_else_is_never_pressed(attached):
         names = [(c.inner_text() or "").strip() for c in site.find_invoice_controls(page)]
         page.close()
     assert names == ["View invoice"], names
+
+
+# -- a list an earlier rename left naming the old files ------------------------
+
+OTHER = "902000000000099"
+
+
+def index_rows(app, number, *paths, confidence="High", status="Completed"):
+    app.index_csv.append_rows([{
+        "Purchase Date": TIPPED.iso, "Purchase Type": ONLINE, "Order or Receipt Number": number,
+        "PDF Filename": f.name, "PDF Full Path": str(f), "Document Type": "Invoice",
+        "Classification Confidence": confidence, "Receipt Status": "Downloaded",
+        "Processing Status": status} for f in paths])
+
+
+def left_stale(app, taken: bool):
+    """TIPPED's two invoices as an earlier Review Names or Rename left them.
+    The second was renamed, its index row and pdf_path follow it, and the
+    record's list still names the old file. With `taken`, a later order of
+    the same day was saved under that freed name, and its record and its
+    row, which the review is unsure of, name it, beside a copy of its
+    invoice that Download again left."""
+    purchase = tipped_purchase()
+    tip = invoice_pdf(app.paths.invoices / "Games (1 of 2).pdf", "1 of 2",
+                      "10000000000000042", "10000042 - shipt_tip")
+    renamed = invoice_pdf(app.paths.invoices / "Wooden Puzzle Box (2 of 2).pdf", "2 of 2",
+                          "10000000000000041", "10000041 - Invented Wooden Puzzle Box")
+    old = app.paths.invoices / "Games (2 of 2).pdf"
+    entries = [
+        {"file": str(tip), "part": "1 of 2", "number": "10000000000000042", "kept": True,
+         "names": False},
+        {"file": str(old), "part": "2 of 2", "number": "10000000000000041", "kept": True,
+         "names": True}]
+    app.progress.update(purchase.key, dict(purchase.to_dict(), state="Completed",
+                                           downloaded_ok=True, pdf_path=str(renamed),
+                                           pdf_filename=renamed.name, invoices=entries))
+    index_rows(app, purchase.order_number, renamed)
+    other = None
+    if taken:
+        invoice_pdf(old, "1 of 1", "10000000000000099", "10000099 - Invented Other Thing")
+        copy = invoice_pdf(app.paths.invoices / "Games (2 of 2) (2).pdf", "1 of 1",
+                           "10000000000000099", "10000099 - Invented Other Thing")
+        other = Purchase(purchase_type=ONLINE, purchase_date=TIPPED.iso, order_number=OTHER,
+                         summary="Games")
+        app.progress.update(other.key, dict(other.to_dict(), state="Completed",
+                                            downloaded_ok=True, pdf_path=str(old),
+                                            pdf_filename=old.name, invoices=[
+            {"file": str(old), "part": "1 of 1", "number": "10000000000000099",
+             "kept": True, "names": True}]))
+        index_rows(app, OTHER, old, confidence="Low", status="Review Needed")
+        index_rows(app, OTHER, copy)
+    return purchase, other, renamed, entries
+
+
+def saved_record(app, purchase):
+    return json.loads(app.paths.progress_json.read_text(encoding="utf-8"))[purchase.key]
+
+
+def holding(folder, number):
+    """The one file in `folder` that is this invoice, by what it says."""
+    found = [f for f in Path(folder).glob("*.pdf")
+             if number in " ".join(receipt_pdf.pdf_text(f).split())]
+    assert len(found) == 1, found
+    return found[0]
+
+
+@pytest.mark.parametrize("taken", [False, True], ids=["name left free", "name taken since"])
+@pytest.mark.parametrize("command", ["review names", "rename"])
+def test_a_list_an_earlier_rename_left_stale_is_mended(command, taken, tmp_path, monkeypatch,
+                                                       capsys):
+    """Review Names and Rename left the record's list naming the old file
+    of each invoice they renamed, until the list followed its files. Such a
+    list is mended before either reads it, to the file of the order's index
+    rows that says it is that invoice, and written down. With the old name
+    taken since by another order's invoice, the stale entry named that file,
+    so Review Names left the other order's row out as a file two purchases
+    name, and Download again counted the other file as this order's. The
+    other order's own entry, whose file says it is that invoice, stays where
+    it is, though a copy of it is on file as well."""
+    app = an_app(tmp_path)
+    purchase, other, renamed, entries = left_stale(app, taken)
+    asked = []
+    monkeypatch.setattr(app_mod, "ask", lambda prompt: asked.append(prompt) or "")
+    capsys.readouterr()
+    if command == "review names":
+        app.cmd_review_names()
+    else:
+        app.args.apply = True
+        app.cmd_rename()
+
+    said = " ".join(capsys.readouterr().out.split())
+    assert ("1 invoice(s) in the order records named a file an earlier rename moved, "
+            "and now name it as it is.") in said, said
+    now = holding(app.paths.invoices, "10000000000000041")
+    record = saved_record(app, purchase)
+    assert record["invoices"] == [entries[0], dict(entries[1], file=str(now))], record
+    if taken:
+        theirs = saved_record(app, other)
+        assert theirs["invoices"][0]["file"] == theirs["pdf_path"], theirs
+        assert Path(theirs["pdf_path"]).exists(), theirs
+        if command == "review names":
+            assert len(asked) == 1, "the other order's row is offered, %s" % said
+            assert "another purchase's rows or record also name" not in said, said
+
+
+def test_a_rename_preview_mends_nothing_on_disk(tmp_path, capsys):
+    """A preview changes nothing. It reads the list as it would be mended,
+    so it says what Rename will do, and says the list would be mended."""
+    app = an_app(tmp_path)
+    left_stale(app, taken=True)
+    before = app.paths.progress_json.read_bytes()
+    capsys.readouterr()
+    app.args.apply = False
+    app.cmd_rename()
+    said = " ".join(capsys.readouterr().out.split())
+    assert app.paths.progress_json.read_bytes() == before
+    assert ("1 invoice(s) in the order records name a file an earlier rename moved, and "
+            "Rename with --apply writes down where each is now.") in said, said
+
+
+def test_an_invoice_deleted_after_import_keeps_its_entry(tmp_path, monkeypatch):
+    """The promise every download here makes. A file deleted once it was
+    imported elsewhere is not looked for under another name, and its entry
+    is left as it was, so it is not downloaded again."""
+    app = an_app(tmp_path)
+    purchase, _, renamed, entries = left_stale(app, taken=False)
+    renamed.unlink()
+    before = app.paths.progress_json.read_bytes()
+    monkeypatch.setattr(app_mod, "ask", lambda prompt: "")
+    app.cmd_review_names()
+    assert app.paths.progress_json.read_bytes() == before
+    assert [e["number"] for e in app._invoices_on_file(purchase)] == [
+        "10000000000000042", "10000000000000041"]
+
+
+def test_download_again_does_not_count_another_orders_file_as_this_ones(tmp_path):
+    """With the old name taken by another order's invoice, the stale entry
+    named a file that was there, so Download again counted that file as
+    this order's invoice. The walk now follows such an entry to the file
+    that says it is this invoice, as it follows one whose file is gone."""
+    app = an_app(tmp_path, "--redownload")
+    purchase, other, renamed, entries = left_stale(app, taken=True)
+    assert [e["file"] for e in app._invoices_on_file(purchase)] == [entries[0]["file"],
+                                                                    str(renamed)]
+    assert [e["file"] for e in app._invoices_on_file(other)] == [
+        saved_record(app, other)["invoices"][0]["file"]], "the other order keeps its own"

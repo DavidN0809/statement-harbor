@@ -1280,6 +1280,23 @@ def _numbers_naming(rows: Iterable[dict], records: dict) -> dict:
     return out
 
 
+def named_by_another(rows: Iterable[dict], records: dict) -> Callable[[str, str], bool]:
+    """Whether a file is named by an index row or progress record of
+    another purchase than the one whose order number is given, asked as
+    another(path, number). A record names its pdf_path and each file of its
+    list of invoices (_numbers_naming). Two spellings are one file only when
+    they are shown to be (_one_file)."""
+    numbers = _numbers_naming(rows, records)
+
+    def another(raw: str, number: str) -> bool:
+        raw = str(raw or "").strip()
+        number = str(number or "").strip()
+        where = _same_file(raw) if raw else ""
+        return bool(where) and any(n != number and _one_file(r, raw)
+                                   for r, n in numbers.get(where, ()))
+    return another
+
+
 def _write_down(app, rows: List[dict], order_rows: List[dict], backup: bool) -> None:
     """Both CSVs as the review now has them, the order history even when
     the index could not be written."""
@@ -1316,7 +1333,7 @@ def review_names(app, ask, words: ReviewWords = WORDS,
     so an older copy of a purchase whose record names another copy leaves
     that record as it is."""
     rows = app.index_csv.read_all()
-    numbers = _numbers_naming(rows, getattr(app.progress, "data", None) or {})
+    another = named_by_another(rows, getattr(app.progress, "data", None) or {})
     # A row somebody already renamed is left out, even one renamed before
     # its confidence was marked High as well (#47).
     review, offered, left_out, shared = [], set(), 0, 0
@@ -1328,9 +1345,7 @@ def review_names(app, ask, words: ReviewWords = WORDS,
         path = held_receipt(r, app.paths)
         if path is None:
             left_out += 1
-        elif any(number != (r.get("Order or Receipt Number") or "").strip()
-                 and _one_file(raw, str(path))
-                 for raw, number in numbers.get(_same_file(str(path)), ())):
+        elif another(str(path), r.get("Order or Receipt Number")):
             # A file deleted once it was imported elsewhere leaves its name
             # free, and a later purchase of the same day and summary is
             # saved under it. Whose receipt the file is cannot be told, and
