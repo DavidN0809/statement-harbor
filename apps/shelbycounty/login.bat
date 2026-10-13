@@ -10,7 +10,7 @@ if not "%~1"=="" echo Account: %~1
 echo.
 echo Your own Edge or Chrome will open, with a separate profile. Then:
 echo   1. Open the Trustee's lookup; there is no sign-in (do all the 2FA / device approval yourself).
-echo   2. Open Help ^& Tools, then Forms ^& documents.
+echo   2. Open the Tax Query lookup for your parcel.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
 echo   4. Then run:  paperpull shelbycounty diagnose   (a survey for the maintainer)
 echo.

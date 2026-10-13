@@ -15,6 +15,26 @@ def row(cells, bill=False, receipt=False, i=0):
     return {"i": i, "cells": cells, "hasBillLink": bill, "hasPrintReceipt": receipt, "printLabel": "Print Receipt" if receipt else ""}
 
 
+
+class _FakeClick:
+    """Stands in for paperpull_core.pressing.click, which reads a real
+    Playwright control; these fakes have none. It records what the app
+    hands the core (css, what, words) and can raise pressing.Stop the way
+    the core does when a press is refused."""
+
+    def __init__(self):
+        self.calls = []
+        self.raise_stop = False
+
+    def __call__(self, page, locator, **kw):
+        self.calls.append(kw)
+        assert kw.get("css") in (site.pressing.BUTTONS, site.pressing.LINKS), kw.get("css")
+        assert kw.get("what") and kw.get("words") is not None
+        if self.raise_stop:
+            raise site.pressing.Stop("press a control", "a test refused the press", ["A test refused the press."])
+        locator.click(timeout=kw.get("timeout") or 8000)
+
+
 class Guard(unittest.TestCase):
     def test_allows_only_the_four_controls(self):
         for label in ["Print Receipt", "PRINT NOTICE Balances Due", "NEXT", "PREVIOUS"]:
@@ -65,6 +85,28 @@ class Hosts(unittest.TestCase):
             self.assertFalse(site.landed_on_parcel("https://apps2.shelbycountytrustee.com/Parcel?parcel="))
         finally:
             site.configure("")
+
+    def test_the_pdf_must_name_the_receipt_that_was_pressed(self):
+        pdf = b"%PDF-1.3 ... DATE 3/1/2020 2:34 PM ... Receipt # 1000001 ... Property Tax Notice ..."
+        self.assertEqual(site.pdf_names_receipt(pdf, "03/01/2020", "1000001"), "")
+        self.assertEqual(site.pdf_names_receipt(pdf, "3/1/2020", "1000001"), "")
+        self.assertEqual(site.pdf_names_receipt(b"%PDF 03/1/2020 1 000 001", "3/01/2020", "1000001"), "")
+        self.assertIn("date", site.pdf_names_receipt(pdf, "03/02/2020", "1000001"))
+        self.assertIn("number", site.pdf_names_receipt(pdf, "03/01/2020", "1000002"))
+        self.assertIn("receipt number", site.pdf_names_receipt(pdf, "03/01/2020", ""))
+        self.assertIn("date is not", site.pdf_names_receipt(pdf, "March 1", "1000001"))
+        self.assertEqual(site.pdf_names_notice(pdf + b" 2020", "2020"), "")
+        self.assertIn("tax year", site.pdf_names_notice(b"%PDF Notice", "2021"))
+        self.assertIn("notice", site.pdf_names_notice(b"%PDF 2021", "2021"))
+
+    def test_private_words_add_up_rather_than_replace(self):
+        site.set_private_words(["Example Owner"])
+        site.configure("012345 00001")
+        try:
+            self.assertIn("Example", site.private_words())
+            self.assertIn("012345", site.private_words())
+        finally:
+            site.configure(""); site.set_private_words([])
 
     def test_the_guard_takes_its_own_documents_and_refuses_the_rest(self):
         for ok in ["Print Receipt", "View Receipt", "Download Property Tax Receipt", "Property Tax Notice", "NEXT"]:
@@ -133,6 +175,14 @@ class Blob(unittest.TestCase):
 
 
 class Press(unittest.TestCase):
+    def setUp(self):
+        self._click = site.pressing.click
+        self.click = _FakeClick()
+        site.pressing.click = self.click
+
+    def tearDown(self):
+        site.pressing.click = self._click
+
     """_press_for_blob reads the capture only once it holds still, and a late second blob is refused."""
 
     def make_page(self, polls, result):
@@ -160,6 +210,29 @@ class Press(unittest.TestCase):
             trace = []
             self.assertFalse(site._press_for_blob(page, el, "Print Receipt", Path(td) / "o.pdf", trace))
             self.assertEqual(trace[-1]["note"], "blob refused"); self.assertFalse((Path(td) / "o.pdf").exists())
+
+    def test_a_pdf_that_names_another_receipt_is_refused_without_a_file(self):
+        pdf = base64.b64encode(b"%PDF-1.4 DATE 12/21/2011 Receipt # 1000002").decode()
+        one = {"blobs": [{"type": "application/pdf", "size": 1, "url": "blob:https://apps2.shelbycountytrustee.com/a"}],
+               "opened": ["blob:https://apps2.shelbycountytrustee.com/a"], "b64": pdf}
+        page, el = self.make_page([[0, 0], [1, 1], [1, 1], [1, 1], [1, 1]], one)
+        with tempfile.TemporaryDirectory() as td:
+            trace = []
+            ok = site._press_for_blob(page, el, "Print Receipt", Path(td) / "o.pdf", trace,
+                                      expect=lambda d: site.pdf_names_receipt(d, "12/21/2011", "1000001"))
+            self.assertFalse(ok); self.assertFalse((Path(td) / "o.pdf").exists())
+            self.assertEqual(trace[-1]["note"], "pdf refused"); self.assertNotIn("1000001", str(trace)); self.assertNotIn("1000002", str(trace))
+            ok = site._press_for_blob(page, el, "Print Receipt", Path(td) / "o.pdf", [],
+                                      expect=lambda d: site.pdf_names_receipt(d, "12/21/2011", "1000002"))
+            self.assertTrue(ok)
+        self.assertEqual(self.click.calls[-1]["css"], site.pressing.LINKS)
+
+    def test_a_press_the_core_refuses_stops_the_run(self):
+        one = {"blobs": [], "opened": [], "b64": ""}
+        page, el = self.make_page([[0, 0]], one)
+        self.click.raise_stop = True
+        with tempfile.TemporaryDirectory() as td, self.assertRaises(site.pressing.Stop):
+            site._press_for_blob(page, el, "Print Receipt", Path(td) / "o.pdf", [])
 
     def test_one_still_blob_is_taken(self):
         pdf = base64.b64encode(b"%PDF-1.4 x").decode()
@@ -203,6 +276,14 @@ class Navigation(unittest.TestCase):
 
 
 class Paging(unittest.TestCase):
+    def setUp(self):
+        self._click = site.pressing.click
+        self.click = _FakeClick()
+        site.pressing.click = self.click
+
+    def tearDown(self):
+        site.pressing.click = self._click
+
     """A fake two-page table: NEXT shows the second page; indexes are the page's own."""
 
     class Page:
@@ -345,7 +426,7 @@ class ReviewFixes(unittest.TestCase):
         bills = [row(["", "2025"], bill=True, i=0), row(["", "2024"], bill=True, i=1)]
         self.patch(goto_documents=lambda page: True, balance_due=lambda page: True,
                    read_whole_table=lambda page, what: bills,
-                   _press_for_blob=lambda page, el, label, out, trace: pressed.append(label) or True)
+                   _press_for_blob=lambda page, el, label, out, trace, **kw: pressed.append(label) or True)
         with tempfile.TemporaryDirectory() as d:
             out = Path(d) / "n.pdf"
             self.assertFalse(site.download_bill(Page(), d, "2024-12-31", out, "Property Tax Notice Tax Year 2024"))
