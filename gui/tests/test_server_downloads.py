@@ -327,6 +327,12 @@ def test_a_file_swapped_after_its_check_is_still_read_from_the_checked_open(
         shop, tmp_path, monkeypatch):
     """The window the first version left wide, between the check and the
     read. The file is swapped for a link the moment its check is done."""
+    # The swap deletes a file the checked open still holds. Linux, where the
+    # server runs, allows that. Windows refuses it (WinError 32 on CI, whose
+    # runner makes links), so there the swap this guards against cannot
+    # happen.
+    if os.name == "nt":
+        pytest.skip("Windows will not delete a file that is open")
     if not can_link(tmp_path):
         pytest.skip("this system makes no symbolic links for an ordinary user")
     secret = written(tmp_path / "profiles", "Cookies", b"signed in")
