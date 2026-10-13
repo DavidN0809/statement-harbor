@@ -68,7 +68,8 @@ from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
-from paperpull_core.redact import redact, set_private_words  # noqa: F401  (re-exported)
+from paperpull_core import pressing
+from paperpull_core.redact import redact, set_private_words, private_words  # noqa: F401  (re-exported)
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
@@ -103,7 +104,7 @@ def configure(parcel_id: str, owner: str = "") -> None:
     global _PARCEL
     _PARCEL = re.sub(r"\s+", " ", str(parcel_id or "")).strip()
     words = [w for w in (owner, _PARCEL, _PARCEL.replace(" ", ""), _PARCEL.replace(" ", "-")) if w]
-    set_private_words(words)
+    set_private_words(sorted(set(private_words()) | set(words)))
     URLS["login"] = URLS["documents"] = parcel_url() if _PARCEL else PARCEL_PAGE
 
 
@@ -152,7 +153,7 @@ FALLBACK = {
 }
 
 # ---------------------------------------------------------------------------
-# Date parsing (verbatim from the Optum app)
+# Date parsing (shared shape with the other apps)
 # ---------------------------------------------------------------------------
 DATE_PATTERNS = [
     (re.compile(r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
@@ -437,7 +438,9 @@ def _press_next(page) -> bool:
     before = _rows(page)
     tabs = tabs_now(page)
     try:
-        loc.first.click(timeout=8000)
+        pressing.click(page, loc.first, css=pressing.BUTTONS, what="the table's NEXT", words=_words(), timeout=8000)
+    except pressing.Stop:
+        raise
     except Exception as e:
         raise ListStopped("the table's NEXT could not be pressed (%s)" % type(e).__name__)
     settled_here(page, "pressing NEXT", tabs)
@@ -580,7 +583,7 @@ def _register_page_words(page) -> None:
             words.append(v)
             words += [w for w in re.split(r"[\s,]+", v) if len(w) >= 4 and not w.isdigit()]
     base = [w for w in (_PARCEL, _PARCEL.replace(" ", ""), _PARCEL.replace(" ", "-")) if w]
-    set_private_words(base + words)
+    set_private_words(sorted(set(private_words()) | set(base) | set(words)))
 
 
 def scroll_full_page(page, rounds: int = 4, delay_ms: int = 400) -> None:
@@ -798,7 +801,55 @@ def accept_blob(result: dict) -> Tuple[bytes, str]:
     return data, ""
 
 
-def _press_for_blob(page, control, label: str, out_path: Path, trace: Optional[list]) -> bool:
+def pdf_text(data: bytes) -> str:
+    """The text a PDF prints, read with pypdf, with the raw bytes added
+    behind it. The lookup builds its PDFs with jsPDF, uncompressed, so even
+    a page pypdf cannot read still carries its printed text in the bytes."""
+    text = ""
+    try:
+        from io import BytesIO
+        from pypdf import PdfReader
+        text = "\n".join((p.extract_text() or "") for p in PdfReader(BytesIO(data)).pages)
+    except Exception as e:
+        log.info("the PDF's text could not be read with pypdf (%s)", type(e).__name__)
+    return text + "\n" + data.decode("latin-1", "replace")
+
+
+def pdf_names_receipt(data: bytes, date_text: str, receipt_no: str) -> str:
+    """Why the PDF is not the receipt row that was pressed, or "" when its
+    text carries the row's date and its receipt number. Printed dates may
+    pad the month and day or not, so all four spellings are looked for,
+    with any whitespace the text puts between runs allowed inside the
+    number and the date."""
+    digits = re.sub(r"\D", "", receipt_no or "")
+    if not digits:
+        return "the row carries no receipt number"
+    m = re.match(r"^\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*$", date_text or "")
+    if not m:
+        return "the row's date is not one this can look for"
+    mo, d, y = (int(m.group(1)), int(m.group(2)), m.group(3))
+    text = pdf_text(data)
+    date_re = re.compile(r"\b0?%d\s*/\s*0?%d\s*/\s*%s\b" % (mo, d, y))
+    if not date_re.search(text):
+        return "the PDF does not name the receipt's date"
+    number_re = re.compile(r"(?<!\d)" + r"\s*".join(digits) + r"(?!\d)")
+    if not number_re.search(text):
+        return "the PDF does not name the receipt's number"
+    return ""
+
+
+def pdf_names_notice(data: bytes, year: str) -> str:
+    """Why the PDF is not the tax notice for `year`, or ""."""
+    text = pdf_text(data)
+    if not re.search(r"notice", text, re.I):
+        return "the PDF does not read as a notice"
+    if not re.search(r"(?<!\d)%s(?!\d)" % re.escape(str(year or "")), text):
+        return "the PDF does not name the tax year"
+    return ""
+
+
+def _press_for_blob(page, control, label: str, out_path: Path, trace: Optional[list],
+                    css: str = pressing.LINKS, expect=None) -> bool:
     if not is_safe_control(label):
         if trace is not None:
             trace.append({"note": "control refused by the guard"})
@@ -806,7 +857,9 @@ def _press_for_blob(page, control, label: str, out_path: Path, trace: Optional[l
     _arm_blob_hook(page)
     tabs = tabs_now(page)
     try:
-        control.click(timeout=8000)
+        pressing.click(page, control, css=css, what=label, words=_words(), timeout=8000)
+    except pressing.Stop:
+        raise
     except Exception as e:
         if trace is not None:
             trace.append({"note": "click failed", "error": type(e).__name__})
@@ -849,6 +902,14 @@ def _press_for_blob(page, control, label: str, out_path: Path, trace: Optional[l
                       "count": len(made) if made != [{}] else 0, "type": str(made[0].get("type", ""))[:30]})
     if not data:
         return False
+    # The PDF has to be the document that was pressed: its own text names
+    # the row's date and receipt number (or the notice's tax year).
+    wrong = expect(data) if expect else ""
+    if wrong:
+        if trace is not None:
+            trace.append({"note": "pdf refused", "why": wrong})
+        log.info("the PDF was not kept: %s", wrong)
+        return False
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(data)
     return True
@@ -874,7 +935,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             if btn.count() != 1 or btn.first.is_disabled():
                 log.info("Print Notice is not a single enabled control")
                 return False
-            return _press_for_blob(page, btn.first, (btn.first.inner_text(timeout=1000) or "").split("\n")[0], out_path, trace)
+            return _press_for_blob(page, btn.first, (btn.first.inner_text(timeout=1000) or "").split("\n")[0],
+                                   out_path, trace, css=pressing.BUTTONS, expect=lambda d: pdf_names_notice(d, m.group(1)))
         m = _RECEIPT_TITLE_RE.match(t)
         if not m or not valid_iso(iso_date):
             log.info("not a title and date this app knows how to fetch")
@@ -903,7 +965,9 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         link = page.locator("table tbody tr").nth(row_idx).get_by_role("link", name=re.compile(r"^\s*print\s+receipt\s*$", re.I))
         if link.count() != 1:
             return False
-        return _press_for_blob(page, link.first, (link.first.inner_text(timeout=1000) or ""), out_path, trace)
+        cells = hits[0].get("cells") or []
+        return _press_for_blob(page, link.first, (link.first.inner_text(timeout=1000) or ""), out_path, trace,
+                               css=pressing.LINKS, expect=lambda d: pdf_names_receipt(d, cells[2], cells[1]))
     except ListStopped as stop:
         log.info("the list stopped while looking for the document: %s", stop)
         if trace is not None:
