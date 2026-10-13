@@ -10,6 +10,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
+- **SDG&E (San Diego Gas & Electric) bills from My Energy Center.** The app
+  reads the bills Billing History lists, about two years of them, and saves
+  each bill's PDF, fetched by its own address with your signed-in session.
+  Nothing on the site is clicked, and payments, autopay, paperless,
+  pricing plans and service changes are never touched. If My Energy Center
+  signs you out partway, the run stops, keeps what it saved and asks you to
+  sign in and Resume, rather than marking the rest for review. Your account
+  number, contract account and service address are kept out of every log
+  and diagnostic file. With more than one account on your sign-in, only the
+  one selected in the portal is listed. A full run on a contributor's own
+  account saved all 8 bills online.
 - **Shelby County Trustee, property tax receipts and the current notice for
   one Memphis parcel.** The Trustee's public lookup needs no sign-in, so the
   parcel ID goes in config.json, where it stays. It is never written to a
