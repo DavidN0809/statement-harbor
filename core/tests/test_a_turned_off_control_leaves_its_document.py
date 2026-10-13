@@ -101,7 +101,7 @@ STOPS = {
 # this census. It finds them by what they do, this only keeps it from
 # passing on finding none.
 LEAVES = {
-    ("amex", "download_document"),
+    ("alpaca", "_press"), ("amex", "download_document"),
     ("amfam", "_catch_pdf"), ("applecard", "_catch_pdf"), ("att", "_catch_pdf"),
     ("coinbase", "_catch_statement"),
     ("etrade", "_catch_pdf"), ("golden1", "_catch_pdf"), ("nelnet", "_catch_pdf"),
@@ -498,6 +498,31 @@ def _pge(site, page, out, staging, trace):
     return got
 
 
+def _alpaca(monkeypatch):
+    """Alpaca's row Download, pressed through its own capture of the
+    document's link and download. Only the Live account's check is stood
+    in for, since the page is not on Alpaca's host. A turned off Download
+    leaves the document for the next run (DocumentTurnedOff), which its
+    run records nowhere and goes on from."""
+    def call(site, page, out, staging, trace):
+        monkeypatch.setattr(site, "check_live", lambda page, state: None)
+        try:
+            return site._catch_document(page, site.Run(), staging, 1, ALPACA_DOC, "2026-06-30",
+                                        "trade_confirmation", out, trace)
+        except site.DocumentTurnedOff:
+            return False
+    return call
+
+
+ALPACA_DOC = "0f0f0f0f-1234-4abc-8def-0123456789ab"
+
+
+def _alpaca_download(off: bool) -> str:
+    return ('<p id="get" class="ctl" role="button"%s onclick="window.presses++; '
+            'fetch(\'/statement.pdf\');">Download</p>'
+            % (' aria-disabled="true"' if off else ""))
+
+
 def _vanguard_icon(off: bool) -> str:
     return ('<a id="get" class="ctl" title="Pdf download icon" href="/doc"%s '
             'onclick="window.presses++" aria-label="Download a pdf statement generated on '
@@ -536,6 +561,9 @@ def _how(app: str, function: str, monkeypatch):
     row it sits in, for each press that leaves its document."""
     if function == "_catch_pdf":
         return "%s_site" % app, _catch_pdf, _button, "June 30, 2026"
+    if (app, function) == ("alpaca", "_press"):
+        return "alpaca_site", _alpaca(monkeypatch), _alpaca_download, \
+            "2026-06-30</td><td>trade_confirmation"
     if (app, function) == ("amex", "download_document"):
         return "amex_site", _amex, _amex_button, "June 30, 2026"
     if (app, function) == ("vanguard", "download_document"):

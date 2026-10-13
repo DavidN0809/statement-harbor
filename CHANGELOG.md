@@ -7,6 +7,26 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Alpaca brokerage and crypto statements and trade confirmations, for
+  your Live account.** The app opens Alpaca's Documents page, reads the
+  list the page itself asks for, and saves each statement and trade
+  confirmation by pressing that row's own Download once and keeping the
+  PDF your browser receives. Nothing else on the site is pressed: no
+  trading, transfers, deposits, account switching or settings. A Paper
+  account is never read; if Alpaca is showing Paper, the run stops and asks
+  you to choose your Live account yourself, then Resume. The JSON copies of
+  trade confirmations and the account application are skipped. If Alpaca
+  has turned one document's Download off for now, that document is left for
+  the next run and this run goes on. Your account name, account number and
+  every document's ID are kept out of every log and diagnostic file, and
+  file names and the document index never carry the account holder's name,
+  whatever config.json asks. Built
+  from the account owner's walk through their own Live account; a full run
+  is still to come.
+
 ## [0.50.0] - 2026-10-13
 
 Two providers arrive, SDG&E bills from My Energy Center and Shelby County

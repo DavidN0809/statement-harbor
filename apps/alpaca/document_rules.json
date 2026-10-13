@@ -1,0 +1,20 @@
+{
+  "_comment": "Editable rules mapping Alpaca document titles to filename summaries. Checked in order: tax (unused, tax forms are not collected yet), then insurance (unused), then statement. alpaca_site.py titles each document by the type Alpaca's list gives it: account_statement is 'Brokerage Statement', crypto_account_statement 'Crypto Statement' and trade_confirmation 'Trade Confirmation'. The crypto rule comes first so a crypto statement and a brokerage statement of one month keep names of their own.",
+  "tax_rules": [],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "crypto\\s+statement",
+      "summary": "Crypto Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Brokerage Statement"
+    },
+    {
+      "pattern": "trade\\s+confirmation",
+      "summary": "Trade Confirmation"
+    }
+  ],
+  "skip_patterns": []
+}

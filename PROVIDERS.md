@@ -19,6 +19,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy & insurance documents | Insurance / member association |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Bank / card |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | Bank |
+| [`alpaca`](apps/alpaca) | Alpaca (Live brokerage account) | Brokerage and crypto statements and trade confirmations for the Live account, each row's own Download pressed once and the presigned file taken through the browser. The JSON twins of trade confirmations and the account application are skipped, and a Paper account is never read. Built and run on a contributor's own Live account, 22 documents | Brokerage / crypto |
 | [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills. Confirmed by @watling777 on two accounts, wireless and internet, with a full run on each (#26) | Telecom |
 | [`amazon`](apps/amazon) | Amazon | Order invoices (full history) | Retail |
 | [`amfam`](apps/amfam) | American Family Insurance | Billing statements, policy documents, declarations, ID cards. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #45. Being tested by @jpfieber | Insurance |
