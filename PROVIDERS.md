@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (56, plus two with a known issue and eight built and waiting for a tester)
+## Supported (60, plus seven built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -31,7 +31,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements, the roughly two years the site lists online; statements API, nothing clicked | Card |
 | [`coinbase`](apps/coinbase) | Coinbase | Monthly account statements back to the account's first month, and tax documents, the 1099-DA and other tax forms and the pregenerated gain and loss PDF reports. Contributed by @JasperDale420. A statement row's own PDF button is pressed and the download taken only from Coinbase's statements bucket, and tax PDFs come from the list calls the Taxes page makes, nothing pressed. A full run on a retail account saved 66 statements and 2 tax documents | Crypto exchange |
 | [`costco`](apps/costco) | Costco Wholesale | Receipts, in-warehouse, gas, pharmacy and costco.com orders. Written from a member's recording and run against their account. One membership so far, a second Pilot is welcome, see issue #47 | Retail |
-| [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | Card, **moving to Capital One** ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
+| [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements. A card that has moved to Capital One is read there by the Capital One app (#13) | Card |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Utility |
 | [`ebay`](apps/ebay) | eBay | Order receipts, the order-details page rendered to PDF, ten years of purchase history, nothing clicked. Confirmed by @jpfieber on issue #44, every order back to 2017 | Retail |
 | [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms. Confirmed by @watling777, whose Pilot and full run saved every statement (#36). No tax form seen yet, his account has none | Brokerage |

@@ -431,9 +431,14 @@ class App:
                 print("pages this app reads no longer exist, and there is nothing")
                 print("to fix on your end.")
                 print()
-                print("This app cannot download from Capital One yet. Anything you")
-                print("already downloaded is untouched, and your history is kept, so")
-                print("nothing is re-fetched if support arrives later.")
+                print("Your card's statements are on Capital One's site now, and")
+                print("PaperPull's Capital One provider downloads them there. To add")
+                print("it, press Add a provider on the panel's Accounts page and")
+                print("choose Capital One, then open it and press Open sign-in window.")
+                print()
+                print("Anything you already downloaded from Discover is untouched,")
+                print("and this app's history is kept, so it never downloads again")
+                print("what it saved.")
                 # A moved account has no Discover pages left to list, which no
                 # sign-in and no later run changes. So its list is the whole of
                 # it with nothing in it, noted as read whole below, and neither

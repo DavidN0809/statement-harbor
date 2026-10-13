@@ -60,6 +60,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   while its record kept no banner. Review Names then named that copy
   without it, and the next Rename put the banner back, renaming the file a
   second time.
+- **Discover sends a card that moved to Capital One to the Capital One
+  app.** A Discover run that landed on Capital One still said the app
+  could not download from Capital One yet, long after the Capital One
+  provider came to read a moved Discover card on capitalone.com (#13). It
+  now says to press Add a provider on the panel's Accounts page and choose
+  Capital One, and still says that what it saved is untouched and its
+  history kept. The provider tables and the panel's line for Discover say
+  the same, and Discover counts as supported, so sixty providers are
+  supported and seven wait for a tester.
 
 ## [0.49.0] - 2026-10-12
 

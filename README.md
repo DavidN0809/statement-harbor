@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Fifty-nine providers are supported today, all built on the same pattern.
+Sixty providers are supported today, all built on the same pattern.
 Seven more, Wells Fargo, SBA, Verizon Mobile,
 Meijer, American Family, Stripe and FedEx, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
@@ -86,7 +86,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements | Statements API from inside the page, nothing clicked; the site lists about two years online |
 | [`coinbase`](apps/coinbase) | Coinbase | Monthly account statements, tax forms, gain and loss reports | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 66 statements and 2 tax documents saved on a full run.** Each month's own PDF button on the Statements page pressed once and the download taken only from Coinbase's statements bucket, and tax PDFs from the list calls the Taxes page makes, nothing pressed |
 | [`costco`](apps/costco) | Costco Wholesale | Receipts, in-warehouse, gas, pharmacy and costco.com orders | **Written from a member's recording and run against their account, 34 purchases back to July 2024** ([#47](https://github.com/rheeloaded/paperpull/issues/47)). Each receipt names its part of Costco, Warehouse or Gas Station, for a file name pattern ([#60](https://github.com/rheeloaded/paperpull/issues/60)). One membership so far, so a second Pilot is welcome. Two tabs, quarters walked, the warehouse receipt is a dialog rendered with printToPDF, real Edge/Chrome |
-| [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | **Capital One is moving these accounts onto its own site. Once yours has moved this app can no longer read it** ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
+| [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | Capital One is moving these accounts onto its own site. A card that has moved is read there by the [`capitalone`](apps/capitalone) app ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Paginated MUI accordion; ~18-month limit |
 | [`ebay`](apps/ebay) | eBay | Order receipts, ten years of purchase history | **Confirmed by [@jpfieber](https://github.com/jpfieber), every order back to 2017.** Order-details page rendered to PDF, nothing clicked, real Edge/Chrome. Requested in [#44](https://github.com/rheeloaded/paperpull/issues/44) |
 | [`lowes`](apps/lowes) | Lowe's Home Improvement | Store and online receipts, and returns | **Built on the maintainer's own account.** The purchase history read by address, each purchase's details page saved as the receipt, nothing clicked, real Edge/Chrome |
@@ -626,9 +626,9 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **sixty-seven** apps pass their tests, the fifty-nine that are
-  supported, the one with a known issue and the seven still waiting for a
-  tester, 20,875 of them across the repo. Most are in regular use by the author. The rest were built or
+- ✅ All **sixty-seven** apps pass their tests, the sixty that are
+  supported and the seven still waiting for a tester, 20,875 of them
+  across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Self-hosted.** PaperPull Server, one Docker image published with
