@@ -7,7 +7,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.50.0] - 2026-10-13
+
+Two providers arrive, SDG&E bills from My Energy Center and Shelby County
+property tax receipts, and PaperPull Server now hands over a support report
+and the documents a run set aside as downloads. The release also has Costco
+receipts name the part of Costco they came from, Kroger keep its banner
+through Download again, and Discover send a card that moved to Capital One
+to the Capital One app, so Discover counts as supported.
 
 ### Added
 - **Costco receipts say which part of Costco they came from (#60).** A file
