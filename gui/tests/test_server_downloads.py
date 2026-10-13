@@ -344,3 +344,61 @@ def test_a_file_swapped_after_its_check_is_still_read_from_the_checked_open(
     with zipfile.ZipFile(io.BytesIO(body_of(got))) as z:
         assert z.read("Manual Review/real.pdf") == PDF
     assert real.is_symlink()
+
+
+# -- what the safety review of the fix found ---------------------------------------
+
+def test_a_named_pipe_is_refused_without_waiting(shop):
+    """Opening a pipe waits for a writer, which held the panel's thread for
+    good. A pipe named like a failure file or a set-aside PDF is passed by."""
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("this system has no named pipes")
+    import threading
+    diag, aside = shop / "Diagnostics", shop / "Manual Review"
+    diag.mkdir()
+    os.mkfifo(diag / "failure-pilot-20260101-120000.json")
+    written(aside, "real.pdf", PDF)
+    os.mkfifo(aside / "pipe.pdf")
+    got = {}
+
+    def ask():
+        got["failure"] = asked(app_module.api_failure_download, app="Shop Receipts")[0]
+        status, response = asked(app_module.api_aside_download, app="Shop Receipts")
+        with zipfile.ZipFile(io.BytesIO(body_of(response))) as z:
+            got["zipped"] = z.namelist()
+    worker = threading.Thread(target=ask, daemon=True)
+    worker.start()
+    worker.join(20)
+    assert not worker.is_alive(), "a named pipe held the request"
+    assert got == {"failure": 404, "zipped": ["Manual Review/real.pdf"]}
+
+
+def test_a_file_dated_past_what_a_zip_holds_is_still_zipped(shop):
+    path = written(shop / "Manual Review", "future.pdf", PDF)
+    try:
+        os.utime(path, (7258118400, 7258118400))        # the year 2200
+    except (OSError, OverflowError, ValueError):
+        pytest.skip("this system cannot date a file that far ahead")
+    status, got = asked(app_module.api_aside_download, app="Shop Receipts")
+    assert status == 200
+    with zipfile.ZipFile(io.BytesIO(body_of(got))) as z:
+        assert z.getinfo("Manual Review/future.pdf").date_time[0] == 2107
+
+
+def test_a_backslash_in_a_name_is_no_separator_in_the_zip(shop):
+    if os.sep == "\\":
+        pytest.skip("a Windows file name cannot hold a backslash")
+    # A name starting with a dot is left out as hidden, so this one does not.
+    written(shop / "Manual Review", "x\\..\\..\\evil.pdf", PDF)
+    status, got = asked(app_module.api_aside_download, app="Shop Receipts")
+    assert status == 200
+    with zipfile.ZipFile(io.BytesIO(body_of(got))) as z:
+        assert z.namelist() == ["Manual Review/x_.._.._evil.pdf"]
+
+
+def test_more_than_the_most_is_said_and_sends_nothing(shop, monkeypatch):
+    monkeypatch.setattr(app_module, "ASIDE_MOST", len(PDF) + 1)
+    written(shop / "Manual Review", "one.pdf", PDF)
+    written(shop / "Manual Review", "two.pdf", PDF)
+    status, detail = asked(app_module.api_aside_download, app="Shop Receipts")
+    assert status == 413 and "Copy it from the Manual Review folder" in detail

@@ -2524,10 +2524,14 @@ def _inside(meta: dict, account: str, name: str) -> str:
 def _open_plain(path, inside: str):
     """An open handle on a file of its own inside `inside`, or None. Not a
     link, not reached through one, not one of several hard links to one
-    file, and judged by the file the open reached (/proc/self/fd on Linux)."""
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    file, and judged by the file the open reached (/proc/self/fd on Linux).
+    Anything but a plain file, a named pipe or a device, is refused before
+    it is opened, and the open never waits, since opening a pipe waits for
+    a writer and would hold the panel's thread for good."""
+    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+             | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0))
     try:
-        if os.path.islink(path):
+        if not stat.S_ISREG(os.lstat(path).st_mode):
             return None
         fd = os.open(path, flags)
     except OSError:
@@ -2536,8 +2540,13 @@ def _open_plain(path, inside: str):
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
             raise ValueError("not a file of its own")
-        opened = "/proc/self/fd/%d" % fd
-        real = os.readlink(opened) if os.path.exists(opened) else os.path.realpath(path)
+        # On Linux, where the server runs, only what the open reached
+        # counts, and a /proc that cannot be read refuses. Elsewhere, the
+        # desktop, the path is resolved.
+        if sys.platform.startswith("linux"):
+            real = os.readlink("/proc/self/fd/%d" % fd)
+        else:
+            real = os.path.realpath(path)
         if os.path.commonpath([_same(real), _same(inside)]) != _same(inside):
             raise ValueError("outside")
         return fd
@@ -2623,8 +2632,24 @@ def _set_aside(meta: dict, account: str):
     return out, inside
 
 
+# The most the set-aside zip holds. Far past any folder of set-aside
+# documents, and it keeps a planted giant from filling the server's disk.
+ASIDE_MOST = 2 * 1024 ** 3
+
+
 def _zip_time(seconds: float) -> tuple:
-    return max(time.localtime(seconds)[:6], (1980, 1, 1, 0, 0, 0))
+    """A file's time as a zip can hold it, 1980 to 2107."""
+    try:
+        when = time.localtime(seconds)[:6]
+    except (OverflowError, OSError, ValueError):
+        when = (1980, 1, 1, 0, 0, 0)
+    return min(max(when, (1980, 1, 1, 0, 0, 0)), (2107, 12, 31, 23, 59, 58))
+
+
+def _zip_name(arc: str) -> str:
+    """A name in the zip no unzip can take out of its folder. A backslash
+    is a separator to a Windows unzip, and a Linux file name may hold one."""
+    return arc.replace("\\", "_")
 
 
 @app.get("/api/aside/download", dependencies=[Depends(_same_origin_only)])
@@ -2646,14 +2671,21 @@ def api_aside_download(app: str = "", account: str = "primary"):
     put = 0
     try:
         # Stored, not compressed, since a PDF already is.
+        total = 0
         with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as z:
             for path, arc in files:
                 fd = _open_plain(path, inside)
                 if fd is None:
                     continue
                 with os.fdopen(fd, "rb") as fh:
-                    info = zipfile.ZipInfo(arc, date_time=_zip_time(os.fstat(fh.fileno()).st_mtime))
-                    with z.open(info, "w") as dest:
+                    st = os.fstat(fh.fileno())
+                    total += st.st_size
+                    if total > ASIDE_MOST:
+                        raise HTTPException(413, "What is set aside is too large to download "
+                                                 "here. Copy it from the Manual Review folder "
+                                                 "on the server.")
+                    info = zipfile.ZipInfo(_zip_name(arc), date_time=_zip_time(st.st_mtime))
+                    with z.open(info, "w", force_zip64=True) as dest:
                         shutil.copyfileobj(fh, dest, 1024 * 1024)
                 put += 1
     except BaseException:
