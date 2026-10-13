@@ -10,6 +10,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
+- **Costco receipts say which part of Costco they came from (#60).** A file
+  name pattern's `{store}` gives Warehouse, Gas Station, Car Wash, or Gas
+  and Car Wash, read off the heading Costco prints on each warehouse
+  receipt, or Online, Delivery and the like for an order. Every row on the
+  Warehouse tab says In-Warehouse, gas included, so the store was the list's
+  word and told nothing apart. Rename reads it off the heading of each
+  receipt already saved, asking nothing of Costco, and a preview leaves
+  every record as it was. Food court, pharmacy and tire center receipts are
+  Warehouse until a member's receipts show how to tell them apart.
 - **SDG&E (San Diego Gas & Electric) bills from My Energy Center.** The app
   reads the bills Billing History lists, about two years of them, and saves
   each bill's PDF, fetched by its own address with your signed-in session.

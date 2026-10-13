@@ -55,6 +55,11 @@ from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 log = logging.getLogger("costco_receipts")
 
 
+# A key a record did not have before Rename settled its store, so a
+# preview can take it away again.
+_MISSING = object()
+
+
 def ask(prompt: str) -> str:
     """input() that stops cleanly (progress already saved by callers) when
     no interactive console is attached, instead of corrupting the run."""
@@ -408,9 +413,11 @@ class App:
             if floor and purchase.purchase_date and purchase.purchase_date < floor:
                 continue  # before the cutoff: never record or download
             key = purchase.key
+            store = self._listed_store(purchase)
             if self.discovery.get(key) is None:
                 rec = purchase.to_dict()
                 rec["state"] = State.DISCOVERED.value
+                rec["store_info"], rec["store_read"] = store, bool(store)
                 self.discovery.update(key, rec, save=False)
                 n_new += 1
             else:
@@ -419,8 +426,11 @@ class App:
                     "receipt_url": purchase.receipt_url,
                     "total": purchase.total or self.discovery.get(key).get("total", ""),
                     "status": purchase.status or self.discovery.get(key).get("status", ""),
-                    "store_info": purchase.store_info
-                    or self.discovery.get(key).get("store_info", ""),
+                    # The list says In-Warehouse for every warehouse
+                    # receipt, gas included, so a store read off the
+                    # receipt is kept over it (#60).
+                    "store_info": store,
+                    "store_read": bool(store),
                     "notes": purchase.notes,
                 }, save=False)
         self.discovery.save()
@@ -549,6 +559,9 @@ class App:
             self._delay()
 
     def process_one(self, page, purchase: Purchase, dry_run: bool = False):
+        # Before anything is recorded, even a page that fails to load, since
+        # every record writes the purchase's store (#60, as Kroger does).
+        self._forget_unread_store(purchase)
         n = self.stats.get("receipts_downloaded", 0)
         self.journal.op("next_item" if n else "open_item",
                         "take the next document", ordinal=n)
@@ -588,7 +601,13 @@ class App:
 
         # ---- extract ----
         purchase = site.extract_details(page, purchase)
-        self._record_state(purchase, State.DETAILS_EXTRACTED)
+        if purchase.purchase_type == IN_STORE:
+            # The heading names the part of Costco, Warehouse or Gas
+            # Station and the like, which no row on the list does (#60).
+            purchase.store_info = site.receipt_store(page) or purchase.store_info
+        self._record_state(purchase, State.DETAILS_EXTRACTED,
+                           extra={"store_read": bool(purchase.store_info)})
+        self._note_store(purchase)
         if purchase.purchase_date:
             self.stats["dates_processed"].append(purchase.purchase_date)
 
@@ -1064,7 +1083,21 @@ class App:
         nothing is asked of the provider here (#43, #49). A preview
         unless --apply is given."""
         self.stats["mode"] = "rename"
-        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
+        apply = bool(getattr(self.args, "apply", False))
+        # A preview changes nothing. The stores settled here name the files
+        # in the preview and are put back after it however it ends, cut short
+        # or failing included, since the run saves both stores on its way
+        # out (#60, as Kroger does for its banner).
+        changed: list = []
+        try:
+            read = self._settle_stores(changed)
+            if read:
+                print(f"Read the part of Costco from {read} receipt(s) already saved, "
+                      "off the PDF itself.")
+            renaming.run_for(self, apply_changes=apply)
+        finally:
+            if not apply:
+                self._put_back(changed)
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"
@@ -1096,7 +1129,98 @@ class App:
                 print(f"  {k}: {c} rows")
 
     def cmd_review_names(self):
-        renaming.review_names(self, ask)
+        # The store read off the receipt, never the list's In-Warehouse.
+        renaming.review_names(self, ask, record_for=lambda key, prog: dict(
+            prog, store_info=self._store_kept(key)))
+
+    # -- the part of Costco a receipt came from (#60) --------------------------
+
+    def _store_kept(self, key: str) -> str:
+        """The store a purchase has, or empty. For an online order, the
+        list's own word for it, Online or Delivery and the like. For a
+        warehouse receipt, only a store read off the receipt's heading,
+        marked store_read. The list's In-Warehouse is on every warehouse
+        receipt, gas included, and was written there before 0.50.0, so it
+        names nothing. A store that is not text, which a hand edit or a
+        damaged file can leave, names nothing either."""
+        for store in (self.progress, self.discovery):
+            rec = store.get(key) or {}
+            info = rec.get("store_info")
+            if not isinstance(info, str) or not info.strip():
+                continue
+            if rec.get("purchase_type") == ONLINE or rec.get("store_read"):
+                return info.strip()
+        return ""
+
+    def _listed_store(self, purchase: Purchase) -> str:
+        """The store a row read off the list gives its purchase. The list
+        names an online order's kind, and never the part of a warehouse a
+        receipt came from, so a warehouse receipt keeps the one read off
+        it, or none."""
+        if purchase.purchase_type == ONLINE:
+            return purchase.store_info or ""
+        return self._store_kept(purchase.key)
+
+    def _forget_unread_store(self, purchase: Purchase) -> None:
+        """Before a receipt is read, drop a store that was never read off
+        one. Resume works from the purchase list without reading it again,
+        and a list from before 0.50.0 carries In-Warehouse there."""
+        purchase.store_info = self._listed_store(purchase)
+
+    def _note_store(self, purchase: Purchase) -> None:
+        """The purchase list says the same as the record, since Rename reads
+        the list over the record. A receipt saved before keeps the store its
+        record has while a Download again saves no copy of its own
+        (paperpull_core.saved_copy)."""
+        if saved_copy.holding(self, purchase.key):
+            return
+        if self.discovery.get(purchase.key) is not None:
+            self.discovery.update(purchase.key, {
+                "store_info": purchase.store_info,
+                "store_read": bool(purchase.store_info)}, save=False)
+
+    def _settle_stores(self, changed: list) -> int:
+        """Give every purchase the store its receipt names, or none, in the
+        record and the purchase list alike, before Rename builds names from
+        them (#60).
+
+        A store already read is kept, and the list is made to agree, since
+        Rename reads the list over the record. A warehouse receipt saved
+        before 0.50.0 has its store read off its own PDF, whose heading is
+        the dialog's, with nothing asked of Costco. In memory only, each
+        change noted in `changed`, so a preview can put it back. Returns how
+        many stores were read off a PDF."""
+        n = 0
+        folders = self.paths.filing_folders()
+        for key in set(self.progress.data) | set(self.discovery.data):
+            recs = [r for r in (self.progress.data.get(key), self.discovery.data.get(key))
+                    if isinstance(r, dict)]
+            store = self._store_kept(key)
+            prog = self.progress.data.get(key)
+            if not store and isinstance(prog, dict) and prog.get("purchase_type") == IN_STORE:
+                where = prog.get("pdf_path")
+                # Only a receipt the app holds is read, as Rename renames
+                # only those (renaming.held_document).
+                if renaming.held_document(where, folders) is not None:
+                    store = site.store_from_receipt(receipt_pdf.pdf_text(Path(where)))
+                    n += bool(store)
+            for rec in recs:
+                if (rec.get("store_info") or "") != store:
+                    changed.append((rec, "store_info", rec.get("store_info", _MISSING)))
+                    rec["store_info"] = store
+                if bool(rec.get("store_read")) != bool(store):
+                    changed.append((rec, "store_read", rec.get("store_read", _MISSING)))
+                    rec["store_read"] = bool(store)
+        return n
+
+    def _put_back(self, changed: list) -> None:
+        """Undo _settle_stores exactly, for a preview, a key that was not
+        there taken away again."""
+        for rec, key, old in reversed(changed):
+            if old is _MISSING:
+                rec.pop(key, None)
+            else:
+                rec[key] = old
 
     @property
     def requests(self):
