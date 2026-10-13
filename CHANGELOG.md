@@ -7,6 +7,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Shelby County Trustee, property tax receipts and the current notice for
+  one Memphis parcel.** The Trustee's public lookup needs no sign-in, so the
+  parcel ID goes in config.json, where it stays. It is never written to a
+  log or a diagnostic file, and neither is the owner the page shows or a
+  bill or receipt number. Each receipt, and the notice while a balance is
+  due, is a PDF the page builds itself, and the app keeps the one the press
+  made without opening a tab. Both lists are read page by page to the
+  total the page states, or the run stops. Two receipts paid the same day
+  for one tax year are told apart by the last four digits of their receipt
+  numbers. The payment site is never opened. A full run on a contributor's
+  parcel saved 17 receipts across 16 tax years.
+
 ## [0.49.0] - 2026-10-12
 
 Review names comes to the control panel, so PaperPull Server, which has no

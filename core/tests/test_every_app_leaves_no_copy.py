@@ -431,6 +431,8 @@ DRIVEN_ELSEWHERE_HERE = {"verizon", "vanguard", "ibkr", "coinbase"}
 # Apps that point the browser at a folder and take nothing from it, so
 # there is no capture here to drive, and why. Each is held to that below.
 TAKES_NOTHING = {
+    "shelbycounty": "every document is a PDF the page builds in the browser and the app keeps as the Blob "
+                    "the page made; no download event, response or folder is ever used",
     "adp": "every document comes from ADP's statement services, fetched inside the page, "
            "and what the browser saves while a run is attached stays out of the person's "
            "own downloads, where an exact copy of a saved document goes at the next start",

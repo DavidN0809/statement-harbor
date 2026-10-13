@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Fifty-seven providers are supported today, all built on the same pattern.
+Fifty-eight providers are supported today, all built on the same pattern.
 Seven more, Wells Fargo, SBA, Verizon Mobile,
 Meijer, American Family, Stripe and FedEx, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
@@ -117,6 +117,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | "View More" pagination |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098 | **Untested, built without an account. Have an SBA loan? [Help test it](apps/sba/README.md#help-test-it-no-programming-needed)** |
 | [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Ported by [@davidrudnick](https://github.com/davidrudnick); fresh live pilot pending |
+| [`shelbycounty`](apps/shelbycounty) | Shelby County Trustee (Memphis, TN) | Property tax receipts, one per payment, and the current tax notice while a balance is due | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 17 receipts across 16 tax years saved on a full run.** A public lookup with no sign-in, the parcel ID goes in config.json. The page builds each PDF itself and the app keeps it, one guarded press per document |
 | [`smud`](apps/smud) | SMUD (Sacramento Municipal Utility District) | Monthly bills | **Confirmed by [@watling777](https://github.com/watling777)**, whose Pilot took the newest five and whose full run took the rest of the history ([#34](https://github.com/rheeloaded/paperpull/issues/34)) |
 | [`stripe`](apps/stripe) | Stripe (merchant Dashboard) | Fee invoices, tax forms such as the 1099-K | **Untested, built on an account with no documents yet. Have Stripe invoices or tax forms? [Help test it](apps/stripe/README.md#help-test-it-no-programming-needed)** Requested in [#53](https://github.com/rheeloaded/paperpull/issues/53) |
 | [`statefarm`](apps/statefarm) | State Farm | Bills, renewal notices, ID cards, receipts, policy documents | **Confirmed by [@watling777](https://github.com/watling777)**, whose full run saved every document State Farm lists for his policies ([#37](https://github.com/rheeloaded/paperpull/issues/37)) |
@@ -624,7 +625,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **sixty-five** apps pass their tests, the fifty-seven that are
+- ✅ All **sixty-six** apps pass their tests, the fifty-eight that are
   supported, the one with a known issue and the seven still waiting for a
   tester, 20,875 of them across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
@@ -706,7 +707,8 @@ found a bug and diagnosed it to the line.
   run against five years of monthly statements.
 - [@JasperDale420](https://github.com/JasperDale420), the Coinbase app,
   run against a retail account's monthly statements and tax documents,
-  and the Optum Bank app, built and run against an HSA.
+  the Optum Bank app, built and run against an HSA, and the Shelby County
+  Trustee app, run against a Memphis parcel's sixteen years of receipts.
 - [@marecabo](https://github.com/marecabo), Amazon's legal invoice PDFs on
   the German store.
 - [@watling777](https://github.com/watling777), the tester behind AT&T,
