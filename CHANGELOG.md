@@ -45,6 +45,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   statement's own balances. Every statement is read again once, since the
   saved readings came from the old rule. Thanks to @dertbv for the sample
   lines.
+- **The transaction export finds a statement period that pdfplumber
+  scattered (#32).** On a Navy Federal Visa statement the summary box's
+  characters sit at slightly different heights, and pdfplumber read each
+  of its lines as a column of single characters, so the Statement Closing
+  Date was lost and Period Start and Period End came out blank. A page
+  that comes out that way has those characters put back into lines by
+  height, while every line read whole stays exactly as it was, and the
+  closing date label now allows a stray space inside a word. Thanks to
+  @dertbv for working out what pdfplumber was doing.
 
 ## [0.49.0] - 2026-10-12
 

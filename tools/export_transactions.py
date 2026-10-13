@@ -49,7 +49,7 @@ from typing import Dict, List, Optional, Tuple
 
 INDEX_SUFFIX = " Document Index.csv"
 CACHE_NAME = ".transactions-cache.json"
-CACHE_VERSION = 6      # 2: the index date drives the year, #29. 3: split decimals, empty brackets, #32. 4: sidebar bleed, neighbor descriptions. 5: dates checked against the period. 6: credits signed by their heading, #32
+CACHE_VERSION = 7      # 2: the index date drives the year, #29. 3: split decimals, empty brackets, #32. 4: sidebar bleed, neighbor descriptions. 5: dates checked against the period. 6: credits signed by their heading, #32. 7: scattered lines rebuilt, #32
 
 # -- shapes -----------------------------------------------------------------------
 _MON = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?"
@@ -89,7 +89,11 @@ NOT_A_TRANSACTION = re.compile(
 PERIOD_RE = re.compile(
     r"(?:statement\s+period|billing\s+period|opening\s*/\s*closing\s+dates?|period|for the period|from)\s*:?\s*"
     r"(" + _DATE_ANY + r")\s*(?:to|-|–|—|through|thru)\s*(" + _DATE_ANY + r")", re.I)
-CLOSING_RE = re.compile(r"(?:closing\s+date|statement\s+date|statement\s+closing\s+date|as of)\s*:?\s*(" + _DATE_ANY + r")", re.I)
+# The labels tolerate a stray space inside a word, which is how a line
+# rebuilt from scattered characters reads ("Statement Clos ing Date09/13").
+CLOSING_RE = re.compile(r"(?:" + "|".join(_fuzzy(w) for w in ("closing date", "statement date",
+                                                              "statement closing date"))
+                        + r"|as of)\s*:?\s*(" + _DATE_ANY + r")", re.I)
 _ANY_DATE_RE = re.compile(_DATE_ANY, re.I)
 # A card statement that prints every amount unsigned tells a payment or a
 # refund from a purchase only by the heading it sits under (Navy Federal's
@@ -643,6 +647,55 @@ def _bracketed_sections(txns: List[dict], marks: List[tuple]) -> Optional[List[d
 
 # -- PDFs, the index, the cache --------------------------------------------------
 
+# A page that comes out with this many lines of one or two characters has
+# a block whose characters sit at jittered heights, and pdfplumber breaks
+# each of its lines into a column of single characters. A Navy Federal Visa
+# statement's summary box did, and its closing date was lost with it (#32).
+SCATTER_MIN = 20
+# How far apart in height two characters of one rebuilt line may sit.
+BAND_PT = 4.0
+
+
+def _band_lines(chars: List[dict]) -> List[Tuple[float, str]]:
+    """Characters grouped into lines by height, each read left to right, a
+    space where the gap is wider than a quarter of a character. Returns
+    (top, text) for each line."""
+    out: List[Tuple[float, str]] = []
+    band: List[dict] = []
+    for c in sorted(chars, key=lambda c: c["top"]):
+        if band and c["top"] - band[0]["top"] > BAND_PT:
+            out.append(_band_text(band))
+            band = []
+        band.append(c)
+    if band:
+        out.append(_band_text(band))
+    return out
+
+
+def _band_text(band: List[dict]) -> Tuple[float, str]:
+    text, prev = "", None
+    for c in sorted(band, key=lambda c: c["x0"]):
+        if prev is not None and c["x0"] - prev["x1"] > max(1.0, 0.25 * (prev["x1"] - prev["x0"])):
+            text += " "
+        text += c.get("text", "")
+        prev = c
+    return min(c["top"] for c in band), re.sub(r"\s+", " ", text).strip()
+
+
+def page_lines(text_lines: List[dict]) -> List[str]:
+    """A page's lines as pdfplumber read them, with any block it scattered
+    into single characters rebuilt from those characters. Every line it
+    read whole is kept exactly as it was, and the rebuilt ones are put
+    back in their place by height."""
+    short = {i for i, tl in enumerate(text_lines) if len((tl.get("text") or "").strip()) <= 2}
+    if len(short) < SCATTER_MIN:
+        return [tl["text"] for tl in text_lines]
+    chars = [c for i in sorted(short) for c in (text_lines[i].get("chars") or [])]
+    kept = [(tl["top"], n, tl["text"]) for n, tl in enumerate(text_lines) if n not in short]
+    rebuilt = [(top, len(text_lines) + n, txt) for n, (top, txt) in enumerate(_band_lines(chars))]
+    return [txt for _, _, txt in sorted(kept + rebuilt)]
+
+
 def pdf_lines(path: Path) -> List[str]:
     import logging
     logging.getLogger("pdfminer").setLevel(logging.ERROR)
@@ -651,8 +704,8 @@ def pdf_lines(path: Path) -> List[str]:
     with pdfplumber.open(str(path)) as pdf:
         for page in pdf.pages:
             try:
-                for tl in page.extract_text_lines(layout=False, strip=True, return_chars=False):
-                    lines.append(tl["text"])
+                lines.extend(page_lines(page.extract_text_lines(layout=False, strip=True,
+                                                                return_chars=True)))
             except Exception:
                 text = page.extract_text() or ""
                 lines.extend(text.splitlines())

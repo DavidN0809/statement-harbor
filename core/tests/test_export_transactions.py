@@ -551,3 +551,57 @@ def test_the_navy_federal_summary_box_reads_its_balances_and_signs_nothing():
     assert (s["beginning"], s["ending"]) == (2500.00, 46.77)
     assert s["status"] == "reconciled, signs from the statement's headings"
     assert len(s["transactions"]) == 6
+
+
+def _line(text, top, x0=40.0):
+    """A line as pdfplumber's extract_text_lines gives it, one char per
+    letter, 5 points wide."""
+    chars = [{"text": ch, "x0": x0 + 5 * i, "x1": x0 + 5 * i + 4.5, "top": top}
+             for i, ch in enumerate(text)]
+    return {"text": text, "top": top, "chars": chars}
+
+
+def _scattered(text, top, x0=300.0):
+    """The same line as pdfplumber scatters it when its characters sit at
+    jittered heights, one line per character (#32)."""
+    jitter = [0.0, 1.6, 0.4, 2.9, 1.1, 2.2, 0.7, 3.1]
+    out = []
+    for i, ch in enumerate(text):
+        if ch == " ":
+            continue
+        c = {"text": ch, "x0": x0 + 5 * i, "x1": x0 + 5 * i + 4.5, "top": top + jitter[i % len(jitter)]}
+        out.append({"text": ch, "top": c["top"], "chars": [c]})
+    return out
+
+
+def test_a_block_scattered_into_single_characters_is_rebuilt():
+    """A Navy Federal Visa summary box came out of pdfplumber as some 200
+    lines of one or two characters, and the Statement Closing Date line
+    went with it, so the statement had no period (#32). The scattered
+    characters are put back into lines by height, and every line read
+    whole is kept as it was, in its place."""
+    tls = ([_line("Credit Limit $9,000.00", 100.0)]
+           + _scattered("Statement Closing Date 09/13/2026", 120.0)
+           + _scattered("Payment Due Date 10/07/2026", 140.0)
+           + [_line("Days in Billing Cycle 31", 160.0)])
+    assert sum(1 for tl in tls if len(tl["text"]) <= 2) >= xt.SCATTER_MIN
+    lines = xt.page_lines(tls)
+    assert lines == ["Credit Limit $9,000.00", "Statement Closing Date 09/13/2026",
+                     "Payment Due Date 10/07/2026", "Days in Billing Cycle 31"]
+    assert xt.find_period(lines) == (None, "2026-09-13")
+
+
+def test_a_page_read_whole_is_left_exactly_as_pdfplumber_gave_it():
+    tls = [_line("Previous Balance $2,500.00", 100.0), _line("A", 110.0), _line("B", 118.0),
+           _line("08/16/26 NFO PAYMENT RECEIVED $1,482.17", 130.0)]
+    assert xt.page_lines(tls) == [tl["text"] for tl in tls]
+
+
+def test_a_closing_date_label_with_a_stray_space_is_still_read():
+    assert xt.find_period(["Statement Clos ing Date09/13/2026"]) == (None, "2026-09-13")
+    assert xt.find_period(["Statement Closing Date 08/13/2026", "Days in Billing Cycle 31"]) == (
+        None, "2026-08-13")
+
+
+def test_the_cache_is_read_again_for_the_rebuilt_lines():
+    assert xt.CACHE_VERSION >= 7
