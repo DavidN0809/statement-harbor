@@ -533,3 +533,21 @@ def test_a_statement_that_prints_signs_is_never_signed_by_its_headings():
 
 def test_the_cache_is_read_again_for_the_heading_signs():
     assert xt.CACHE_VERSION >= 6
+
+
+def test_the_navy_federal_summary_box_reads_its_balances_and_signs_nothing():
+    """The Visa's summary box as pdfplumber prints it (#32, values made up):
+    both balances on one line with the box's words glued on, Payments and
+    Other Credits printed signed, a split decimal, and, as on a September
+    statement, no closing date line at all, so the index date is the
+    anchor. The signed summary lines are not transactions and do not stop
+    the heading signs."""
+    box = ["Previous Balance $2,500.0 0 New Balance $46.77 Go Paperless",
+           "Payments -$2,587.17 Minimum Pay ment Due $25.00 Access up to 24 months of",
+           "Other Cred its -$234.59 Payment Due Date 10/07/2026",
+           "New Balance $46.77"]
+    body = [line for line in NFCU_VISA[3:]]
+    s = xt.parse_statement(box + body, "2026-09-15")
+    assert (s["beginning"], s["ending"]) == (2500.00, 46.77)
+    assert s["status"] == "reconciled, signs from the statement's headings"
+    assert len(s["transactions"]) == 6
