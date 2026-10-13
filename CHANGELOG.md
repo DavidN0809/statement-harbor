@@ -32,6 +32,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   for one tax year are told apart by the last four digits of their receipt
   numbers. The payment site is never opened. A full run on a contributor's
   parcel saved 17 receipts across 16 tax years.
+- **PaperPull Server hands over a support report and what was set aside.**
+  The desktop opens a folder after a support report or a recording, and
+  after a run that set documents aside, and the server offered nothing
+  there, since its folders are on the server. The run's page now offers
+  the report's file to download, the survey Diagnose says to attach or
+  the recording, from the last hour, and the documents in the account's
+  Manual Review folder as one zip. A screenshot Diagnose takes stays on
+  the server. Neither hands over a link placed in the shared folder, a
+  folder there that is a link, a second hard link to a file, or a file
+  swapped for one after it was checked, and the failure file is handed
+  over the same way.
 
 ## [0.49.0] - 2026-10-12
 

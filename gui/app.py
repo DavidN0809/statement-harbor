@@ -28,10 +28,13 @@ import os
 from datetime import date, datetime
 import re
 import shutil
+import stat
 import subprocess
 import sysconfig
 import tempfile
 import threading
+import urllib.parse
+import zipfile
 import time
 from typing import Optional
 import sys
@@ -2393,8 +2396,10 @@ def _account_named(meta: dict, account) -> str:
     return account
 
 
-def _latest_failure(meta: dict, account: str = "primary"):
+def _latest_failure(meta: dict, account: str = "primary", pattern: str = "failure-*.json"):
     """The newest failure file an app wrote, if it wrote one recently.
+    `pattern` finds the survey Diagnose writes, or the recording, the same
+    way.
 
     A run that stops early writes one of these by itself. It is the most
     useful thing a tester can attach and the easiest to never notice, so
@@ -2419,15 +2424,21 @@ def _latest_failure(meta: dict, account: str = "primary"):
         except OSError:
             return ""
     try:
-        found = sorted(_diagnostics_of(meta, account).glob("failure-*.json"), key=written)
+        inside = _inside(meta, account, "Diagnostics")
+        found = sorted(Path(inside).glob(pattern), key=written)
     except (OSError, ValueError):
         return None
     for path in reversed(found):
+        fd = _open_plain(path, inside)
+        if fd is None:
+            continue
         try:
-            if time.time() - path.stat().st_mtime < 3600:
+            if time.time() - os.fstat(fd).st_mtime < 3600:
                 return path
         except OSError:
             continue
+        finally:
+            os.close(fd)
     return None
 
 
@@ -2477,10 +2488,224 @@ def api_failure_download(app: str = "", account: str = "primary"):
     apps = discover_apps()
     if app not in apps:
         raise HTTPException(404, "unknown app")
-    found = _latest_failure(apps[app], _account_named(apps[app], account))
+    account = _account_named(apps[app], account)
+    found = _latest_failure(apps[app], account)
     if found is None:
         raise HTTPException(404, "no recent failure file")
-    return FileResponse(found, filename=found.name)
+    return _handed(apps[app], account, "Diagnostics", found)
+
+
+# On PaperPull Server the data folder is usually a share others can write
+# to, and the container also holds every signed-in browser profile. A link
+# planted in the share, as a file or as a folder the panel reads from, would
+# hand the browser a file from anywhere the server can read, cookies among
+# them. So a file the panel hands over is opened without following a link
+# and judged by what the open reached, and it is sent from that same open,
+# so nothing swapped in after the check is read.
+
+def _same(path: str) -> str:
+    return os.path.normcase(os.path.normpath(path))
+
+
+def _inside(meta: dict, account: str, name: str) -> str:
+    """Where a file the panel hands over has to be, the account's own folder,
+    resolved, with `name` joined on and not resolved, so a folder of that
+    name that is a link leads nowhere this accepts. On the server the
+    account's folder has to be inside the shared data folder. ValueError
+    when it cannot be told or is not."""
+    root = os.path.realpath(_account_root(meta, account))
+    if server_mode.enabled():
+        data = os.path.realpath(server_mode.data_root())
+        if os.path.commonpath([_same(root), _same(data)]) != _same(data):
+            raise ValueError("the account's folder is outside the data folder")
+    return os.path.join(root, name)
+
+
+def _open_plain(path, inside: str):
+    """An open handle on a file of its own inside `inside`, or None. Not a
+    link, not reached through one, not one of several hard links to one
+    file, and judged by the file the open reached (/proc/self/fd on Linux).
+    Anything but a plain file, a named pipe or a device, is refused before
+    it is opened, and the open never waits, since opening a pipe waits for
+    a writer and would hold the panel's thread for good."""
+    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+             | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0))
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return None
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+            raise ValueError("not a file of its own")
+        # On Linux, where the server runs, only what the open reached
+        # counts, and a /proc that cannot be read refuses. Elsewhere, the
+        # desktop, the path is resolved.
+        if sys.platform.startswith("linux"):
+            real = os.readlink("/proc/self/fd/%d" % fd)
+        else:
+            real = os.path.realpath(path)
+        if os.path.commonpath([_same(real), _same(inside)]) != _same(inside):
+            raise ValueError("outside")
+        return fd
+    except (OSError, ValueError):
+        os.close(fd)
+        return None
+
+
+def _attachment(name: str) -> dict:
+    return {"Content-Disposition": "attachment; filename*=utf-8''%s" % urllib.parse.quote(name)}
+
+
+# A support report, a recording or a failure file is a few kilobytes. Far
+# more is not one of them.
+HANDED_MOST = 20 * 1024 * 1024
+
+
+def _handed(meta: dict, account: str, name: str, path: Path) -> Response:
+    """One small file from the account's `name` folder, read from the one
+    open that was checked (_open_plain)."""
+    try:
+        inside = _inside(meta, account, name)
+    except ValueError:
+        raise HTTPException(404, "that account's folder cannot be read here")
+    fd = _open_plain(path, inside)
+    if fd is None:
+        raise HTTPException(404, "that file cannot be handed over")
+    with os.fdopen(fd, "rb") as fh:
+        data = fh.read(HANDED_MOST + 1)
+    if len(data) > HANDED_MOST:
+        raise HTTPException(413, "that file is too large to be a report")
+    kind = "application/json" if path.suffix.lower() == ".json" else "application/octet-stream"
+    return Response(content=data, media_type=kind, headers=_attachment(path.name))
+
+
+# What Diagnose and Record write that may leave the machine, by the run's
+# action. The survey is the file Diagnose says to attach, and the recording
+# is built from the same fixed word list. A screenshot is not on this list,
+# since it is a picture of the page and stays where it was taken.
+REPORT_FILES = {"diagnose": "survey-*.json", "record": "recording.json"}
+
+
+@app.get("/api/diagnostics/download", dependencies=[Depends(_same_origin_only)])
+def api_diagnostics_download(app: str = "", account: str = "primary", action: str = ""):
+    """On PaperPull Server, the file a support report or a recording wrote
+    in the last hour, handed to the browser to attach to an issue, where
+    the desktop opens the folder. Only the app, the account and which of
+    the two come from the page, and the file is found here."""
+    if not server_mode.enabled():
+        raise HTTPException(404)
+    if action not in REPORT_FILES:
+        raise HTTPException(400, "diagnose or record")
+    apps = discover_apps()
+    if app not in apps:
+        raise HTTPException(404, "unknown app")
+    account = _account_named(apps[app], account)
+    found = _latest_failure(apps[app], account, REPORT_FILES[action])
+    if found is None:
+        raise HTTPException(404, "There is no file from the last hour to download. Run it again, "
+                                 "then download its file.")
+    return _handed(apps[app], account, "Diagnostics", found)
+
+
+def _set_aside(meta: dict, account: str):
+    """Every file in an account's Manual Review folder, as (path, name in
+    the zip), hidden ones left out, and where they must be (_inside). Each
+    is checked again as it is opened (_open_plain). A Manual Review that is
+    a link holds nothing."""
+    try:
+        inside = _inside(meta, account, "Manual Review")
+    except ValueError:
+        raise HTTPException(404, "that account's folder cannot be read here")
+    out = []
+    if os.path.islink(inside):
+        return out, inside
+    for here, dirs, files in os.walk(inside):
+        dirs[:] = sorted(d for d in dirs if not d.startswith(".")
+                         and not os.path.islink(os.path.join(here, d)))
+        for name in sorted(files):
+            if not name.startswith("."):
+                path = Path(here) / name
+                out.append((path, "Manual Review/" + path.relative_to(inside).as_posix()))
+    return out, inside
+
+
+# The most the set-aside zip holds. Far past any folder of set-aside
+# documents, and it keeps a planted giant from filling the server's disk.
+ASIDE_MOST = 2 * 1024 ** 3
+
+
+def _zip_time(seconds: float) -> tuple:
+    """A file's time as a zip can hold it, 1980 to 2107."""
+    try:
+        when = time.localtime(seconds)[:6]
+    except (OverflowError, OSError, ValueError):
+        when = (1980, 1, 1, 0, 0, 0)
+    return min(max(when, (1980, 1, 1, 0, 0, 0)), (2107, 12, 31, 23, 59, 58))
+
+
+def _zip_name(arc: str) -> str:
+    """A name in the zip no unzip can take out of its folder. A backslash
+    is a separator to a Windows unzip, and a Linux file name may hold one."""
+    return arc.replace("\\", "_")
+
+
+@app.get("/api/aside/download", dependencies=[Depends(_same_origin_only)])
+def api_aside_download(app: str = "", account: str = "primary"):
+    """On PaperPull Server, the documents an account has set aside for a
+    look, in one zip, where the desktop opens the provider's folder. They
+    sit in the account's Manual Review folder, where a run puts a document
+    it would not file under a name it could be wrong about."""
+    if not server_mode.enabled():
+        raise HTTPException(404)
+    apps = discover_apps()
+    if app not in apps:
+        raise HTTPException(404, "unknown app")
+    files, inside = _set_aside(apps[app], _account_named(apps[app], account))
+    named = "%s set aside.zip" % (app if account == "primary" else "%s %s" % (app, account))
+    # A file of no name, which the system removes when it is closed or the
+    # panel ends, so a download cut short leaves nothing behind.
+    out = tempfile.TemporaryFile()
+    put = 0
+    try:
+        # Stored, not compressed, since a PDF already is.
+        total = 0
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as z:
+            for path, arc in files:
+                fd = _open_plain(path, inside)
+                if fd is None:
+                    continue
+                with os.fdopen(fd, "rb") as fh:
+                    st = os.fstat(fh.fileno())
+                    total += st.st_size
+                    if total > ASIDE_MOST:
+                        raise HTTPException(413, "What is set aside is too large to download "
+                                                 "here. Copy it from the Manual Review folder "
+                                                 "on the server.")
+                    info = zipfile.ZipInfo(_zip_name(arc), date_time=_zip_time(st.st_mtime))
+                    with z.open(info, "w", force_zip64=True) as dest:
+                        shutil.copyfileobj(fh, dest, 1024 * 1024)
+                put += 1
+    except BaseException:
+        out.close()
+        raise
+    if not put:
+        out.close()
+        raise HTTPException(404, "Nothing is set aside for this account now.")
+    out.seek(0)
+
+    def chunks():
+        try:
+            while True:
+                part = out.read(1024 * 1024)
+                if not part:
+                    return
+                yield part
+        finally:
+            out.close()
+    return StreamingResponse(chunks(), media_type="application/zip", headers=_attachment(named))
 
 
 @app.post("/api/record/stop", dependencies=[Depends(_same_origin_only)])
