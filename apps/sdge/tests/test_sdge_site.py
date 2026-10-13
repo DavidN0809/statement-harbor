@@ -66,8 +66,10 @@ class Page:
     """Billing History as the portal draws it, with nothing pressed."""
 
     def __init__(self, rows=ROWS, empty="", ready=True, settled=None, password=False,
-                 answers=(), accounts=1, start=f"https://{HOST}/portal/Dashboard/index"):
+                 answers=(), accounts=1, start=f"https://{HOST}/portal/Dashboard/index",
+                 api=None, info=""):
         self.rows, self.empty, self.ready, self.settled = list(rows), empty, ready, settled
+        self.api, self.info = api, info
         self.password, self.accounts, self.url, self.gotos = password, accounts, start, []
         page = self
 
@@ -103,7 +105,8 @@ class Page:
                 words += [f"{FAKE_ACCOUNT}{i}", f"{FAKE_ACCOUNT}{i}", f"{FAKE_CONTRACT}{i}",
                           f"100 {FAKE_STREET} Ave San Diego CA", f"{FAKE_ACCOUNT}{i} - 100 {FAKE_STREET} Ave"]
             return {"count": self.accounts, "words": words + [FAKE_CONTRACT]}
-        return {"rows": [dict(r) for r in self.rows], "empty": self.empty}
+        return {"rows": [dict(r) for r in self.rows], "empty": self.empty,
+                "api": self.api, "info": self.info}
 
 
 class Dead:
@@ -218,6 +221,34 @@ class ListReady(unittest.TestCase):
         page.wait_for_selector = wait
         with self.assertRaises(site.SessionExpired):
             site.collect_download_docs(page)
+
+    def test_a_table_that_counts_only_the_rows_read_is_whole(self):
+        n = len(ROWS)
+        for page in (Page(api={"total": n, "shown": n, "search": ""}),
+                     Page(info=f"Showing 1 to {n} of {n} entries"),
+                     Page(api={"total": n, "shown": n, "search": ""}, info=f"Showing 1 to {n} of {n} entries")):
+            self.assertEqual([d.document_id for d in site.collect_download_docs(page)], [ID1, ID2, ID3])
+
+    def test_one_page_of_a_longer_table_stops_with_what_was_read(self):
+        n = len(ROWS)
+        for page in (Page(api={"total": 24, "shown": 24, "search": ""}),
+                     Page(info=f"Showing 1 to {n} of 24 entries"),
+                     Page(info=f"Showing 1 to {n} of 1,024 entries"),
+                     Page(api={"total": n, "shown": n, "search": ""}, info=f"Showing 1 to {n} of 24 entries")):
+            with self.assertRaises(site.ListStopped) as stop:
+                site.collect_download_docs(page)
+            self.assertEqual([d.document_id for d in stop.exception.docs], [ID1, ID2, ID3])
+            self.assertFalse(site.bill_list_opens(page))
+
+    def test_a_filtered_or_unreadable_count_stops(self):
+        n = len(ROWS)
+        for page in (Page(api={"total": 24, "shown": n, "search": ""}),
+                     Page(api={"total": n, "shown": n, "search": "2026"}),
+                     Page(api={"unreadable": True}),
+                     Page(info=f"Showing 1 to {n} of {n} entries (filtered from 24 total entries)"),
+                     Page(info="Page one")):
+            with self.assertRaises(site.ListStopped):
+                site.collect_download_docs(page)
 
     def test_a_list_that_never_draws_stops(self):
         for page in (Page(ready=False), Page(rows=[], empty="Loading..."), Page(rows=[], empty="")):

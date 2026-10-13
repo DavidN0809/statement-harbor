@@ -45,9 +45,10 @@ KNOWN CEILINGS (left as they are until a run shows otherwise)
     changed. With more than one account offered, only the one the page has
     selected is listed, and the run says so once.
   * The empty list has not been seen. A table whose only body cell is the
-    table plugin's "No data available in table" is read as no bills, and
-    only once the rows have had a further wait to arrive; anything else
-    that shows no row stops the list.
+    table plugin's "No data available in table" stops the list, after a
+    further wait for rows, until a real empty history has been seen.
+  * One page of the table seen. The table plugin draws a page of rows at a
+    time, so the list stops unless its own count agrees with the rows read.
   * Two bills on one statement date stop the list, since a bill's file is
     named by its date alone. None was seen.
   * Solar (NBT) bills are fetched by the same address and filed as ordinary
@@ -393,8 +394,28 @@ _ROWS_JS = r"""() => {
                cells: Array.from(tr.querySelectorAll('td')).map(td => (td.textContent || '').replace(/\s+/g, ' ').trim())});
   }
   const empty = table.querySelector('tbody td.dataTables_empty');
-  return {rows: rows, empty: empty ? (empty.textContent || '').replace(/\s+/g, ' ').trim() : ''};
+  // The table plugin keeps only the page it shows in the DOM, so what it
+  // says of the whole table is read too, from its API and its info line.
+  let api = null;
+  try {
+    const $ = window.jQuery;
+    if ($ && $.fn && $.fn.dataTable && $.fn.dataTable.isDataTable(table)) {
+      const dt = $(table).DataTable();
+      const info = dt.page.info();
+      api = {total: info.recordsTotal, shown: info.recordsDisplay, search: String(dt.search() || '')};
+    }
+  } catch (e) {
+    api = {unreadable: true};
+  }
+  const line = document.querySelector('#billHistoryTable_info');
+  return {rows: rows, empty: empty ? (empty.textContent || '').replace(/\s+/g, ' ').trim() : '',
+          api: api, info: line ? (line.textContent || '').replace(/\s+/g, ' ').trim() : ''};
 }"""
+
+# The table plugin's info line, "Showing 1 to 10 of 24 entries", and the
+# "(filtered from N total entries)" it adds under a search.
+INFO_TOTAL_RE = re.compile(r"\bof\s+([\d,]+)\s+entries\b", re.IGNORECASE)
+INFO_FILTERED_RE = re.compile(r"\bfiltered\b", re.IGNORECASE)
 
 # What would identify the account holder on Billing History: every value of
 # the account selector's options and each bill row's contract account. Read
@@ -516,12 +537,43 @@ def _bills(page) -> List[RawDoc]:
         raise ListStopped("Billing History shows no bill table")
     rows = seen.get("rows") or []
     if rows:
-        return bills_of(rows)
+        docs = bills_of(rows)
+        _whole_table(seen, docs)
+        return docs
     if EMPTY_TEXT_RE.fullmatch(seen.get("empty") or ""):
         # ponytail: fail closed until a real empty history has been seen;
         # then this can become an empty list.
         raise ListStopped("Billing History drew its empty table, which this app does not yet read as no bills")
     raise ListStopped("the billing history did not finish loading")
+
+
+def _whole_table(seen: dict, docs: List[RawDoc]) -> None:
+    """Stop the list unless the rows read are every bill the table holds.
+    The table plugin draws one page of rows at a time (ten by default) and
+    can filter them by a remembered search, so rows alone never prove the
+    whole history. Its API's totals, when it answers, and its info line,
+    when drawn, must both agree with the rows read and show no filter. A
+    table showing neither is read as its rows, as before."""
+    n = len(docs)
+    api = seen.get("api")
+    if isinstance(api, dict):
+        if api.get("unreadable"):
+            raise ListStopped("the bill table's own count could not be read", docs)
+        total, shown = api.get("total"), api.get("shown")
+        if api.get("search") or total != shown:
+            raise ListStopped("the bill table is filtered by a search", docs)
+        if total != n:
+            raise ListStopped(f"the bill table holds {total} bills and {n} were drawn", docs)
+    info = str(seen.get("info") or "")
+    if info:
+        if INFO_FILTERED_RE.search(info):
+            raise ListStopped("the bill table is filtered by a search", docs)
+        m = INFO_TOTAL_RE.search(info)
+        if not m:
+            raise ListStopped("the bill table's own count could not be read", docs)
+        total = int(m.group(1).replace(",", ""))
+        if total != n:
+            raise ListStopped(f"the bill table holds {total} bills and {n} were drawn", docs)
 
 
 def _read_rows(page):
@@ -537,9 +589,10 @@ def bills_of(rows: list) -> List[RawDoc]:
     """RawDocs from the bill rows as read, one per invoice id. An id that is
     not "ISU" and twelve digits, a statement date that is not one, one id on
     two rows, or two bills on one statement date stops the list, carrying
-    what was read before it. A bill's file is named by its date alone, and
-    no invoice id goes into a file name, so two bills of one date could not
-    be told apart there. The page's own words stay out of what is said,
+    what was read before it. A bill's file is named by its date, and the
+    end of its invoice id is added only when a file of that name is already
+    in the folder (sdge_docs.told_apart_by), so two bills of one date are
+    not filed. The page's own words stay out of what is said,
     since it is printed and logged."""
     docs: List[RawDoc] = []
     seen = set()
