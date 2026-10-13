@@ -53,7 +53,6 @@ from paperpull_core import browser as browser_launcher
 import shelbycounty_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
-from paperpull_core.keys import is_done as _is_done
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
 from paperpull_core.words import Fixed, shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
@@ -190,13 +189,17 @@ def migrate_legacy_keys(records: dict) -> int:
 
 def told_apart_by(record: dict) -> str:
     """What a document's file adds to its name when another file already
-    has that name, the same on every run. A product never has two
-    statements of one day, so two statements of one name are two
-    products', told apart by the product, as in " product 5678". A form
-    Shelby County Trustee lists a second time under one title is told apart by the end of
-    its own id, as other apps' documents are. The download and Rename both
-    ask this, so a rename tells a file apart the way its download did."""
+    has that name, the same on every run, " tax year 2019" or, for two
+    receipts of one day and year, " tax year 2019 #1234". The download and
+    Rename both ask this, so a rename tells a file apart the way its
+    download did."""
     record = record or {}
+    # A receipt or notice is named by its date, and several tax years paid
+    # on one day are common, so the tax year (and the receipt number's
+    # ending, when the title carries it) tells them apart.
+    m = re.search(r"Tax Year ((?:19|20)\d{2})(?: \(#(\d{4})\))?$", str(record.get("title") or ""))
+    if m:
+        return "tax year %s" % m.group(1) + (" #%s" % m.group(2) if m.group(2) else "")
     doc_id = str(record.get("document_id") or "").strip()
     if doc_id:
         return doc_id[-6:]
@@ -390,7 +393,7 @@ class App:
         saved session - so nothing is duplicated in the launcher scripts. You
         sign in; the tool attaches afterwards.
         """
-        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9292")
+        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9287")
         profile = self.config["profile_dir"]
         url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]
         # A real Edge or Chrome first, which is also what the site's own

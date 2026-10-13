@@ -616,7 +616,7 @@ def bill_rows(rows: list) -> List[dict]:
             raise ListStopped("a billing row has no bill link")
         year = cells[1].strip()
         if not _YEAR4_RE.match(year):
-            raise ListStopped("a billing row's year reads %r" % year[:12])
+            raise ListStopped("a billing row's year is not a year")
         if year in seen:
             raise ListStopped("two bills for tax year %s" % year)
         seen.add(year)
@@ -638,7 +638,7 @@ def receipt_docs(rows: list, year: str) -> List[RawDoc]:
             raise ListStopped("a receipt row has no Print Receipt link")
         iso = mdy_to_iso(cells[2])
         if not iso:
-            raise ListStopped("a receipt row's date reads %r" % cells[2][:12])
+            raise ListStopped("a receipt row's date is not a calendar date")
         parsed.append((iso, re.sub(r"\D", "", cells[1])[-4:]))
     by_date: dict = {}
     for iso, _ in parsed:
@@ -697,7 +697,12 @@ def collect_download_docs(page) -> List[RawDoc]:
         raise ListStopped("the parcel page did not open")
     docs: List[RawDoc] = []
     bills = bill_rows(read_whole_table(page, "billing history"))
-    if balance_due(page) and bills:
+    if not bills:
+        # A parcel always has bills, so no row is a page that did not draw
+        # its table, never an empty history ("No payment is due" on the
+        # page reads as no rows).
+        raise ListStopped("the parcel's billing history shows no bill")
+    if balance_due(page):
         newest = max(b["year"] for b in bills)
         docs.append(RawDoc(title=f"Property Tax Notice Tax Year {newest}", date_text=f"{newest}-12-31",
                            text=f"Shelby County Trustee notice {newest}", kind="tax", tax_year=newest))
@@ -869,6 +874,14 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                 return False
             if not balance_due(page):
                 log.info("no balance is due, so there is no notice to print")
+                return False
+            # Print Notice prints the newest bill's notice, so a notice
+            # listed for an older year is not pressed for.
+            bills = bill_rows(read_whole_table(page, "billing history"))
+            if not bills or max(b["year"] for b in bills) != m.group(1):
+                log.info("the newest bill is not this notice's tax year, none pressed")
+                if trace is not None:
+                    trace.append({"note": "notice year is not the newest bill's"})
                 return False
             btn = page.get_by_role("button", name=re.compile(r"^\s*print\s+notice\b", re.I))
             if btn.count() != 1 or btn.first.is_disabled():

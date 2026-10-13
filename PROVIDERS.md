@@ -79,7 +79,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`walmart`](apps/walmart) | Walmart | Receipts | Retail |
 | [`wellsfargo`](apps/wellsfargo) | Wells Fargo | Account statements, tax documents. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #27 | Bank / card / mortgage |
 | [`wealthfront`](apps/wealthfront) | Wealthfront | Statements, tax docs | Brokerage |
-| [`shelbycounty`](apps/shelbycounty) | Shelby County Trustee (Memphis, TN property tax) | Property tax receipts, one per payment, back to the parcel's first year online, and the current tax notice while a balance is due. Public lookup, no sign-in: the parcel id goes in config.json. The page builds each PDF in the browser; the app keeps it and opens nothing. Built and run on a contributor's own parcel, 17 receipts | Tax authority |
+| [`shelbycounty`](apps/shelbycounty) | Shelby County Trustee (Memphis, TN property tax) | Property tax receipts, one per payment, back to the parcel's first year online, and the current tax notice while a balance is due. A public lookup with no sign-in, the parcel ID goes in config.json. The page builds each PDF in the browser and the app keeps it, opening nothing. Built and run on a contributor's own parcel, 17 receipts | Tax authority |
 
 ## Requested / in progress
 
