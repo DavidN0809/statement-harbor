@@ -70,6 +70,12 @@ DECIDES_NOTHING = {
 # Rename reads, and a record without the fields matches nothing there and
 # changes nothing.
 WALKS_FOR_RENAME = {
+    "costco": {
+        "costco_receipts.App._settle_stores":
+            "gives each purchase the part of Costco its receipt's heading names, before "
+            "Rename builds names from them",
+        "costco_receipts.App._store_kept": "the store _settle_stores keeps for a purchase",
+    },
     "golden1": {
         "golden1_docs.App._carry_index_rows":
             "gives an index row the title its record was carried to, and the index "
