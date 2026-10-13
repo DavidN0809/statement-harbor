@@ -41,7 +41,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   now says to press Add a provider on the panel's Accounts page and choose
   Capital One, and still says that what it saved is untouched and its
   history kept. The provider tables and the panel's line for Discover say
-  the same.
+  the same, and Discover counts as supported, so sixty providers are
+  supported and seven wait for a tester.
 
 ## [0.49.0] - 2026-10-12
 
