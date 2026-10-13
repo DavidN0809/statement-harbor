@@ -33,6 +33,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   numbers. The payment site is never opened. A full run on a contributor's
   parcel saved 17 receipts across 16 tax years.
 
+### Fixed
+- **Kroger keeps the store it reads on a Download again (#41).** A receipt
+  saved before its store was read, then downloaded again, was saved under
+  a name with the banner the receipt names, Metro Market or King Soopers,
+  while its record kept no banner. Review Names then named that copy
+  without it, and the next Rename put the banner back, renaming the file a
+  second time.
+
 ## [0.49.0] - 2026-10-12
 
 Review names comes to the control panel, so PaperPull Server, which has no
