@@ -41,6 +41,9 @@ review from one set aside.
   description and the server kit's read-me. Nothing about how it runs
   changes.
 
+### Added
+- **Shelby County Trustee, property tax receipts and the current notice for one Memphis parcel.** The Trustee's public Tax Query lookup needs no sign-in; the parcel id lives in config.json and is registered as a private word, so nothing written carries it, the owner the page shows, a bill or receipt number, or the Transaction page's address, which encodes the whole bill row. Each receipt (and the notice, while a balance is due) is a PDF the page builds in the browser and tries to open in a new tab; the app arms a hook before the one guarded press, keeps the Blob the page makes, accepts it only when exactly one was made, of type application/pdf, on the lookup's own origin, and opens no tab. Both tables are read whole through their PAGE x OF y / TOTAL RECORDS footer, starting at page 1 and advancing one page per NEXT, or the run stops. Two receipts on one day for one tax year are told apart by the last four digits of their receipt numbers. The payment site is never an allowed host. Full run on a contributor's parcel saved 17 receipts across 16 tax years.
+
 ### Fixed
 - **Robinhood saves IRA statements.** The retirement statements page,
   read since 0.46.0, was read only when a heading on it named a retirement
