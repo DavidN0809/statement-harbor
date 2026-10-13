@@ -426,7 +426,7 @@ class ReviewFixes(unittest.TestCase):
         bills = [row(["", "2025"], bill=True, i=0), row(["", "2024"], bill=True, i=1)]
         self.patch(goto_documents=lambda page: True, balance_due=lambda page: True,
                    read_whole_table=lambda page, what: bills,
-                   _press_for_blob=lambda page, el, label, out, trace: pressed.append(label) or True)
+                   _press_for_blob=lambda page, el, label, out, trace, **kw: pressed.append(label) or True)
         with tempfile.TemporaryDirectory() as d:
             out = Path(d) / "n.pdf"
             self.assertFalse(site.download_bill(Page(), d, "2024-12-31", out, "Property Tax Notice Tax Year 2024"))
