@@ -32,6 +32,7 @@ import subprocess
 import sysconfig
 import tempfile
 import threading
+import zipfile
 import time
 from typing import Optional
 import sys
@@ -42,6 +43,7 @@ import run_result
 from anyio import to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from starlette.background import BackgroundTask
 from starlette.datastructures import MutableHeaders
 
 # PaperPull targets Python 3.11+ (README, and core/pyproject.toml's
@@ -2393,8 +2395,10 @@ def _account_named(meta: dict, account) -> str:
     return account
 
 
-def _latest_failure(meta: dict, account: str = "primary"):
+def _latest_failure(meta: dict, account: str = "primary", pattern: str = "failure-*.json"):
     """The newest failure file an app wrote, if it wrote one recently.
+    `pattern` finds the survey Diagnose writes, or the recording, the same
+    way.
 
     A run that stops early writes one of these by itself. It is the most
     useful thing a tester can attach and the easiest to never notice, so
@@ -2419,12 +2423,13 @@ def _latest_failure(meta: dict, account: str = "primary"):
         except OSError:
             return ""
     try:
-        found = sorted(_diagnostics_of(meta, account).glob("failure-*.json"), key=written)
+        folder = _diagnostics_of(meta, account)
+        found = sorted(folder.glob(pattern), key=written)
     except (OSError, ValueError):
         return None
     for path in reversed(found):
         try:
-            if time.time() - path.stat().st_mtime < 3600:
+            if time.time() - path.stat().st_mtime < 3600 and _plain_file_in(path, folder):
                 return path
         except OSError:
             continue
@@ -2481,6 +2486,95 @@ def api_failure_download(app: str = "", account: str = "primary"):
     if found is None:
         raise HTTPException(404, "no recent failure file")
     return FileResponse(found, filename=found.name)
+
+
+def _plain_file_in(path: Path, folder: Path) -> bool:
+    """Whether a path is a file of its own inside `folder`, not a link and
+    not reached through one. On PaperPull Server the data folder is usually
+    a share others can write to, and a link planted there would hand the
+    browser a file from anywhere the server can read, a signed-in profile's
+    among them."""
+    try:
+        if path.is_symlink() or not path.is_file():
+            return False
+        real, inside = os.path.realpath(path), os.path.realpath(folder)
+        return os.path.commonpath([real, inside]) == inside
+    except (OSError, ValueError):
+        return False
+
+
+# What Diagnose and Record write that may leave the machine, by the run's
+# action. The survey is the file Diagnose says to attach, and the recording
+# is built from the same fixed word list. A screenshot is not on this list,
+# since it is a picture of the page and stays where it was taken.
+REPORT_FILES = {"diagnose": "survey-*.json", "record": "recording.json"}
+
+
+@app.get("/api/diagnostics/download", dependencies=[Depends(_same_origin_only)])
+def api_diagnostics_download(app: str = "", account: str = "primary", action: str = ""):
+    """On PaperPull Server, the file a support report or a recording wrote
+    in the last hour, handed to the browser to attach to an issue, where
+    the desktop opens the folder. Only the app, the account and which of
+    the two come from the page, and the file is found here."""
+    if not server_mode.enabled():
+        raise HTTPException(404)
+    if action not in REPORT_FILES:
+        raise HTTPException(400, "diagnose or record")
+    apps = discover_apps()
+    if app not in apps:
+        raise HTTPException(404, "unknown app")
+    found = _latest_failure(apps[app], _account_named(apps[app], account), REPORT_FILES[action])
+    if found is None:
+        raise HTTPException(404, "There is no file from the last hour to download. Run it again, "
+                                 "then download its file.")
+    return FileResponse(found, filename=found.name)
+
+
+def _set_aside(meta: dict, account: str) -> list:
+    """Every file in an account's Manual Review folder, as (path, name in
+    the zip), links and hidden files left out (_plain_file_in)."""
+    try:
+        folder = _account_root(meta, account) / "Manual Review"
+    except ValueError:
+        raise HTTPException(404, "that account's config names no folder PaperPull can read")
+    out = []
+    for here, dirs, files in os.walk(folder):
+        dirs[:] = sorted(d for d in dirs if not d.startswith(".")
+                         and not os.path.islink(os.path.join(here, d)))
+        for name in sorted(files):
+            path = Path(here) / name
+            if not name.startswith(".") and _plain_file_in(path, folder):
+                out.append((path, "Manual Review/" + path.relative_to(folder).as_posix()))
+    return out
+
+
+@app.get("/api/aside/download", dependencies=[Depends(_same_origin_only)])
+def api_aside_download(app: str = "", account: str = "primary"):
+    """On PaperPull Server, the documents an account has set aside for a
+    look, in one zip, where the desktop opens the provider's folder. They
+    sit in the account's Manual Review folder, where a run puts a document
+    it would not file under a name it could be wrong about."""
+    if not server_mode.enabled():
+        raise HTTPException(404)
+    apps = discover_apps()
+    if app not in apps:
+        raise HTTPException(404, "unknown app")
+    files = _set_aside(apps[app], _account_named(apps[app], account))
+    if not files:
+        raise HTTPException(404, "Nothing is set aside for this account now.")
+    folder = Path(tempfile.mkdtemp(prefix="paperpull-aside-"))
+    try:
+        named = "%s set aside.zip" % (app if account == "primary" else "%s %s" % (app, account))
+        out = folder / "aside.zip"
+        # Stored, not compressed, since a PDF already is.
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as z:
+            for path, arc in files:
+                z.write(path, arc)
+    except BaseException:
+        _drop(folder)
+        raise
+    return FileResponse(out, filename=named, media_type="application/zip",
+                        background=BackgroundTask(_drop, folder))
 
 
 @app.post("/api/record/stop", dependencies=[Depends(_same_origin_only)])

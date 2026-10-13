@@ -805,6 +805,24 @@ async function checkFailure(app, account) {
     }
   } catch (e) { /* nothing to offer */ }
 }
+// A file the server hands the browser. Asked first, so a file that is not
+// there is said here rather than the page going to an error.
+async function fetchDownload(url) {
+  let r;
+  try { r = await fetch(url); } catch (e) { notice('The server could not be reached.', 'warn'); return; }
+  if (!r.ok) {
+    let d = {};
+    try { d = await r.json(); } catch (e) { /* not JSON */ }
+    notice((d && typeof d.detail === 'string' && d.detail) || 'That did not download.', 'warn');
+    return;
+  }
+  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(r.headers.get('content-disposition') || '');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(await r.blob());
+  a.download = m ? decodeURIComponent(m[1]) : 'download';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
 async function revealFailure() {
   if (!failureApp) return;
   if (SERVER) {
@@ -869,20 +887,27 @@ function renderRun() {
           ' has once more. Nothing is downloaded</span></div><button type="button" class="btn btn-p starts" data-do="run" data-action="discover" data-key="' +
           key + '">Check again</button></li>' : '') + '</ol>';
     }
-    if (!SERVER && r && ['diagnose', 'record'].includes(RUN.action) && o.clean) {
+    if (r && ['diagnose', 'record'].includes(RUN.action) && o.clean) {
+      // The server's folder is on the server, so the file comes to the browser.
       html += '<div class="keepopen"><p>The file holds counts and states and no text from your account.</p>' +
-        '<button type="button" class="btn btn-s" data-do="reveal" data-key="' + key + '">' + sv(P.folder) + 'Open folder</button></div>';
+        (SERVER ? '<button type="button" class="btn btn-s" data-do="report-download" data-key="' + key + '" data-action="' +
+          esc(RUN.action) + '">' + sv(P.download) + 'Download the file to attach</button></div>'
+          : '<button type="button" class="btn btn-s" data-do="reveal" data-key="' + key + '">' + sv(P.folder) + 'Open folder</button></div>');
     }
     html += techDetails(!o.clean && !RUN.failure) + '</section>';
     if (o.attention && r) {
       const folder = !SERVER && !inSample() && (o.aside || !o.names);
+      // On the server what was set aside comes to the browser in one zip.
+      const aside = SERVER && o.aside;
       html += '<section class="callout warn" style="margin-top:20px"><div class="text"><h2>' +
         (o.names && !o.aside ? 'Some receipts need a better name' : 'Some documents need a look') + '</h2>' +
-        '<p>' + esc(o.say) + '</p>' + (o.names || folder ? '<div class="row-actions">' +
+        '<p>' + esc(o.say) + '</p>' + (o.names || folder || aside ? '<div class="row-actions">' +
         (o.names ? '<button type="button" class="btn btn-s" data-do="review" data-key="' + key + '">' + sv(P.tag) +
           'Review names</button>' : '') +
         (folder ? '<button type="button" class="btn btn-s" data-do="reveal" data-key="' + key + '">' +
-          sv(P.folder) + 'Open ' + esc(RUN.provider) + "'s folder</button>" : '') + '</div>' : '') + '</div></section>';
+          sv(P.folder) + 'Open ' + esc(RUN.provider) + "'s folder</button>" : '') +
+        (aside ? '<button type="button" class="btn btn-s" data-do="aside-download" data-key="' + key + '">' +
+          sv(P.download) + 'Download what was set aside</button>' : '') + '</div>' : '') + '</div></section>';
     }
     if (RUN.failure) {
       html += '<section class="callout plain" id="failnote" style="margin-top:20px">' + sv(P.report, 22) + '<div class="text">' +
@@ -1862,6 +1887,15 @@ const DO = {
   'stop-run': () => stopRun(),
   'stop-recording': () => stopRecording(),
   'failure': () => revealFailure(),
+  'report-download': el => {
+    const r = rowByKey(el.dataset.key);
+    if (r) fetchDownload('/api/diagnostics/download?' + new URLSearchParams({app: r.app, account: r.account,
+      action: el.dataset.action}).toString());
+  },
+  'aside-download': el => {
+    const r = rowByKey(el.dataset.key);
+    if (r) fetchDownload('/api/aside/download?' + new URLSearchParams({app: r.app, account: r.account}).toString());
+  },
   'rs-go': () => rsGo(),
   'ps-go': () => psGo(),
   'rm-go': () => rmGo(),

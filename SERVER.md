@@ -230,6 +230,14 @@ docker exec paperpull python /opt/paperpull/server/selftest.py
   own at your server. Add the name you use to `PAPERPULL_HOSTS` in
   `compose.yaml`, then recreate the container, with `docker compose up -d`
   or from your NAS's Docker app, as when updating.
+- **A file to attach to an issue.** After a run that stops early, a support
+  report or a recording, the run's page offers its file to download, where
+  the desktop opens the folder. Each is built from PaperPull's fixed word
+  list and holds no text from your account. A screenshot Diagnose takes
+  stays on the server.
+- **Documents set aside.** A run that would not file a document under a
+  name it could be wrong about puts it in the account's Manual Review
+  folder. The run's page offers what is there as one zip.
 
 ## Where the provider code runs
 

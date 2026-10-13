@@ -7,6 +7,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **PaperPull Server hands over a support report and what was set aside.**
+  The desktop opens a folder after a support report or a recording, and
+  after a run that set documents aside, and the server offered nothing
+  there, since its folders are on the server. The run's page now offers
+  the report's file to download, the survey Diagnose says to attach or
+  the recording, from the last hour, and the documents in the account's
+  Manual Review folder as one zip. A screenshot Diagnose takes stays on
+  the server, and neither follows a link placed in the shared folder.
+
 ## [0.49.0] - 2026-10-12
 
 Review names comes to the control panel, so PaperPull Server, which has no

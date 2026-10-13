@@ -261,6 +261,13 @@ ROUTES = {
     ("POST", "/api/failure/reveal"): dict(body={"app": SHOP}, desktop="changes", server="reads"),
     ("GET", "/api/failure/download"): dict(ask="/api/failure/download?app=Shop%20Receipts",
                                            desktop="reads", server="reads"),
+    ("GET", "/api/diagnostics/download"): dict(
+        ask="/api/diagnostics/download?app=Shop%20Receipts&action=diagnose",
+        desktop="reads", server="reads"),
+    # The server writes the zip it hands over, in a folder of its own that
+    # goes once the answer is sent.
+    ("GET", "/api/aside/download"): dict(ask="/api/aside/download?app=Shop%20Receipts",
+                                         desktop="reads", server="changes"),
     ("POST", "/api/record/stop"): dict(body={"app": SHOP}, desktop="changes", server="changes"),
     ("POST", "/api/remove"): dict(body={"app": SHOP}, desktop="changes", server="changes"),
     # A real provider, because the server runs only the code the image ships
@@ -373,6 +380,10 @@ def box(tmp_path, monkeypatch):
     (shop / "Shop Order History.csv").write_text(HISTORY, encoding="utf-8")
     (shop / "Diagnostics" / "failure-run-1.json").write_text('{"step": "a step"}',
                                                              encoding="utf-8")
+    (shop / "Diagnostics" / "survey-diagnose-20260101-100000.json").write_text(
+        '{"step": "survey the page"}', encoding="utf-8")
+    (shop / "Manual Review").mkdir()
+    (shop / "Manual Review" / "2026-01-02 Shop Receipt.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
     # An install of a real provider whose code is older than the template,
     # which is what the app list brings up to date.
     app_module.create_install(b.root, "kroger")
