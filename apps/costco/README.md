@@ -164,6 +164,31 @@ Purchases file into two folders.
 The folder is named the way Costco names it. The route key inside the
 code is the shared `In-Store` constant, which is why those two differ.
 
+## Which part of Costco
+
+A file name pattern's `{store}` says which part of Costco a receipt came
+from (#60). Every row on the Warehouse tab says In-Warehouse, the gas
+station included, so the list cannot tell them apart, and the receipt does.
+Costco heads each one with what it is, and the store is read off that
+heading.
+
+| Heading on the receipt | `{store}` |
+|---|---|
+| In-Warehouse Receipt | Warehouse |
+| Gas Station Receipt | Gas Station |
+| Car Wash Receipt | Car Wash |
+| Gas and Car Wash Receipt | Gas and Car Wash |
+| an online order | Online |
+
+A receipt saved before this was read gets its store at Rename, read off the
+heading of its own PDF, with nothing asked of Costco. A heading this does
+not know names no store, so `{store|provider}` falls back to Costco.
+
+Food court, pharmacy and tire center visits come up as ordinary
+In-Warehouse receipts as far as anyone has seen, so they are Warehouse for
+now. Telling them apart needs their item lines, which a member's receipts
+will show.
+
 ## How it connects (important)
 
 Costco sits behind a bot check, so `login.bat` launches the Edge or

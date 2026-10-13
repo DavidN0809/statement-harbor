@@ -381,7 +381,7 @@ def summary_from_kind(store_info: str) -> str:
     Gas Station Receipt across the top. The API's purchaseType is not a
     guess. Empty for the kinds that describe a place rather than a
     purchase, which are left to the classifier (#47)."""
-    label = (store_info or "").strip()
+    label = store_info.strip() if isinstance(store_info, str) else ""
     return label if label in SELF_DESCRIBING else ""
 
 
@@ -1316,17 +1316,29 @@ _GRADE_RE = re.compile(
 _FUEL_SIGNAL_RE = re.compile(r"\bgallons?\b|\bgas\s+station\b", re.I)
 
 # The dialog's heading names the kind of receipt. A warehouse receipt's
-# reads "In-Warehouse Receipt", SEEN, and a member reported "Gas Station
-# Receipt" across the top of a fuel receipt's PDF, which is rendered from
-# this same dialog (#47). Costco's own counts name two more kinds on the
-# Warehouse tab, a car wash and gas with a car wash, whose headings
-# nobody has seen, and they are read the same way. A heading this does
-# not know leaves the name to the items.
+# reads "In-Warehouse Receipt", SEEN, on every one of seven saved from two
+# installs, and a member reported "Gas Station Receipt" across the top of a
+# fuel receipt's PDF, which is rendered from this same dialog (#47).
+# Costco's own counts name two more kinds on the Warehouse tab, a car wash
+# and gas with a car wash, whose headings nobody has seen, and they are
+# read the same way. A heading this does not know names no part of Costco,
+# and leaves the name to the items.
 _KIND_HEADING_RE = re.compile(
-    r"\b(?P<kind>gas\s+(?:and|&)\s+car\s+wash|gas\s+station|car\s+wash)"
+    r"\b(?P<kind>in\s*-?\s*warehouse|gas\s+(?:and|&)\s+car\s+wash|gas\s+station|car\s+wash)"
     r"\s+receipt\b", re.I)
-_KIND_BY_HEADING = {"gas and car wash": "Gas and Car Wash",
-                    "gas station": "Gas Station", "car wash": "Car Wash"}
+# The part of Costco each heading names, which a run keeps as the
+# purchase's store, so a file name pattern's {store} says Gas Station or
+# Warehouse the way Kroger's says its banner (#60). The words are Costco's.
+# Food court, pharmacy and tire center visits have no heading of their own
+# that anyone has seen, so they are ordinary warehouse receipts here until
+# a member's receipts show how to tell them apart.
+# Keyed by the heading's letters alone, so "In-Warehouse", "In Warehouse"
+# and "Gas & Car Wash" are read alike.
+_KIND_BY_HEADING = {"inwarehouse": "Warehouse", "gasandcarwash": "Gas and Car Wash",
+                    "gasstation": "Gas Station", "carwash": "Car Wash"}
+# Every store a warehouse receipt can be given, so a store written by an
+# older version, "In-Warehouse" from the list, is never marked as read.
+WAREHOUSE_STORES = frozenset(_KIND_BY_HEADING.values())
 # Where the heading sits, counted in lines that have something on them.
 # A few, because a Close control can come before it in the dialog's text.
 _HEADING_LINES = 6
@@ -1538,19 +1550,28 @@ def _fuel_items(lines: List[str]) -> List[Item]:
     return items
 
 
-def kind_from_receipt(text: str) -> str:
-    """What the receipt says it is, when that is a kind with a name of
-    its own, or empty.
+def store_from_receipt(text: str) -> str:
+    """The part of Costco a warehouse receipt's heading names, Warehouse,
+    Gas Station, Car Wash or Gas and Car Wash, or empty.
 
     Read from the top few lines only, where the heading sits, so a line
     further down cannot name the purchase. This does not depend on how
-    the pump and sale tables come out as text, which nobody has seen."""
+    the pump and sale tables come out as text, which nobody has seen. A
+    receipt's PDF is rendered from the same dialog, so the same heading
+    is read off a saved one."""
     top = [ln.strip() for ln in (text or "").splitlines() if ln.strip()][:_HEADING_LINES]
     m = _KIND_HEADING_RE.search(re.sub(r"\s+", " ", " ".join(top)))
     if not m:
         return ""
-    words = re.sub(r"\s+", " ", m.group("kind").lower().replace("&", "and"))
-    return summary_from_kind(_KIND_BY_HEADING.get(words, ""))
+    letters = re.sub(r"[^a-z]+", "", m.group("kind").lower().replace("&", "and"))
+    return _KIND_BY_HEADING.get(letters, "")
+
+
+def kind_from_receipt(text: str) -> str:
+    """What the receipt says it is, when that is a kind with a name of
+    its own, Gas Station and the like, or empty. A warehouse visit names
+    a place, not a purchase, so its items name it."""
+    return summary_from_kind(store_from_receipt(text))
 
 
 def receipt_kind(page) -> str:
@@ -1558,6 +1579,12 @@ def receipt_kind(page) -> str:
     dialog, never the page around it, and empty on an online invoice,
     which is not a dialog."""
     return kind_from_receipt(receipt_text(page))
+
+
+def receipt_store(page) -> str:
+    """store_from_receipt for the receipt dialog on screen, empty on an
+    online invoice."""
+    return store_from_receipt(receipt_text(page))
 
 
 def extract_items(page) -> List[Item]:

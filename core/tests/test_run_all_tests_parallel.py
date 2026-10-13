@@ -59,13 +59,22 @@ def alive(pid: int) -> bool:
         return False
 
 
-def gone(pid: int, within: float = 15.0) -> bool:
-    end = time.time() + within
-    while time.time() < end:
-        if not alive(pid):
+def comes(done, looks: int, every: float) -> bool:
+    """Whether done() comes true in `looks` looks, `every` seconds apart, the
+    last of them after the last pause. The looks are counted rather than
+    read off a clock. A CI runner stopped for about 53 s on 2026-10-12, and
+    a machine that stops between two looks, or between a look and the
+    verdict, then costs one look and never turns a thing that came into one
+    that did not."""
+    for _ in range(looks - 1):
+        if done():
             return True
-        time.sleep(0.5)
-    return False
+        time.sleep(every)
+    return bool(done())
+
+
+def gone(pid: int, within: float = 15.0) -> bool:
+    return comes(lambda: not alive(pid), looks=int(within / 0.5) + 1, every=0.5)
 
 
 def suite_with(root: Path, name: str, test: str) -> Path:
@@ -107,20 +116,25 @@ def fake_run(tmp_path, monkeypatch):
 # when one suite's pytest started more than four seconds after another's. Each
 # says so in a file of its own, since lines that several processes append to
 # one file can overwrite each other on Windows, which failed the old way too.
+# The wait is counted in looks, as comes() counts them, and the verdict is a
+# look after the last pause, so a machine that stops a while cannot leave a
+# suite judging on a look from before the others started.
 MEET = """
     import os, time
     def test_meet():
         folder, me = os.environ["STARTED_IN"], os.path.basename(os.getcwd())
         open(os.path.join(folder, me), "w").close()
         limit = float(os.environ["WAIT_SECONDS"])
-        end = time.monotonic() + limit
-        while True:
-            missing = [n for n in os.environ["WAIT_FOR"].split()
-                       if not os.path.exists(os.path.join(folder, n))]
-            if not missing or time.monotonic() > end:
+
+        def missing():
+            return [n for n in os.environ["WAIT_FOR"].split()
+                    if not os.path.exists(os.path.join(folder, n))]
+        for _ in range(round(limit / 0.05)):
+            if not missing():
                 break
             time.sleep(0.05)
-        assert not missing, "%s waited %gs for %s, which never started" % (me, limit, " and ".join(missing))
+        left = missing()
+        assert not left, "%s waited %gs for %s, which never started" % (me, limit, " and ".join(left))
     """
 
 
@@ -353,10 +367,8 @@ def test_the_lock_goes_with_its_process_however_it_ends(tmp_path):
         proc.kill()
         proc.wait(timeout=30)
         # Windows lets go of a dead process's locks soon, not at once.
-        lock, end = rat.RunLock(tmp_path), time.time() + 20
-        while not lock.try_take():
-            assert time.time() < end, "a killed run still held the lock"
-            time.sleep(0.5)
+        lock = rat.RunLock(tmp_path)
+        assert comes(lock.try_take, looks=41, every=0.5), "a killed run still held the lock"
         lock.release()
     finally:
         end_tree(child)
@@ -803,10 +815,9 @@ def test_ctrl_c_a_closed_terminal_or_term_ends_every_suite_of_the_run(tmp_path, 
                                stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
     procs = []
     try:
-        end = time.time() + 90
-        while not all(f.exists() for f in pid_files):
-            assert time.time() < end and run.poll() is None, "the suites never started\n" + log.read_text()
-            time.sleep(0.2)
+        comes(lambda: run.poll() is not None or all(f.exists() for f in pid_files),
+              looks=451, every=0.2)
+        assert all(f.exists() for f in pid_files), "the suites never started\n" + log.read_text()
         procs = [p for f in pid_files for p in started(f)]
         os.killpg(run.pid, getattr(signal, name))
         try:

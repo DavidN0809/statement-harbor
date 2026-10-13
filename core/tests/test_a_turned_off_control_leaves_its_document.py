@@ -86,6 +86,10 @@ STOPS = {
     ("pge", "goto_page_number", "press_once", ""): (1,
         "the history's page picker, a step to the page a bill is on and every bill "
         "after it"),
+    ("shelbycounty", "_press_next", "click", "page the table"): (1,
+        "pages the billing and payment tables every receipt is listed from, read as "
+        "turned on before it is pressed, so a turned off NEXT where the footer says more "
+        "pages leaves the rest of the list unread"),
     ("vanguard", "dismiss_timeout", "click", "continue the session"): (1,
         "keeps the session open for every document"),
     ("vanguard", "show_more", "click", "show more of the list"): (1,
@@ -513,6 +517,15 @@ def _coinbase_button(off: bool) -> str:
             % (" disabled" if off else ""))
 
 
+def _shelbycounty(site, page, out, staging, trace):
+    return site._press_for_blob(page, page.locator("#get"), "Print Receipt", out, trace)
+
+
+def _shelbycounty_link(off: bool) -> str:
+    return ('<a id="get" class="ctl" href="#"%s onclick="window.presses++; return false;">'
+            'Print Receipt</a>' % (' aria-disabled="true"' if off else ""))
+
+
 def _pge_link(off: bool) -> str:
     return ('<a id="get" class="ctl" href="#"%s onclick="window.presses++; return false;">'
             'View Bill PDF</a>' % (' aria-disabled="true"' if off else ""))
@@ -532,6 +545,8 @@ def _how(app: str, function: str, monkeypatch):
         return "coinbase_site", _coinbase, _coinbase_button, "June 2026"
     if (app, function) == ("pge", "_press_once"):
         return "pge_site", _pge, _pge_link, "June 30, 2026"
+    if (app, function) == ("shelbycounty", "_press_for_blob"):
+        return "shelbycounty_site", _shelbycounty, _shelbycounty_link, "06/30/2026"
     return None
 
 
