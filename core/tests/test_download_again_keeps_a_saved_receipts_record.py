@@ -455,7 +455,7 @@ def kroger_takes(inst, p: Purchase, store: str):
     """Kroger's process_one from the receipt read to the record and the
     purchase list, as it writes them."""
     p.store_info = store
-    inst._record_state(p, State.DETAILS_EXTRACTED, extra={"store_read": bool(p.store_info)})
+    inst._record_state(p, State.DETAILS_EXTRACTED)
     inst._note_store(p)
 
 
