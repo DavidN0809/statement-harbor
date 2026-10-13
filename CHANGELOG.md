@@ -17,7 +17,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the report's file to download, the survey Diagnose says to attach or
   the recording, from the last hour, and the documents in the account's
   Manual Review folder as one zip. A screenshot Diagnose takes stays on
-  the server, and neither follows a link placed in the shared folder.
+  the server. Neither hands over a link placed in the shared folder, a
+  folder there that is a link, a second hard link to a file, or a file
+  swapped for one after it was checked, and the failure file is handed
+  over the same way.
 
 ## [0.49.0] - 2026-10-12
 

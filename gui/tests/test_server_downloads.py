@@ -42,6 +42,7 @@ def shop(tmp_path, monkeypatch):
     monkeypatch.setenv("PAPERPULL_SERVER", "1")
     install = tmp_path / "data" / "Shop Receipts"
     install.mkdir(parents=True)
+    monkeypatch.setenv("APPS_ROOT", str(install.parent))
     (install / "config.json").write_text('{"output_dir": "."}', encoding="utf-8")
     (install / "config.robin.json").write_text('{"output_dir": "robin"}', encoding="utf-8")
     meta = {"name": "Shop Receipts", "dir": str(install), "accounts": ["primary", "robin"]}
@@ -66,10 +67,12 @@ def named(response) -> str:
 
 
 def body_of(response) -> bytes:
-    data = Path(response.path).read_bytes()
-    if response.background is not None:
-        asyncio.run(response.background())
-    return data
+    """Everything a response sends, a whole one or one streamed."""
+    if hasattr(response, "body_iterator"):
+        async def read():
+            return b"".join([part async for part in response.body_iterator])
+        return asyncio.run(read())
+    return response.body
 
 
 def written(folder: Path, name: str, data: bytes = b"{}", age: float = 0) -> Path:
@@ -101,7 +104,7 @@ def test_the_newest_survey_from_the_last_hour_is_given(shop):
     status, got = asked(app_module.api_diagnostics_download, app="Shop Receipts",
                         action="diagnose")
     assert status == 200, got
-    assert Path(got.path).name == "survey-diagnose-20260101-100000.json"
+    assert named(got) == "survey-diagnose-20260101-100000.json"
     assert body_of(got) == b'{"new": 1}'
 
 
@@ -110,7 +113,7 @@ def test_a_recording_from_the_last_hour_is_given_and_an_older_one_is_not(shop):
     written(diag, "recording.json", b'{"steps": []}')
     status, got = asked(app_module.api_diagnostics_download, app="Shop Receipts",
                         action="record")
-    assert status == 200 and Path(got.path).name == "recording.json"
+    assert status == 200 and named(got) == "recording.json"
     written(diag, "recording.json", b'{"steps": []}', age=7200)
     status, _ = asked(app_module.api_diagnostics_download, app="Shop Receipts",
                       action="record")
@@ -153,23 +156,25 @@ def test_a_linked_survey_is_not_given(shop, tmp_path):
 
 # -- what was set aside --------------------------------------------------------------
 
-def test_what_was_set_aside_comes_as_one_zip_and_its_folder_goes(shop):
+def test_what_was_set_aside_comes_as_one_zip(shop, tmp_path, monkeypatch):
     aside = shop / "Manual Review"
     written(aside, "2026-05-14 Shop Unsure Receipt.pdf", PDF)
     written(aside / "Invoices", "2026-05-14 Shop Invoice (1 of 2).pdf", PDF + b"2")
     written(aside, ".2026-05-14 Shop Half.pdf.part", b"half")
     written(shop / "Online", "2026-05-14 Shop Filed Receipt.pdf", PDF)
+    # Nothing of it is left on disk, since the zip is a file of no name.
+    monkeypatch.setattr(app_module.tempfile, "tempdir", str(tmp_path / "temp"))
+    (tmp_path / "temp").mkdir()
     status, got = asked(app_module.api_aside_download, app="Shop Receipts")
     assert status == 200, got
     assert got.media_type == "application/zip"
     assert named(got) == "Shop Receipts set aside.zip"
-    folder = Path(got.path).parent
     with zipfile.ZipFile(io.BytesIO(body_of(got))) as z:
         assert sorted(z.namelist()) == [
             "Manual Review/2026-05-14 Shop Unsure Receipt.pdf",
             "Manual Review/Invoices/2026-05-14 Shop Invoice (1 of 2).pdf"]
         assert z.read("Manual Review/2026-05-14 Shop Unsure Receipt.pdf") == PDF
-    assert not folder.exists(), "the zip is made for one answer and removed after it"
+    assert list((tmp_path / "temp").iterdir()) == []
 
 
 def test_nothing_set_aside_is_said(shop):
@@ -227,3 +232,115 @@ def test_the_page_offers_them_on_the_server_and_a_folder_on_the_desktop():
     assert "const aside = SERVER && o.aside;" in script
     assert "const folder = !SERVER && !inSample() && (o.aside || !o.names);" in script
     assert "'/api/diagnostics/download?'" in script and "'/api/aside/download?'" in script
+
+
+# -- what the review of the first version found -----------------------------------
+
+def test_a_manual_review_folder_that_is_a_link_holds_nothing(shop, tmp_path):
+    """A share writer swaps the folder itself for a link to a signed-in
+    profile. Every file under it resolves inside the folder's own target,
+    so a check against that target let them all through."""
+    if not can_link(tmp_path):
+        pytest.skip("this system makes no symbolic links for an ordinary user")
+    secret = written(tmp_path / "profiles" / "Default", "Cookies", b"signed in")
+    (shop / "Manual Review").symlink_to(secret.parent, target_is_directory=True)
+    status, detail = asked(app_module.api_aside_download, app="Shop Receipts")
+    assert status == 404, detail
+
+
+def test_a_diagnostics_folder_that_is_a_link_hands_nothing_over(shop, tmp_path):
+    if not can_link(tmp_path):
+        pytest.skip("this system makes no symbolic links for an ordinary user")
+    elsewhere = tmp_path / "profiles" / "Default"
+    written(elsewhere, "survey-diagnose-20260101-100000.json", b"signed in")
+    written(elsewhere, "failure-run-20260101-100000.json", b"signed in")
+    (shop / "Diagnostics").symlink_to(elsewhere, target_is_directory=True)
+    assert asked(app_module.api_diagnostics_download, app="Shop Receipts",
+                 action="diagnose")[0] == 404
+    assert asked(app_module.api_failure_download, app="Shop Receipts")[0] == 404
+
+
+def test_a_file_with_a_second_hard_link_is_left_out(shop, tmp_path):
+    """A hard link reads as a plain file, and could be a second name of a
+    file elsewhere on the same disk."""
+    outside = written(tmp_path / "profiles", "Cookies", b"signed in")
+    aside = shop / "Manual Review"
+    written(aside, "real.pdf", PDF)
+    try:
+        os.link(outside, aside / "cookies.pdf")
+    except OSError:
+        pytest.skip("this system makes no hard link here")
+    status, got = asked(app_module.api_aside_download, app="Shop Receipts")
+    assert status == 200
+    with zipfile.ZipFile(io.BytesIO(body_of(got))) as z:
+        assert z.namelist() == ["Manual Review/real.pdf"]
+
+
+def test_an_account_whose_folder_is_outside_the_data_folder_hands_nothing(shop, tmp_path,
+                                                                           monkeypatch):
+    monkeypatch.setenv("APPS_ROOT", str(shop.parent))
+    away = tmp_path / "away"
+    written(away / "Manual Review", "real.pdf", PDF)
+    written(away / "Diagnostics", "survey-diagnose-20260101-100000.json")
+    (shop / "config.json").write_text('{"output_dir": "%s"}' % away.as_posix(), encoding="utf-8")
+    assert asked(app_module.api_aside_download, app="Shop Receipts")[0] == 404
+    assert asked(app_module.api_diagnostics_download, app="Shop Receipts",
+                 action="diagnose")[0] == 404
+    (shop / "config.json").write_text('{"output_dir": "."}', encoding="utf-8")
+    written(shop / "Manual Review", "real.pdf", PDF)
+    assert asked(app_module.api_aside_download, app="Shop Receipts")[0] == 200
+
+
+def test_the_failure_file_is_handed_over_from_its_checked_open(shop):
+    written(shop / "Diagnostics", "failure-run-20260101-100000.json", b'{"step": "a step"}')
+    status, got = asked(app_module.api_failure_download, app="Shop Receipts")
+    assert status == 200
+    assert named(got) == "failure-run-20260101-100000.json"
+    assert body_of(got) == b'{"step": "a step"}'
+
+
+def test_a_file_swapped_for_a_link_after_the_list_is_not_read(shop, tmp_path, monkeypatch):
+    """The walk lists a real file, and a share writer swaps it for a link
+    before it is read. What is read is what the checked open reached."""
+    if not can_link(tmp_path):
+        pytest.skip("this system makes no symbolic links for an ordinary user")
+    secret = written(tmp_path / "profiles", "Cookies", b"signed in")
+    aside = shop / "Manual Review"
+    real = written(aside, "real.pdf", PDF)
+    swapped = written(aside, "swapped.pdf", PDF)
+    listed = app_module._set_aside
+
+    def then_swap(meta, account):
+        out = listed(meta, account)
+        swapped.unlink()
+        swapped.symlink_to(secret)
+        return out
+    monkeypatch.setattr(app_module, "_set_aside", then_swap)
+    status, got = asked(app_module.api_aside_download, app="Shop Receipts")
+    assert status == 200
+    with zipfile.ZipFile(io.BytesIO(body_of(got))) as z:
+        assert z.namelist() == ["Manual Review/real.pdf"]
+        assert z.read("Manual Review/real.pdf") == real.read_bytes()
+
+
+def test_a_file_swapped_after_its_check_is_still_read_from_the_checked_open(
+        shop, tmp_path, monkeypatch):
+    """The window the first version left wide, between the check and the
+    read. The file is swapped for a link the moment its check is done."""
+    if not can_link(tmp_path):
+        pytest.skip("this system makes no symbolic links for an ordinary user")
+    secret = written(tmp_path / "profiles", "Cookies", b"signed in")
+    real = written(shop / "Manual Review", "real.pdf", PDF)
+    checked = app_module._open_plain
+
+    def then_swap(path, inside):
+        fd = checked(path, inside)
+        Path(path).unlink()
+        Path(path).symlink_to(secret)
+        return fd
+    monkeypatch.setattr(app_module, "_open_plain", then_swap)
+    status, got = asked(app_module.api_aside_download, app="Shop Receipts")
+    assert status == 200
+    with zipfile.ZipFile(io.BytesIO(body_of(got))) as z:
+        assert z.read("Manual Review/real.pdf") == PDF
+    assert real.is_symlink()
