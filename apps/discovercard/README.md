@@ -16,6 +16,16 @@ are not covered. Tax documents are not collected: `document_types` lists
 `Statement` alone, so a stray 1099 is classified and then skipped rather than
 half-filed.
 
+## A card that moved to Capital One
+
+Capital One acquired Discover and is moving card servicing onto its own site,
+account by account. Once a card has moved, the Discover pages this app reads
+are gone, and a run says so rather than asking you to sign in again. The
+card's statements are then read on capitalone.com by the Capital One app,
+[apps/capitalone](../capitalone). In the panel, press **Add a provider** on
+the Accounts page and choose Capital One. Anything this app saved stays where
+it is, and its history is kept, so it never downloads again what it saved.
+
 ## Setup
 
 ```bash

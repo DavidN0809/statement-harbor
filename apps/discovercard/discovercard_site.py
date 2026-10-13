@@ -320,7 +320,8 @@ def looks_public_or_error(page) -> bool:
 
 # Capital One acquired Discover, and card servicing is being moved onto
 # Capital One's own site account by account. Once an account has moved, nothing
-# this app knows how to read still exists, and the honest answer is to say so.
+# this app knows how to read still exists, and the honest answer is to say so
+# and point to the capitalone app, which reads a moved card on capitalone.com.
 # Without this the run reported "could not open your Discover statements, sign
 # in and try again", which sends someone to fix a sign-in that is not broken.
 MOVED_HOSTS = ("capitalone.com", "capitalone360.com")

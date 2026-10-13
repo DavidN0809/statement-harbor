@@ -112,14 +112,16 @@ REVIEWED = {
         "The control panel's own page, never a provider's. Export history makes a "
         "link to the history file the panel just handed it, marked as a download, "
         "and presses it so the browser saves the file under its own name (#67). "
-        "Nothing a site drew is pressed.",
+        "On PaperPull Server, fetchDownload does the same with the support report "
+        "or the Manual Review zip the server just handed it. Nothing a site drew is "
+        "pressed.",
 }
 
 # A file of JavaScript is read whole, so one entry above holds every press
 # of its kind in the file, and a press added there would join the one
 # reviewed without a review of its own. Each such entry says how many
 # presses its reason covers.
-REVIEWED_IN_A_FILE = {("gui/static/app.js", "<script>", "click()"): 1}
+REVIEWED_IN_A_FILE = {("gui/static/app.js", "<script>", "click()"): 2}
 
 # Parts of a script that are not followed back, each a value put into a
 # script rather than a script, with the reason, keyed by the file, the
@@ -799,19 +801,20 @@ def test_a_file_read_whole_holds_only_the_presses_reviewed_there():
 
 
 def test_a_second_press_in_a_file_read_whole_is_not_taken_for_the_one_reviewed():
-    """Not a pin of nothing. A second click() in the panel's page script,
-    on a line of its own or beside the one reviewed, is found."""
+    """Not a pin of nothing. One more click() in the panel's page script,
+    on a line of its own or beside one reviewed, is found."""
     rel = "gui/static/app.js"
     text = (REPO / rel).read_text(encoding="utf-8")
     key = (rel, "<script>", "click()")
+    more = REVIEWED_IN_A_FILE[key] + 1
     assert presses_beyond_review({rel: text}) == []
     found = presses_beyond_review({rel: text + "\ndocument.querySelector('#x').click();\n"})
-    assert [(k, made) for k, made, _lines in found] == [(key, 2)], found
-    assert len(found[0][2]) == 2, "both lines are named, %s" % found
+    assert [(k, made) for k, made, _lines in found] == [(key, more)], found
+    assert len(found[0][2]) == more, "every line is named, %s" % found
     beside = text.replace("a.click();", "a.click(); a.click();", 1)
     assert beside != text
     found = presses_beyond_review({rel: beside})
-    assert [(k, made) for k, made, _lines in found] == [(key, 2)], found
+    assert [(k, made) for k, made, _lines in found] == [(key, more)], found
 
 
 def test_every_script_handed_to_a_page_is_read_to_the_end(counted):

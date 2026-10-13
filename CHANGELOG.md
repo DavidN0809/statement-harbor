@@ -10,6 +10,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
+- **Costco receipts say which part of Costco they came from (#60).** A file
+  name pattern's `{store}` gives Warehouse, Gas Station, Car Wash, or Gas
+  and Car Wash, read off the heading Costco prints on each warehouse
+  receipt, or Online for an order. Every row on the
+  Warehouse tab says In-Warehouse, gas included, so the store was the list's
+  word and told nothing apart. Rename reads it off the heading of each
+  receipt already saved, asking nothing of Costco, and a preview leaves
+  every record as it was. Food court, pharmacy and tire center receipts are
+  Warehouse until a member's receipts show how to tell them apart.
 - **SDG&E (San Diego Gas & Electric) bills from My Energy Center.** The app
   reads the bills Billing History lists, about two years of them, and saves
   each bill's PDF, fetched by its own address with your signed-in session.
@@ -32,6 +41,34 @@ All notable changes to PaperPull are recorded here. Versioning follows
   for one tax year are told apart by the last four digits of their receipt
   numbers. The payment site is never opened. A full run on a contributor's
   parcel saved 17 receipts across 16 tax years.
+- **PaperPull Server hands over a support report and what was set aside.**
+  The desktop opens a folder after a support report or a recording, and
+  after a run that set documents aside, and the server offered nothing
+  there, since its folders are on the server. The run's page now offers
+  the report's file to download, the survey Diagnose says to attach or
+  the recording, from the last hour, and the documents in the account's
+  Manual Review folder as one zip. A screenshot Diagnose takes stays on
+  the server. Neither hands over a link placed in the shared folder, a
+  folder there that is a link, a second hard link to a file, or a file
+  swapped for one after it was checked, and the failure file is handed
+  over the same way.
+
+### Fixed
+- **Kroger keeps the store it reads on a Download again (#41).** A receipt
+  saved before its store was read, then downloaded again, was saved under
+  a name with the banner the receipt names, Metro Market or King Soopers,
+  while its record kept no banner. Review Names then named that copy
+  without it, and the next Rename put the banner back, renaming the file a
+  second time.
+- **Discover sends a card that moved to Capital One to the Capital One
+  app.** A Discover run that landed on Capital One still said the app
+  could not download from Capital One yet, long after the Capital One
+  provider came to read a moved Discover card on capitalone.com (#13). It
+  now says to press Add a provider on the panel's Accounts page and choose
+  Capital One, and still says that what it saved is untouched and its
+  history kept. The provider tables and the panel's line for Discover say
+  the same, and Discover counts as supported, so sixty providers are
+  supported and seven wait for a tester.
 
 ## [0.49.0] - 2026-10-12
 

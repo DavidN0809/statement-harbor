@@ -670,8 +670,7 @@ class App:
 
         # ---- extract ----
         purchase = site.extract_details(page, purchase)
-        self._record_state(purchase, State.DETAILS_EXTRACTED,
-                           extra={"store_read": bool(purchase.store_info)})
+        self._record_state(purchase, State.DETAILS_EXTRACTED)
         self._note_store(purchase)
         if purchase.purchase_date:
             self.stats["dates_processed"].append(purchase.purchase_date)
@@ -715,6 +714,10 @@ class App:
         final_state = State.NEEDS_MANUAL_REVIEW if review_needed else State.COMPLETED
         self._record_state(purchase, final_state,
                            notes=("Low classification confidence" if review_needed else ""))
+        # Once a copy of its own is saved, a Download again of a receipt
+        # saved before tells the list its store too, which it could not
+        # while the old record was held (review of #60).
+        self._note_store(purchase)
         if review_needed:
             self.stats["manual_review"] += 1
             # Saved under a name it was unsure of, which Review Names
@@ -878,6 +881,10 @@ class App:
         if notes:
             purchase.notes = (purchase.notes + "; " if purchase.notes else "") + notes
         rec = purchase.to_dict()
+        # Every write says whether its store was read, so a later write,
+        # PDF_VERIFIED or COMPLETED after a held DETAILS_EXTRACTED, never
+        # leaves a banner read off a receipt unmarked (review of #60).
+        rec["store_read"] = self._store_is_read(purchase)
         if extra:
             rec.update(extra)
         not_shown.let_go_on_save(self, purchase, state, rec)
@@ -1129,6 +1136,14 @@ class App:
                 return info.strip()
         return ""
 
+    def _store_is_read(self, purchase: Purchase) -> bool:
+        """Whether a purchase's store is one to keep. Kroger's store is only
+        ever a banner read off a receipt, or empty once _forget_unread_store
+        has dropped what the list gave, so any text there is one. A store
+        that is not text names none, as _store_kept reads it."""
+        info = purchase.store_info
+        return isinstance(info, str) and bool(info.strip())
+
     def _forget_unread_store(self, purchase: Purchase) -> None:
         """Before a receipt is read, drop a store that was never read off one.
         Resume works from the purchase list without refreshing it, and a list
@@ -1145,7 +1160,7 @@ class App:
         if self.discovery.get(purchase.key) is not None:
             self.discovery.update(purchase.key, {
                 "store_info": purchase.store_info,
-                "store_read": bool(purchase.store_info)}, save=False)
+                "store_read": self._store_is_read(purchase)}, save=False)
 
     def _settle_stores(self, changed: list) -> int:
         """Give every purchase the store its receipt names, or none, in the
