@@ -33,6 +33,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   numbers. The payment site is never opened. A full run on a contributor's
   parcel saved 17 receipts across 16 tax years.
 
+### Fixed
+- **Discover sends a card that moved to Capital One to the Capital One
+  app.** A Discover run that landed on Capital One still said the app
+  could not download from Capital One yet, long after the Capital One
+  provider came to read a moved Discover card on capitalone.com (#13). It
+  now says to press Add a provider on the panel's Accounts page and choose
+  Capital One, and still says that what it saved is untouched and its
+  history kept. The provider tables and the panel's line for Discover say
+  the same.
+
 ## [0.49.0] - 2026-10-12
 
 Review names comes to the control panel, so PaperPull Server, which has no

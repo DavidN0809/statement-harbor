@@ -321,3 +321,44 @@ def test_a_lookalike_host_does_not_count_as_capital_one():
                 "https://notcapitalone.com/",
                 "https://capitalone.com@evil.test/"):
         assert not site.looks_moved_to_capital_one(_Tab(url)), url
+
+
+def test_a_moved_account_is_sent_to_the_capital_one_app(tmp_path, monkeypatch, capsys):
+    """A moved account was told "This app cannot download from Capital One
+    yet" long after the capitalone app (#20) came to read a moved Discover
+    card on capitalone.com. It is now sent there, by the name the panel
+    lists it under and the panel's own Add a provider, and still told its
+    history here is kept."""
+    import discovercard_docs as docs
+    from storage import JsonStore, Paths
+    app = docs.App.__new__(docs.App)
+    app.args = docs.build_parser().parse_args(["--discover"])
+    app.paths = Paths(tmp_path)
+    app.paths.ensure()
+    app.discovery = JsonStore(app.paths.discovery_json, app.paths.backups)
+    app.discovery.load()
+    app.stats = {"discovered": 0, "skipped_out_of_scope": 0}
+    tab = _Tab("https://myaccounts.capitalone.com/accountSummary")
+    monkeypatch.setattr(app, "page", lambda: tab)
+    monkeypatch.setattr(app, "check_session", lambda _page: None)
+    monkeypatch.setattr(docs.site, "ensure_statements", lambda _page: False)
+
+    assert app.cmd_discover() == 0
+    said = " ".join(capsys.readouterr().out.split())
+    assert "has moved to Capital One" in said and "nothing to fix" in said, said
+    assert "Capital One provider downloads them" in said, said
+    assert "press Add a provider on the panel's Accounts page" in said, said
+    assert "choose Capital One" in said and "Open sign-in window" in said, said
+    assert "history is kept" in said, said
+    assert "cannot download" not in said and "support arrives" not in said, said
+
+    # The names it gives are the ones the panel shows. The panel lists a
+    # provider by the provider string in its storage.py, and the button and
+    # the sign-in control carry these labels.
+    repo = Path(__file__).resolve().parents[3]
+    assert 'provider="Capital One"' in (
+        repo / "apps" / "capitalone" / "storage.py").read_text(encoding="utf-8")
+    assert "Add a provider</button>" in (
+        repo / "gui" / "static" / "index.html").read_text(encoding="utf-8")
+    assert "Open sign-in window</button>" in (
+        repo / "gui" / "static" / "app.js").read_text(encoding="utf-8")
