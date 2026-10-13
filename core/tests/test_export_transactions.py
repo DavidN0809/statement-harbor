@@ -461,3 +461,75 @@ def test_the_cache_version_moved_with_the_shape_of_a_parse():
     """The cache is keyed on path, size and mtime, so an old parse survives
     a change to the parser and hides it. #32 said so explicitly."""
     assert xt.CACHE_VERSION >= 5
+
+
+# A Navy Federal Visa statement as pdfplumber reads it (#32), every value
+# made up. No amount is signed, a payment or refund is told from a purchase
+# only by the PAYMENTS AND CREDITS heading above it, the heading comes back
+# after the page break with a refund under it, the Submitted By column
+# wraps the merchant's town onto a line of its own, and there is no running
+# balance column.
+NFCU_VISA = """Closing Date 09/15/26
+Previous Balance $2,500.00
+New Balance $46.77
+TRANSACTIONS
+PAYMENTS AND CREDITS
+Trans Date Post Date Reference No. Description Submitted By Amount
+08/16/26 08/16/26 70000000000000000000001 NFO PAYMENT RECEIVED xxxx xxxx xxxx 0000 $1,482.17
+08/21/26 08/22/26 70000000000000000000002 EXAMPLE HARDWARE 000001* ANYTOWN xxxx xxxx xxxx 0000 $214.60
+VA
+08/30/26 08/30/26 70000000000000000000003 NFO PAYMENT RECEIVED xxxx xxxx xxxx 0000 $1,105.00
+TRANSACTIONS
+PAYMENTS AND CREDITS
+Trans Date Post Date R eference No. Description Submitted By Amount
+09/02/26 09/03/26 70000000000000000000004 EXAMPLE AI PLAN xxxx xxxx xxxx 0000 $19.99
+SOMETOWN CA
+TOTAL PAYMENTS AND CREDITS $2,821.76
+TRANSACTIONS
+PAT EXAMPLE xxxx xxxx xxxx 0000
+Trans Date Post Date Reference No. Description Amount
+08/14/26 08/15/26 20000000000000000000005 WAREHOUSE CLUB 00001 ANYTOWN VA $312.45
+08/15/26 08/17/26 20000000000000000000006 EXAMPLE MART T-0001 ANYTOWN VA $56.08
+""".splitlines()
+
+
+def test_a_card_that_signs_nothing_reconciles_by_its_credits_heading():
+    s = xt.parse_statement(NFCU_VISA)
+    assert s["status"] == "reconciled, signs from the statement's headings"
+    assert (s["beginning"], s["ending"]) == (2500.00, 46.77)
+    assert [t["amount"] for t in s["transactions"]] == [
+        -1482.17, -214.60, -1105.00, -19.99, 312.45, 56.08]
+    # The wrapped town is not a transaction of its own.
+    assert len(s["transactions"]) == 6
+
+
+def test_the_credits_section_carries_over_the_page_break_and_ends_at_its_total():
+    under = xt.credit_rows(NFCU_VISA)
+    lines = {NFCU_VISA[i] for i in under}
+    assert any("NFO PAYMENT" in line for line in lines)
+    assert any("EXAMPLE AI PLAN" in line for line in lines)
+    assert not any("WAREHOUSE CLUB" in line or "EXAMPLE MART" in line for line in lines)
+    assert not any(line.startswith("TOTAL") for line in lines)
+
+
+def test_headings_never_sign_a_statement_that_does_not_add_up_with_them():
+    # The same rows with the balances off by a dollar stay not reconciled,
+    # with the amounts as printed, rather than a guess.
+    off = [line.replace("New Balance $46.77", "New Balance $47.77") for line in NFCU_VISA]
+    s = xt.parse_statement(off)
+    assert s["status"].startswith("not reconciled")
+    assert all(t["amount"] > 0 for t in s["transactions"])
+    # Without the heading there is nothing to sign by.
+    bare = [line for line in NFCU_VISA if "PAYMENTS AND CREDITS" not in line or line.startswith("TOTAL")]
+    assert xt.parse_statement(bare)["status"].startswith("not reconciled")
+
+
+def test_a_statement_that_prints_signs_is_never_signed_by_its_headings():
+    # CHASE_CARD prints PAYMENTS AND OTHER CREDITS with signed amounts, and
+    # keeps reconciling on the signs as printed.
+    s = xt.parse_statement(CHASE_CARD)
+    assert s["status"].startswith("reconciled") and "headings" not in s["status"]
+
+
+def test_the_cache_is_read_again_for_the_heading_signs():
+    assert xt.CACHE_VERSION >= 6

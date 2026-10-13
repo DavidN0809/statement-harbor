@@ -33,6 +33,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
   numbers. The payment site is never opened. A full run on a contributor's
   parcel saved 17 receipts across 16 tax years.
 
+### Fixed
+- **The transaction export reconciles card statements that print no signs
+  (#32).** A Navy Federal Visa statement prints every amount unsigned and
+  tells a payment or a refund from a purchase only by the PAYMENTS AND
+  CREDITS heading above it, so the export summed everything as a charge
+  and called the statement not reconciled. Rows under that heading, which
+  can carry on after a page break, are now taken off the balance and the
+  rest added to it. That reading is used only for a statement that prints
+  no sign anywhere, and only when it adds up to the cent against the
+  statement's own balances. Every statement is read again once, since the
+  saved readings came from the old rule. Thanks to @dertbv for the sample
+  lines.
+
 ## [0.49.0] - 2026-10-12
 
 Review names comes to the control panel, so PaperPull Server, which has no
