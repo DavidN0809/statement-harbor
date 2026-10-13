@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (54, plus two with a known issue and ten built and waiting for a tester)
+## Supported (56, plus two with a known issue and eight built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -62,7 +62,8 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements for the individual, retirement and crypto accounts, tax docs. A statement Robinhood serves only as HTML (seen for three recent months) is left for manual review | Brokerage |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098. UNTESTED, built without an account. Have an SBA loan? Run Diagnose and attach the file to issue #28 | Government loan servicing |
 | [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Brokerage |
-| [`sdge`](apps/sdge) | SDG&E (San Diego Gas & Electric, My Energy Center) | Monthly bills, about two years online, each read from Billing History and fetched by its own address, nothing clicked. One account at a time: with several, only the one selected in the portal is listed. Built and run on a contributor's own account, 8 bills | Utility |
+| [`sdge`](apps/sdge) | SDG&E (San Diego Gas & Electric, My Energy Center) | Monthly bills, about two years online, each read from Billing History and fetched by its own address, nothing clicked. One account at a time. With several, only the one selected in the portal is listed. Built and run on a contributor's own account, 8 bills | Utility |
+| [`shelbycounty`](apps/shelbycounty) | Shelby County Trustee (Memphis, TN property tax) | Property tax receipts, one per payment, back to the parcel's first year online, and the current tax notice while a balance is due. A public lookup with no sign-in, the parcel ID goes in config.json. The page builds each PDF in the browser and the app keeps it, opening nothing. Built and run on a contributor's own parcel, 17 receipts | Tax authority |
 | [`smud`](apps/smud) | SMUD (Sacramento Municipal Utility District) | Monthly bills. Confirmed by @watling777 on issue #34, whose Pilot took the newest five and whose full run took the rest of the history | Utility |
 | [`stripe`](apps/stripe) | Stripe (merchant Dashboard) | Fee invoices and tax forms such as the 1099-K. UNTESTED, built on an account with no documents yet. Have some? Run Diagnose and attach the file to issue #53 | Payments |
 | [`statefarm`](apps/statefarm) | State Farm | Bills, renewal notices, ID cards, receipts, policy documents. Confirmed by @watling777, whose full run saved every document State Farm lists for his policies (#37) | Insurance |

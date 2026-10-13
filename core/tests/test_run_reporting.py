@@ -37,7 +37,7 @@ def test_each_provider_reports_current_run_counts(entry, tmp_path, capsys):
                if line.startswith(PREFIX)]
     assert reports[0]["manual_review"] == 2
     assert reports[1] == {"manual_review": 0, "failed": 0, "validation_failures": 0,
-                          "new_files": 0, "wrong_document": 0, "stopped": 0}
+                          "new_files": 0, "name_review": 0, "wrong_document": 0, "stopped": 0}
 
 
 @pytest.mark.parametrize("entry", ENTRIES, ids=lambda p: p.parent.name)
@@ -88,6 +88,18 @@ def test_a_run_with_no_wrong_document_says_nothing_about_it(capsys):
 
 def _result(out):
     return json.loads(out.split(PREFIX, 1)[1].splitlines()[0])
+
+
+def test_receipts_saved_under_an_unsure_name_are_counted_on_their_own(capsys):
+    """Part of manual_review, so the panel can send the person to Review
+    names for those and to the Manual Review folder only for the rest."""
+    report_run_result({"manual_review": 3, "name_review": 2, "new_files": []})
+    got = _result(capsys.readouterr().out)
+    assert got["manual_review"] == 3 and got["name_review"] == 2
+    report_run_result({"manual_review": 1, "name_review": 4, "new_files": []})
+    assert _result(capsys.readouterr().out)["name_review"] == 1, "never more than manual_review"
+    report_run_result({"new_files": []})
+    assert _result(capsys.readouterr().out)["name_review"] == 0
 
 
 def test_a_run_that_finishes_is_not_stopped(capsys):

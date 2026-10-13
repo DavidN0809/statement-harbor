@@ -32,7 +32,7 @@ def server_kit_name(version: str) -> str:
 
 
 def server_readme(version: str) -> str:
-    return ("PaperPull Server %s, beta\n"
+    return ("PaperPull Server %s\n"
             "\n"
             "Put compose.yaml and seccomp-chrome.json in a folder of their own on the\n"
             "machine that will run PaperPull Server, fill in compose.yaml, and start it.\n"

@@ -27,15 +27,16 @@ redirect followed, and kept only when it is a PDF. Before each bill the
 list is opened again and the bill is fetched only when exactly one row
 still carries its invoice id and date. A list the app cannot read stops
 rather than being called whole. If the portal answers as signed out, the
-run stops and keeps what it saved; sign in again and run Resume.
+run stops and keeps what it saved. Sign in again and run Resume.
 
 ## Validation status
 
 Built from a survey of a signed-in account on 2026-10-12, which listed
-eight bills; a live run is still to come. Not yet seen:
+eight bills, and a full run on that account saved all eight. Not yet
+seen:
 
 - More than one account on one sign-in. The account selector is read,
-  never changed: only the selected account is listed, and the run says so.
+  never changed. Only the selected account is listed, and the run says so.
 - A Billing History with no bills.
 - Two bills on one statement date, which stop the list.
 - Solar (NBT) bills, which are fetched the same way and filed as bills.

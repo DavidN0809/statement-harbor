@@ -408,6 +408,24 @@ __CSS__
   </form>
 </dialog>
 
+<dialog id="dlg-review" aria-labelledby="rv-title">
+  <form method="dialog">
+    <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12V4h8l10 10-8 8z"/><path d="M7.5 7.5h.01"/></svg></div>
+      <div><h2 id="rv-title">Review names</h2>
+        <p>These receipts were saved under a name PaperPull was unsure of. Type a better summary for any of them, such
+          as <b>Garden Hose</b>, and leave the rest blank to keep their names. Each file is renamed where it sits, and
+          its rows in the receipt index and order history follow it. Nothing is downloaded.</p>
+        <p id="rv-paperless" hidden>A receipt already copied to Paperless keeps the title it has there.</p></div></div>
+    <div class="dlg-body">
+      <p class="hint" id="rv-state" role="status"></p>
+      <div class="rv-list" id="rv-list" hidden></div>
+      <pre class="log short" id="rv-log" hidden></pre>
+    </div>
+    <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Close</button>
+      <button class="btn btn-p" type="button" data-do="rv-go" id="rv-go" disabled>Rename</button></div>
+  </form>
+</dialog>
+
 <dialog id="dlg-support" aria-labelledby="sp-title">
   <form method="dialog">
     <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg></div>
