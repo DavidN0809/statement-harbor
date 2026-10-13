@@ -10,7 +10,62 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
-- **Shelby County Trustee, property tax receipts and the current notice for one Memphis parcel.** The Trustee's public Tax Query lookup needs no sign-in; the parcel id lives in config.json and is registered as a private word, so nothing written carries it, the owner the page shows, a bill or receipt number, or the Transaction page's address, which encodes the whole bill row. Each receipt (and the notice, while a balance is due) is a PDF the page builds in the browser and tries to open in a new tab; the app arms a hook before the one guarded press, keeps the Blob the page makes, accepts it only when exactly one was made, of type application/pdf, on the lookup's own origin, and opens no tab. Both tables are read whole through their PAGE x OF y / TOTAL RECORDS footer, starting at page 1 and advancing one page per NEXT, or the run stops. Two receipts on one day for one tax year are told apart by the last four digits of their receipt numbers. The payment site is never an allowed host. Full run on a contributor's parcel saved 17 receipts across 16 tax years.
+- **SDG&E (San Diego Gas & Electric) bills from My Energy Center.** The app
+  reads the bills Billing History lists, about two years of them, and saves
+  each bill's PDF, fetched by its own address with your signed-in session.
+  Nothing on the site is clicked, and payments, autopay, paperless,
+  pricing plans and service changes are never touched. If My Energy Center
+  signs you out partway, the run stops, keeps what it saved and asks you to
+  sign in and Resume, rather than marking the rest for review. Your account
+  number, contract account and service address are kept out of every log
+  and diagnostic file. With more than one account on your sign-in, only the
+  one selected in the portal is listed. A full run on a contributor's own
+  account saved all 8 bills online.
+- **Shelby County Trustee, property tax receipts and the current notice for
+  one Memphis parcel.** The Trustee's public lookup needs no sign-in, so the
+  parcel ID goes in config.json, where it stays. It is never written to a
+  log or a diagnostic file, and neither is the owner the page shows or a
+  bill or receipt number. Each receipt, and the notice while a balance is
+  due, is a PDF the page builds itself, and the app keeps the one the press
+  made without opening a tab. Both lists are read page by page to the
+  total the page states, or the run stops. Two receipts paid the same day
+  for one tax year are told apart by the last four digits of their receipt
+  numbers. The payment site is never opened. A full run on a contributor's
+  parcel saved 17 receipts across 16 tax years.
+
+## [0.49.0] - 2026-10-12
+
+Review names comes to the control panel, so PaperPull Server, which has no
+console, can rename the receipts an app was unsure how to name, and
+PaperPull Server is no longer a beta. The release also has Robinhood save
+IRA statements, carries what Target and Apple need through a history moved
+with `--minimal`, and has the panel tell a receipt saved under a name to
+review from one set aside.
+
+### Added
+- **Review names in the panel, and on PaperPull Server.** Every receipt
+  app asks for a better name for each receipt it was unsure how to name,
+  and it only ever asked in a console, from the `review_names` file in its
+  folder. PaperPull Server has no console, so it had no way to do it. A
+  receipt provider's More now has **Review names**, on the desktop and the
+  server alike. It lists the receipts waiting, with each one's date, order
+  number and items, and renames each one you type a better summary for,
+  with its rows in the receipt index and order history and its record in
+  progress.json following it. A blank box keeps its name, and so do
+  words that ask to keep it, such as keep, keep this name or same, here
+  and in the console alike, so they never become a receipt's name. A
+  summary is taken as one line of at most 120 characters. The app runs the review
+  the console one runs, with what you typed, so it renames only what that
+  review would, and a name typed for a receipt that stopped waiting
+  meanwhile does nothing and is said. The double-click
+  file still works as before.
+
+### Changed
+- **PaperPull Server is no longer a beta.** It has shipped with every
+  release since 0.43.0, so the label is gone
+  from its setup guide, the README, the panel's footer, the image's
+  description and the server kit's read-me. Nothing about how it runs
+  changes.
 
 ### Fixed
 - **Robinhood saves IRA statements.** The retirement statements page,
@@ -28,6 +83,46 @@ All notable changes to PaperPull are recorded here. Versioning follows
   account is not read whatever its headings say, so an offer to open a
   retirement account, or a holder called Ira shown in capitals, no longer
   passes for the retirement account's own heading.
+- **A Target order moved with `--minimal` while an invoice was still to
+  fetch no longer saves the others again.** Target counts an invoice of an
+  order as saved by the order's list of those it saved, and an order with
+  one still to fetch has no row in the receipt index yet. `--minimal` left
+  the list out, so on the new computer the next run saved the invoices
+  already saved a second time under new names, and Download again did the
+  same to every invoice on the list though its file was copied across. The
+  export now carries the list for Target, each invoice's file, its place
+  among the order's, the number Target prints on it, whether it was kept
+  or put aside and its size and page count. A list filled into a record an
+  older file moved names the files under this computer's folder, as a
+  record the import adds does. What `--minimal` prints when it is done now
+  says that order and invoice numbers stay, and file names, which can name
+  accounts and items.
+- **Target no longer stops on an order whose list of invoices was
+  damaged.** An entry whose file was not text, or a list that was not a
+  list, raised as the order's invoices were walked, so the order failed on
+  every run without its invoices being tried. Such a value now reads as
+  none, as every record value does, and an invoice it no longer names is
+  fetched again.
+- **A receipt saved under a name the app was unsure of is no longer said
+  to be set aside.** A run that saved one said a document set aside sat in
+  the Manual Review folder, where there was none, since the receipt was
+  filed where it belongs and waits only for a better name. Every receipt
+  app now reports such a receipt on its own, and the panel says it was
+  saved under a name to review and offers Review names, keeping the Manual
+  Review folder for a document really set aside.
+- **An account's Latest documents lists receipts saved by older versions.**
+  It read only records that say they were downloaded, which Target has
+  written for every receipt it saves only since 0.41.1, so an older Target
+  archive of 67 receipts said Nothing saved yet. A record from before then counts when it says it
+  was completed.
+- **An Apple purchase whose receipt Apple refused keeps its count of
+  refusals through a move with `--minimal`.** Apple saves a record of the
+  purchase in place of its receipt once it has refused the receipt on three
+  separate runs. `--minimal` left out the runs counted so far, so on the
+  new computer the purchase took three more refusals before its record was
+  saved. The export now carries them, and the runs it was not asked on, for
+  a purchase not saved yet, and a newer file fills them in for one an older
+  file moved without them.
 
 ## [0.48.0] - 2026-10-12
 

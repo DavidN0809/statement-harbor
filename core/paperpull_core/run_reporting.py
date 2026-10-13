@@ -24,6 +24,11 @@ def report_run_result(stats):
     result = {name: int(stats.get(name, 0)) for name in
               ("manual_review", "failed", "validation_failures")}
     result["new_files"] = len(stats.get("new_files", []))
+    # Of manual_review, the receipts saved under a name the app was unsure
+    # of. Their files are where they belong and Review Names gives each a
+    # better name, so the panel says that rather than sending the person to
+    # an empty Manual Review folder.
+    result["name_review"] = min(int(stats.get("name_review", 0) or 0), result["manual_review"])
     # A document that arrived, was read back, and was not the one asked
     # for. It is counted inside manual_review as well, which is what made
     # it invisible, since "needs review" reads the same whether nothing

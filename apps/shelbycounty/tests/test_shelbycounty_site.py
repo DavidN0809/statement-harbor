@@ -394,3 +394,56 @@ class Privacy(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewFixes(unittest.TestCase):
+    """What the review on top of the contribution found, each failing before its fix."""
+
+    def patch(self, **kw):
+        for name, value in kw.items():
+            old = getattr(site, name)
+            setattr(site, name, value)
+            self.addCleanup(setattr, site, name, old)
+
+    def test_a_billing_history_without_a_bill_stops_the_list(self):
+        # "No payment is due at this time" on a page whose table never drew
+        # read as an empty table, so discovery called a short list whole.
+        self.patch(goto_documents=lambda page: True, read_whole_table=lambda page, what: [])
+        with self.assertRaises(site.ListStopped):
+            site.collect_download_docs(object())
+
+    def test_the_notice_is_pressed_only_for_the_newest_bills_year(self):
+        pressed = []
+
+        class Button:
+            first = property(lambda s: s)
+            def count(s): return 1
+            def is_disabled(s): return False
+            def inner_text(s, **kw): return "Print Notice"
+
+        class Page:
+            def get_by_role(s, role, name=None): return Button()
+        bills = [row(["", "2025"], bill=True, i=0), row(["", "2024"], bill=True, i=1)]
+        self.patch(goto_documents=lambda page: True, balance_due=lambda page: True,
+                   read_whole_table=lambda page, what: bills,
+                   _press_for_blob=lambda page, el, label, out, trace: pressed.append(label) or True)
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "n.pdf"
+            self.assertFalse(site.download_bill(Page(), d, "2024-12-31", out, "Property Tax Notice Tax Year 2024"))
+            self.assertEqual(pressed, [])
+            self.assertTrue(site.download_bill(Page(), d, "2025-12-31", out, "Property Tax Notice Tax Year 2025"))
+            self.assertEqual(pressed, ["Print Notice"])
+
+    def test_same_day_receipts_are_told_apart_by_tax_year_and_receipt_ending(self):
+        self.assertEqual(docs.told_apart_by({"title": "Property Tax Receipt Tax Year 2018"}), "tax year 2018")
+        self.assertEqual(docs.told_apart_by({"title": "Property Tax Receipt Tax Year 2019 (#0222)"}), "tax year 2019 #0222")
+        self.assertEqual(docs.told_apart_by({"title": "Property Tax Notice Tax Year 2025"}), "tax year 2025")
+        self.assertEqual(docs.told_apart_by({}), "")
+
+    def test_what_is_said_of_a_bad_row_carries_none_of_its_cells(self):
+        with self.assertRaises(site.ListStopped) as stop:
+            site.bill_rows([row(["", "11223344"], bill=True)])
+        self.assertNotIn("11223344", str(stop.exception))
+        with self.assertRaises(site.ListStopped) as stop:
+            site.receipt_docs([row(["Print Receipt", "1", "R7000001", "TAX", "$1"], receipt=True)], "2019")
+        self.assertNotIn("7000001", str(stop.exception))

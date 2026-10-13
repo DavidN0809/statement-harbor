@@ -47,6 +47,7 @@ THE RULES
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -1521,6 +1522,25 @@ class ReviewWords:
 
 WORDS = ReviewWords()
 
+# What a person types to keep a receipt's name, which is never a summary.
+# The panel's empty box once read "Keep this name", and typed into four
+# boxes it renamed four receipts "... Keep This Name Invoice.pdf". The
+# panel's own list (KEEP_WORDS in gui/static/app.js) is the same.
+KEEP_WORDS = frozenset({
+    "keep", "keep it", "keep this", "keep name", "keep the name", "keep this name",
+    "keep its name", "keep same", "keep the same", "keep the same name", "same",
+    "same name", "the same", "no change", "unchanged", "leave it", "leave as is",
+    "leave blank", "leave it blank", "leave blank to keep this name",
+})
+
+
+def keeps_name(text) -> bool:
+    """Whether a typed summary asks to keep the name rather than give one,
+    read without case, punctuation or extra spaces."""
+    if not isinstance(text, str):
+        return False
+    return " ".join(re.sub(r"[^a-z ]+", " ", text.lower()).split()) in KEEP_WORDS
+
 # Apple and Uber, written after the rest, print the same without the colons.
 PLAIN_WORDS = ReviewWords(current="    Current file  ", items="    Items  ",
                           question="    New summary (blank=keep, q=quit) ",
@@ -1625,6 +1645,82 @@ def named_by_another(rows: Iterable[dict], records: dict, lists: bool = True,
     return another
 
 
+# The control panel has no console to ask in, so it asks Review Names in two
+# steps through these, each naming a file in a folder of the panel's own.
+# The first has the review write the receipts it would ask about to that
+# file and rename nothing. The second hands it the new summaries a person
+# typed in the panel, and only the receipts given one are renamed, by the
+# same rules as a review in a console. The panel sets them for the run it
+# starts and nothing else does, which is how PaperPull Server, with no
+# console at all, reviews names.
+REVIEW_LIST_ENV = "PAPERPULL_REVIEW_LIST"
+REVIEW_ANSWERS_ENV = "PAPERPULL_REVIEW_ANSWERS"
+# The longest summary taken from the panel. A file name keeps the room it
+# needs for the date, the provider and the kind (unique_path cuts the rest).
+SUMMARY_MAX = 120
+
+
+def _one_line(text: str) -> str:
+    """Text as one line, without control characters, with single spaces."""
+    return " ".join("".join(c for c in text if c.isprintable() or c.isspace()).split())
+
+
+def _number_of(row: dict) -> str:
+    return (row.get("Order or Receipt Number") or "").strip()
+
+
+def _write_review_list(where: Path, app, review: list) -> None:
+    """The receipts a review would ask about, written for the control panel
+    to show. Each is known by its file as the review finds it, with its
+    order number, so a new name comes back for that file and that purchase
+    and no other. Written beside itself and then moved into place, so the
+    panel never reads half of it."""
+    out = []
+    for r, path in review:
+        key = f"{r.get('Purchase Type')}:{r.get('Order or Receipt Number')}"
+        prog = app.progress.get(key) or {}
+        items = prog.get("items")
+        items = [_text(i.get("name")) for i in (items if isinstance(items, list) else ())
+                 if isinstance(i, dict)][:10]
+        out.append({"id": str(path), "number": _number_of(r),
+                    "date": _text(r.get("Purchase Date")),
+                    "confidence": _text(r.get("Classification Confidence")),
+                    "status": _text(r.get("Processing Status")),
+                    "file": path.name, "summary": _text(r.get("Purchase Summary")),
+                    "items": [i for i in items if i]})
+    part = where.with_name(where.name + ".part")
+    part.write_text(json.dumps({"receipts": out}), encoding="utf-8")
+    os.replace(part, where)
+
+
+def _panel_answers(raw: str) -> dict:
+    """The new summaries the control panel handed over, by (file, order
+    number). A blank one keeps its name, so it is left out. A file that
+    cannot be read stops the review before anything is renamed."""
+    try:
+        data = json.loads(Path(raw).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        print("The new names from the control panel could not be read (%s), so nothing "
+              "was renamed." % type(e).__name__)
+        raise SystemExit(1)
+    answers = data.get("answers") if isinstance(data, dict) else None
+    if not isinstance(answers, list):
+        print("The new names from the control panel were not a list, so nothing was renamed.")
+        raise SystemExit(1)
+    out = {}
+    for a in answers:
+        if not isinstance(a, dict):
+            continue
+        rid, number, summary = a.get("id"), a.get("number"), a.get("summary")
+        if not (isinstance(rid, str) and isinstance(number, str) and isinstance(summary, str)):
+            continue
+        summary = _one_line(summary)[:SUMMARY_MAX].strip()
+        # Words that ask to keep the name keep it, as a blank box does.
+        if rid and summary and not keeps_name(summary):
+            out[(rid, number.strip())] = summary
+    return out
+
+
 def review_names(app, ask, words: ReviewWords = WORDS,
                  record_for: Optional[Callable[[str, dict], dict]] = None) -> None:
     """Ask for a better name for each receipt the app was unsure of, and
@@ -1659,7 +1755,16 @@ def review_names(app, ask, words: ReviewWords = WORDS,
     check keeps the state its run gave it. A purchase's record takes a new
     name only when it names the file renamed, or when there is none yet,
     so an older copy of a purchase whose record names another copy leaves
-    that record as it is."""
+    that record as it is.
+
+    Run by the control panel, REVIEW_LIST_ENV has it write the receipts it
+    would ask about and rename nothing, and REVIEW_ANSWERS_ENV has it take
+    the new summaries from the panel instead of asking. A summary given for
+    a file no longer waiting for review, or for another purchase's file, is
+    said and left alone."""
+    listing = os.environ.get(REVIEW_LIST_ENV, "").strip()
+    answered = os.environ.get(REVIEW_ANSWERS_ENV, "").strip()
+    answers = _panel_answers(answered) if answered and not listing else None
     rows = app.index_csv.read_all()
     another = named_by_another(rows, getattr(app.progress, "data", None) or {})
     # A row somebody already renamed is left out, even one renamed before
@@ -1691,9 +1796,28 @@ def review_names(app, ask, words: ReviewWords = WORDS,
         print(f"{shared} row(s) marked for review name a file that another purchase's "
               "rows or record also name, so whose receipt it is cannot be told and "
               "they are left out.")
+    if listing:
+        _write_review_list(Path(listing), app, review)
+        print(f"{len(review)} receipt(s) need review." if review
+              else "No receipts need name review.")
+        return
     if not review:
         print("No receipts need name review.")
         return
+    if answers is not None:
+        # Only the receipts given a new name, each for the very file and
+        # purchase it was shown for. The rest keep their names, as Enter
+        # keeps one in a console.
+        given = [(r, p) for r, p in review if (str(p), _number_of(r)) in answers]
+        stale = len(answers) - len(given)
+        if stale:
+            print(f"{stale} new name(s) were for receipts no longer waiting for review, so "
+                  "nothing was done with them. Open Review names again to see the list as "
+                  "it is now.")
+        if not given:
+            print("No receipt was given a new name, so nothing was renamed.")
+            return
+        review = given
     order_rows = app.order_csv.read_all()
     # Each new name is written into the index, the order history and
     # progress.json just after its file is renamed, so each has to be one
@@ -1711,8 +1835,11 @@ def review_names(app, ask, words: ReviewWords = WORDS,
               "each new name into %s as it renames. Close any program that has %s open and "
               "run Review Names again." % (_listed([p.name for p in held]), them, them))
         raise SystemExit(1)
-    print(f"{len(review)} receipt(s) need review. Enter a new summary, "
-          "press Enter to keep, or 'q' to stop.\n")
+    if answers is not None:
+        print(f"Renaming {len(review)} receipt(s) given a new name.\n")
+    else:
+        print(f"{len(review)} receipt(s) need review. Enter a new summary, "
+              "press Enter to keep, or 'q' to stop.\n")
     written = stopped = False
     try:
         for r, old_path in review:
@@ -1728,9 +1855,17 @@ def review_names(app, ask, words: ReviewWords = WORDS,
             print(f"{words.current}{r.get('PDF Filename')}")
             if items:
                 print(f"{words.items}{'; '.join(items)}")
-            new = ask(words.question).strip()
-            if new.lower() == "q":
-                break
+            if answers is not None:
+                # Typed in the panel, where "q" is a summary like any other.
+                new = answers[(str(old_path), _number_of(r))]
+                print(f"    New summary: {new}")
+            else:
+                new = ask(words.question).strip()
+                if new.lower() == "q":
+                    break
+            if keeps_name(new):
+                print("    That keeps its name.\n")
+                continue
             if not new:
                 print()
                 continue
