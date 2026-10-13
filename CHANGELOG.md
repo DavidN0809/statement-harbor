@@ -16,16 +16,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
   confirmation by pressing that row's own Download once and keeping the
   PDF your browser receives. Nothing else on the site is pressed: no
   trading, transfers, deposits, account switching or settings. A Paper
-  account is never read; if Alpaca is showing Paper, the run stops and asks
+  account is never read. If Alpaca is showing Paper, the run stops and asks
   you to choose your Live account yourself, then Resume. The JSON copies of
   trade confirmations and the account application are skipped. If Alpaca
   has turned one document's Download off for now, that document is left for
-  the next run and this run goes on. Your account name, account number and
-  every document's ID are kept out of every log and diagnostic file, and
-  file names and the document index never carry the account holder's name,
-  whatever config.json asks. Built
-  from the account owner's walk through their own Live account; a full run
-  is still to come.
+  the next run and this run goes on. Two documents of one type on one date
+  are counted and left unsaved, since a row cannot tell them apart, and the
+  rest are saved. The page asks Alpaca for about three years of documents,
+  so when the list holds no account application Discover stops unless
+  `--start-date` or `default_start_date` falls on or after the list's first
+  day. Your account name, account number and every document's ID are kept
+  out of every log and diagnostic file, and file names and the document
+  index never carry the account holder's name, whatever config.json asks. Built from the account owner's walk through
+  their own Live account, then run whole on it: 22 documents saved.
 
 ## [0.50.0] - 2026-10-13
 

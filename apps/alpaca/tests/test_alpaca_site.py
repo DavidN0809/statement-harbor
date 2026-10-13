@@ -318,8 +318,12 @@ def fake_press(monkeypatch):
     yield
 
 
-def run():
-    return site.Run()
+def run(floor="2023-10-12"):
+    """A run whose own start date is the made-up list's first day, so a list
+    of the site layer's tests is whole without an application in it."""
+    r = site.Run()
+    r.floor = floor
+    return r
 
 
 def pressed_downloads(page):
@@ -529,7 +533,8 @@ def test_the_switcher_text_is_private_once_read():
 def test_the_list_is_read_whole_and_sorted_into_kinds():
     listed = site.read_list(Response(LIST_URL, survey_items()))
     assert len(listed.items) == 28 and len(listed.kept) == 15
-    assert listed.counts == {"twins": 12, "applications": 1, "tax": 0, "other": 0}
+    assert listed.counts == {"twins": 12, "applications": 1, "tax": 0, "other": 0, "alike": 0}
+    assert (listed.start, listed.end) == ("2023-10-12", "2026-10-12")
     more = survey_items() + [item(900, "2026-01-31", "tax_1099_b"), item(901, "2026-02-01", "fee_notice")]
     listed = site.read_list(Response(LIST_URL, more))
     assert listed.counts["tax"] == 1 and listed.counts["other"] == 1 and len(listed.kept) == 15
@@ -538,8 +543,6 @@ def test_the_list_is_read_whole_and_sorted_into_kinds():
 
 @pytest.mark.parametrize("change", [
     lambda d: d.append(dict(d[0])),                                    # one id twice
-    lambda d: d.append(item(999, "2026-09-30", "account_statement")),  # two kept on one date
-    lambda d: d.append(item(998, "2026-09-01", "trade_confirmation")), # two confirmations, one date
     lambda d: d[0].update(id="not-a-uuid"),
     lambda d: d[0].update(date="2026-02-30"),
     lambda d: d[0].update(date="09/30/2026"),
@@ -552,6 +555,66 @@ def test_a_list_this_cannot_read_whole_stops(change):
     change(data)
     with pytest.raises(site.ListStopped):
         site.read_list(Response(LIST_URL, data))
+
+
+@pytest.mark.parametrize("extra, gone", [
+    (item(999, "2026-09-30", "account_statement"), uid(2)),   # two statements, one date
+    (item(998, "2026-09-01", "trade_confirmation"), uid(100)),  # two confirmations, one date
+])
+def test_two_kept_documents_alike_are_counted_and_the_rest_kept(extra, gone):
+    """A pair of one type and one date, equity and crypto confirmations of
+    one day, say, is counted and not kept, and the rest of the list goes
+    on. The pair stays in the list's items, so its rows are still checked."""
+    listed = site.read_list(Response(LIST_URL, survey_items() + [extra]))
+    assert listed.counts["alike"] == 2 and len(listed.kept) == 14
+    kept = {i.document_id for i in listed.kept}
+    assert gone not in kept and extra["id"] not in kept
+    assert extra["id"] in {i.document_id for i in listed.items}
+
+
+def test_a_pair_alike_leaves_the_rest_of_discovery_flowing():
+    page = Center()
+    page.items.append(item(998, "2026-09-06", "trade_confirmation"))
+    r = run()
+    got = site.collect_download_docs(page, r)
+    assert len(got) == 14 and r.counts["alike"] == 2
+    assert uid(105) not in {d.document_id for d in got} and pressed_downloads(page) == []
+
+
+# ---------------------------------------------------------------------------
+# The list's window
+# ---------------------------------------------------------------------------
+
+def listed_with(items, url=LIST_URL):
+    return site.read_list(Response(url, items))
+
+
+def test_a_list_holding_the_application_in_its_window_is_whole():
+    assert site.reaches_back(listed_with(survey_items()), None)
+
+
+@pytest.mark.parametrize("floor, whole", [
+    ("2023-10-12", True), ("2024-01-01", True), ("2023-10-11", False), (None, False),
+    ("", False), ("2024", False), ("2024-02-30", False),
+])
+def test_a_list_without_the_application_is_whole_only_back_to_the_runs_start(floor, whole):
+    items = [i for i in survey_items() if i["type"] != "account_application"]
+    assert site.reaches_back(listed_with(items), floor) is whole
+
+
+def test_an_application_outside_the_window_does_not_count():
+    items = [i for i in survey_items() if i["type"] != "account_application"]
+    items.append(item(4, "2023-10-11", "account_application"))
+    assert not site.reaches_back(listed_with(items), None)
+
+
+def test_a_list_too_short_stops_discovery_before_any_press():
+    page = Center()
+    page.items = [i for i in page.items if i["type"] != "account_application"]
+    with pytest.raises(site.ListTooShort) as stop:
+        site.collect_download_docs(page, run(floor=None))
+    assert stop.value.start == "2023-10-12" and page.presses == []
+    assert len(site.collect_download_docs(Center(items=page.items), run("2024-01-01"))) == 15
 
 
 def test_a_list_answer_that_is_not_the_lists_json_is_a_signed_out_session():
@@ -1413,6 +1476,51 @@ def test_a_paper_account_stops_discovery(tmp_path):
     with redirect_stdout(io.StringIO()) as said, pytest.raises(SystemExit):
         app.cmd_discover()
     assert "Live account" in said.getvalue() and app.discovery.data == {}
+
+
+@pytest.mark.parametrize("args, extra", [
+    (("--discover", "--start-date", "2024-02-30"), {}),
+    (("--discover", "--end-date", "2024-13-01"), {}),
+    (("--discover",), {"default_start_date": "2024-02-30"}),
+    (("--discover",), {"default_start_date": "2024"}),
+    (("--discover",), {"default_start_date": 20240101}),
+])
+def test_a_start_date_that_is_not_a_day_is_refused_before_anything(tmp_path, args, extra):
+    with redirect_stdout(io.StringIO()) as said, pytest.raises(SystemExit) as end:
+        make_app(tmp_path, *args, **extra)
+    assert end.value.code == 2 and "YYYY-MM-DD" in said.getvalue()
+
+
+def test_main_refuses_a_day_that_does_not_exist():
+    with redirect_stdout(io.StringIO()):
+        assert docs.main(["--discover", "--start-date", "2024-02-30"]) == 2
+
+
+def no_application():
+    page = Center()
+    page.items = [i for i in page.items if i["type"] != "account_application"]
+    return page
+
+
+def test_a_list_too_short_stops_discovery_and_says_how_to_go_on(tmp_path):
+    app = make_app(tmp_path, "--discover")
+    attach(app, no_application())
+    with redirect_stdout(io.StringIO()) as said, pytest.raises(SystemExit):
+        app.cmd_discover()
+    assert "2023-10-12" in said.getvalue() and "default_start_date" in said.getvalue()
+    assert app.discovery.data == {} and app.page().presses == []
+
+
+@pytest.mark.parametrize("args, extra", [
+    (("--discover", "--start-date", "2024-01-01"), {}),
+    (("--discover",), {"default_start_date": "2023-10-12"}),
+])
+def test_a_start_date_the_list_reaches_lets_discovery_finish(tmp_path, args, extra):
+    app = make_app(tmp_path, *args, **extra)
+    attach(app, no_application())
+    with redirect_stdout(io.StringIO()):
+        app.cmd_discover()
+    assert len(app.discovery.data) == 15
 
 
 def test_the_deadline_stops_the_run_before_the_next_document(tmp_path):

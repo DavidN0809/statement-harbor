@@ -3,24 +3,27 @@
 When Alpaca changes its documents page, repair this file only.
 
 STATUS: built from the account owner's survey of a signed-in Live account
-on 2026-10-12 (one Download pressed by hand). No full run has been made
-with this code yet.
+on 2026-10-12 (one Download pressed by hand), then run whole on that
+account the same day: Discover listed 42 documents and kept 22, and Pilot
+and Run All saved all 22.
 
 WHAT THE SURVEY ESTABLISHED
   * The page is https://app.alpaca.markets/account/documents, a route of the
     dashboard SPA, opened here by its address. On a Paper account it
     silently redirects to /dashboard/overview, so a Paper account never shows
     it. One sign-in holds a Paper and a Live account and the app opens on
-    whichever was chosen last; the account switcher's button,
+    whichever was chosen last. The account switcher's button,
     [data-testid=account-switcher-button], reads "<name> Paper - <id>" on
     Paper.
-  * The SPA authorises its API with a bearer token it holds in memory, not a
+  * The SPA authorizes its API with a bearer token it holds in memory, not a
     cookie, so nothing here can ask the API itself. Opening the page makes
     the page GET
         /api/v1/accounts/<account uuid>/documents?start=YYYY-MM-DD&end=YYYY-MM-DD
-    whose answer is the whole list, a JSON array of {id, name, type,
-    sub_type, date}. That answer is listened for (page.expect_response),
-    never asked for.
+    whose answer is the whole list for that window, a JSON array of {id,
+    name, type, sub_type, date}. That answer is listened for, never asked
+    for. The page picks the window itself (the survey's started three years
+    back), so the list is called whole only when it reaches far enough
+    back (reaches_back).
   * The table draws that list ten rows a page, "Date | Document Type |
     Download", the type cell being the list's own type enum verbatim, with
     Previous / page numbers / Next buttons under it. A day can hold a
@@ -60,21 +63,25 @@ uuid in the list's address, every document uuid, the account number in a
 link's path and the download's suggested name are registered as private
 words as soon as they are read. None of them, the link, a response body or
 an address with its query is ever logged, said or written. Only the list and
-link calls are ever listened to; /details, /owners, /billing, authx, cognito,
+link calls are ever listened to. /details, /owners, /billing, authx, cognito,
 unleash and sentry answers are never read.
 
 SIGNED OUT: a sign-in address, authx, a password field, a 401 or 403 on the
 list or link call, or an answer to either that is not the JSON it should be
 raises SessionExpired, checked before and after every wait and press. The
-run saves, says so and stops; nothing is recorded for review.
+run saves, says so and stops. Nothing is recorded for review.
 
 KNOWN CEILINGS (ponytail: left until a live run shows otherwise)
   * Tax forms are deferred: no tax_* or 1099 type has been seen, so they are
     counted and skipped, never pressed.
-  * Two documents of one kept type on one date stop the list: a row shows
-    only its date and type, so it could not be bound to one of them.
+  * Two documents of one kept type on one date are counted and not saved:
+    a row shows only its date and type, so it could not be bound to one of
+    them. The rest of the list goes on.
+  * An account older than the page's window, with no start date of the
+    run's own inside it, stops the list (reaches_back). Whether the page's
+    Filters reach further back has not been seen.
   * The table's markup beyond what the survey saw (one table, rows in one
-    tbody, three cells) is assumed; anything else stops the list.
+    tbody, three cells) is assumed, and anything else stops the list.
 """
 from __future__ import annotations
 
@@ -119,8 +126,6 @@ BASE = "https://" + HOST
 DOCUMENTS_PATH = "/account/documents"
 DOCUMENTS_URL = BASE + DOCUMENTS_PATH
 LOGIN_URL = BASE + "/account/login"
-STATEMENTS_URL = DOCUMENTS_URL
-BILLING_URL = DOCUMENTS_URL
 URLS = {
     "home": BASE + "/",
     "login": LOGIN_URL,
@@ -203,7 +208,7 @@ LATE_DOWNLOAD_WAIT_MS = 10000
 POLL_MS = 250
 PAGE_SIZE = 10
 # A run stops pressing this long after it first opened the documents page.
-# No sign-out was seen in the survey; this is a conservative bound.
+# No sign-out was seen in the survey, so this is a conservative bound.
 DEADLINE_S = 20 * 60
 
 # What each kept type is called, and the types read but never taken.
@@ -213,6 +218,8 @@ TITLES = {
     "trade_confirmation": "Trade Confirmation",
 }
 SKIPPED_TYPES = {"trade_confirmation_json": "twins", "account_application": "applications"}
+# What read_list counts and does not keep, by kind.
+COUNTED = ("twins", "applications", "tax", "other", "alike")
 
 # ---------------------------------------------------------------------------
 # Date parsing (the orchestrator's period reading, unchanged in shape)
@@ -326,6 +333,17 @@ class ListStopped(Exception):
     def __init__(self, why: str, docs=None):
         super().__init__(why)
         self.docs = list(docs or [])
+
+
+class ListTooShort(ListStopped):
+    """The list does not reach back far enough to be called whole
+    (reaches_back). `start` is where its window begins, an ISO date, or ""
+    when the list's address did not say."""
+
+    def __init__(self, start: str):
+        super().__init__("the list starts at %s and holds no account application"
+                         % (start or "a date it did not give"))
+        self.start = start
 
 
 def looks_signed_out(page) -> bool:
@@ -567,7 +585,7 @@ class Run:
         have reached the page, it was the only download that came there,
         and it came from exactly the link Alpaca handed that press (one
         from anywhere else is not the press's: it is left as it is and the
-        run stops); or
+        run stops), or
       * the press got no download in its window, the link Alpaca handed it
         is known, and it came by the run's end from exactly that link.
     A bound download that was not taken (refused) is canceled, the file it
@@ -591,6 +609,9 @@ class Run:
         self.limit_s = limit_s
         self.first_navigation: Optional[float] = None
         self.counts: dict = {}
+        # The run's own start date (--start-date or default_start_date), as
+        # an ISO date, or None. The list must reach back to it (reaches_back).
+        self.floor: Optional[str] = None
         self._watched: list = []
         self.dl_dir: Optional[Path] = None
         # What was in the folder as the last press was made.
@@ -663,7 +684,7 @@ class Run:
     def close(self) -> int:
         """As the app lets go of the tab: when a press is owed its download,
         wait the bounded time for it and discard it if it comes from that
-        press's link; then stop listening. Nothing else is touched. Says
+        press's link, then stop listening. Nothing else is touched. Says
         how many files went from the folder."""
         if self.owed_link is not None:
             for page in self._watched:
@@ -726,10 +747,33 @@ class Listed:
     items: List[Item]
     kept: List[Item]
     counts: dict = field(default_factory=dict)
+    # The window the page asked the list for, from the list call's address.
+    start: str = ""
+    end: str = ""
+
+
+# The type of the account's application, dated when the account was opened.
+APPLICATION_TYPE = "account_application"
+
+
+def reaches_back(listed: Listed, floor: Optional[str]) -> bool:
+    """Whether the list reaches back far enough to be called whole. The
+    page asks for documents from a start date of its own, so an account
+    older than that has documents the list never holds. It is whole when it
+    holds the account's application inside its window, since nothing comes
+    before the account was opened, or when its window starts on or before
+    the run's own start date, since nothing earlier is wanted. A floor that
+    is not a calendar date counts as no floor."""
+    start, end = listed.start, listed.end
+    if calendar_date(start) != start or calendar_date(end) != end:
+        return False
+    if any(i.doc_type == APPLICATION_TYPE and start <= i.date <= end for i in listed.items):
+        return True
+    return bool(floor) and calendar_date(floor) == floor and start <= floor
 
 
 # ---------------------------------------------------------------------------
-# Reading the page. Read only; nothing on the page is changed.
+# Reading the page. Read only, nothing on the page is changed.
 # ---------------------------------------------------------------------------
 _STATE_JS = r"""() => {
   const tidy = s => (s || '').replace(/\s+/g, ' ').trim();
@@ -884,11 +928,15 @@ def read_list(response) -> Listed:
 
     The answer must be 200 JSON, a list of {id, name, type, sub_type, date}:
     each id a uuid, no id twice, each type a lowercase enum, each date a
-    calendar date. Kept are the three statement and confirmation types; the
+    calendar date. Kept are the three statement and confirmation types. The
     JSON twins, the application, tax forms (deferred) and any other type are
-    counted and skipped. Two kept documents of one type on one date stop
-    the list. A 401 or 403, or an answer that is not a JSON list, is a
-    signed-out session. Nothing of the answer is logged."""
+    counted and skipped. Kept documents that share one type and one date
+    with another are counted (alike) and not kept, since a row could not be
+    told from the other, and the rest are kept. They stay in the list's
+    items, so the rows are still checked against them. The window the list
+    was asked for is read off its address. A 401 or 403, or an answer that
+    is not a JSON list, is a signed-out session. Nothing of the answer is
+    logged."""
     status = _status(response)
     if status in (401, 403):
         raise SessionExpired("the documents list answered as signed out")
@@ -924,7 +972,7 @@ def read_list(response) -> Listed:
         items.append(Item(document_id=doc_id.lower(), date=day, doc_type=kind))
     if len({i.document_id for i in items}) != len(items):
         raise ListStopped("two documents in the list carry one id")
-    kept, counts = [], {"twins": 0, "applications": 0, "tax": 0, "other": 0}
+    kept, counts = [], {k: 0 for k in COUNTED}
     for i in items:
         if i.doc_type in TITLES:
             kept.append(i)
@@ -934,10 +982,15 @@ def read_list(response) -> Listed:
             counts["tax"] += 1
         else:
             counts["other"] += 1
-    if any(n > 1 for n in Counter(i.shape for i in kept).values()):
-        raise ListStopped("two documents of one type carry one date, so a row cannot "
-                          "tell them apart")
-    return Listed(items=items, kept=kept, counts=counts)
+    shapes = Counter(i.shape for i in kept)
+    counts["alike"] = sum(n for n in shapes.values() if n > 1)
+    kept = [i for i in kept if shapes[i.shape] == 1]
+    try:
+        query = parse_qs(urlsplit(response.url).query)
+        start, end = query.get("start", [""])[0], query.get("end", [""])[0]
+    except Exception:
+        start = end = ""
+    return Listed(items=items, kept=kept, counts=counts, start=start, end=end)
 
 
 # ---------------------------------------------------------------------------
@@ -1083,7 +1136,7 @@ class Opened:
     """The documents page as it opened: what it shows, and its list, with
     the list's listener still armed. It stays armed while the rows are
     read against the list, so a list answer that comes late, after the
-    settle, is still counted (one_list_answer); close() takes it off."""
+    settle, is still counted (one_list_answer). close() takes it off."""
 
     def __init__(self, state: dict, listed: Listed, heard: Optional["_Watch"] = None):
         self.state = state
@@ -1119,7 +1172,7 @@ def _open(page, run: Run) -> Opened:
     this run opened (core/tests/test_no_app_acts_on_another_sites_tab.py),
     and the listener hears every answer expect_response would. It is left
     armed on the Opened it returns, so the rows can be read against the list
-    with a late second answer still counted; the caller closes it."""
+    with a late second answer still counted. The caller closes it."""
     check_signed_in(page)
     if is_safe_url(page.url or ""):
         check_account(_read(page))
@@ -1217,12 +1270,15 @@ def _rawdocs(items: List[Item]) -> List[RawDoc]:
 
 def collect_download_docs(page, run: Optional[Run] = None) -> List[RawDoc]:
     """Every statement and trade confirmation the Live account's list holds,
-    once every row the page draws has been checked against it. Raises
+    once the list reaches back far enough (reaches_back) and every row the
+    page draws has been checked against it. Raises
     ListStopped, SessionExpired, NotLive or DeadlineReached."""
     run = run or Run()
     opened = _open(page, run)
     try:
         run.counts = dict(opened.listed.counts)
+        if not reaches_back(opened.listed, run.floor):
+            raise ListTooShort(opened.listed.start)
         pages = cross_check(page, run, opened.listed.items, opened.state)
         # A second list answer that came while the rows were read means the
         # rows may be another list's.
@@ -1403,7 +1459,7 @@ def _catch_document(page, run: Run, dl_dir, n: int, document_id: str, iso: str, 
     that is not a PDF stops the run: nothing more is pressed for this or any
     later document. A Download the page has turned off is not pressed and
     raises DocumentTurnedOff. A download bound to this press and not taken
-    is discarded (Run.discard); nothing else in the folder is touched."""
+    is discarded (Run.discard). Nothing else in the folder is touched."""
     out_path = Path(out_path)
     css = download_css(n)
     want = (iso, doc_type)

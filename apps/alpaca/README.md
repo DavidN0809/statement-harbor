@@ -30,7 +30,7 @@ pressing anything and says so.
 5. Check the downloaded statement before using `paperpull alpaca all`.
 
 A run stops on its own twenty minutes after it first opens the documents
-page, and whenever Alpaca signs you out; everything saved is kept, and
+page, and whenever Alpaca signs you out. Everything saved is kept, and
 Resume carries on from there.
 
 ## How it works
@@ -40,7 +40,7 @@ Alpaca's own page asks for, the whole list in one answer. It checks that
 list against the rows the page draws, ten to a page, pressing the page's
 own Next until every row has been seen. A document is saved by opening the
 page again, finding its one row by date and type, and pressing that row's
-Download once; the page asks Alpaca for the document's link, and the
+Download once. The page asks Alpaca for the document's link, and the
 browser's download is kept only when it is one PDF that came from that
 link, in Alpaca's document bucket.
 
@@ -69,8 +69,14 @@ known:
 - Tax forms (1099s): none had been issued when the account was surveyed,
   so they are counted and skipped, never pressed.
 - Two documents of one kind on one date, two trade confirmations on one
-  day, say: a row shows only its date and kind, so the list stops rather
-  than guess which row is which.
+  day, say: a row shows only its date and kind, so those two are counted
+  and left unsaved rather than guess which row is which, and the rest are
+  saved.
+- An account older than the list's window. The page asks for about three
+  years of documents. When the list holds no account application, Discover
+  stops unless `--start-date` or `default_start_date` is on or after the
+  day the list starts, so older documents are never missed unnoticed.
+  Whether the page's Filters reach further back has not been seen.
 - The exact markup of the table beyond what the survey saw.
 
 ## Tests

@@ -1,7 +1,7 @@
 """What makes the Alpaca app different, everything else is paperpull_core.
 
 This file used to be a copy of the same storage logic every other app
-carried. All that logic now lives in `paperpull_core`; what remains here is the
+carried. All that logic now lives in `paperpull_core`, and what remains here is the
 declaration of Alpaca's own facts: the folders it files into, how a document
 routes to one, its CSV columns, and its config defaults.
 
@@ -32,17 +32,13 @@ SPEC = AppSpec(
     kind=DOCUMENT,
     folders=[
         Folder("statements", "Statements"),
-        # Tax documents are not collected yet; made only if something routes here.
-        Folder("tax_documents", "Tax Documents", precreate=False),
-        Folder("insurance_documents", "Insurance Documents", precreate=False),
-        # Statements and confirmations are both Statement; made only if something routes here.
+        # Statements and confirmations both route to Statements, so this is made
+        # only if something else routes here.
         Folder("other_documents", "Other Documents", precreate=False),
         *INFRASTRUCTURE_FOLDERS,
     ],
     routes={
         "Statement": "statements",
-        "Tax Document": "tax_documents",
-        "Insurance Document": "insurance_documents",
     },
     default_route="other_documents",
     csv_files=[
@@ -68,14 +64,14 @@ PROJECT_DIR = SPEC.project_dir
 # they always have.
 from paperpull_core.storage import (  # noqa: E402  (must follow bind)
     CsvFile, JsonStore, Paths, atomic_write_json, atomic_write_text,
-    backup_file, build_pdf_filename, ensure_owner, load_config, now_iso,
+    backup_file, build_pdf_filename, load_config, now_iso,
     sanitize_component, set_filename_owner, title_case, unique_path,
 )
 
 __all__ = [
     "SPEC", "PROJECT_DIR", "DOCUMENT_INDEX_COLUMNS",
     "CsvFile", "JsonStore", "Paths", "atomic_write_json", "atomic_write_text",
-    "backup_file", "build_pdf_filename", "ensure_owner", "load_config",
+    "backup_file", "build_pdf_filename", "load_config",
     "now_iso", "sanitize_component", "set_filename_owner", "title_case",
     "unique_path",
 ]

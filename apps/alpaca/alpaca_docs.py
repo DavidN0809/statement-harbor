@@ -62,7 +62,7 @@ from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
 
-from storage import ensure_owner, PROJECT_DIR, set_filename_owner
+from storage import PROJECT_DIR, set_filename_owner
 log = logging.getLogger("alpaca_docs")
 
 
@@ -108,11 +108,24 @@ def keep_owner_out_of_names(config: dict) -> List[str]:
     set_filename_patterns(cleaned)
     set_filename_owner("")
     if set_aside:
-        log.warning("file names never carry the account holder's name here; "
+        log.warning("file names never carry the account holder's name here, "
                     "set aside: %s", ", ".join(set_aside))
         print("Alpaca file names never carry the account holder's name, so these "
               "settings in config.json are not used: %s" % ", ".join(set_aside))
     return set_aside
+
+
+def check_start_dates(args, config: dict) -> None:
+    """Refuse a start date that is not a day that exists. --start-date and
+    default_start_date decide which documents are wanted and how far back
+    the list must reach (site.reaches_back), so one that cannot be read
+    would leave documents out unnoticed. Exits with 2."""
+    for said, value in (("--start-date", getattr(args, "start_date", None)),
+                        ("--end-date", getattr(args, "end_date", None)),
+                        ("default_start_date in config.json", config.get("default_start_date"))):
+        if value and site.calendar_date(value) != value:
+            print(f"{said} is not a date this can read. Use YYYY-MM-DD, a day that exists.")
+            raise SystemExit(2)
 
 
 def pilot_failed(progress: dict, docs) -> bool:
@@ -175,7 +188,7 @@ class Document:
                  href="", row_index=-1, confidence="", account="",
                  date_text="", document_id="", doc_type="", **kw):
         self.title = title
-        # One account is read, the Live one; nothing about it is written.
+        # One account is read, the Live one, and nothing about it is written.
         self.account = account
         # What binds the record to one row when it is taken: its type as the
         # list answered it, which is also what its row shows.
@@ -258,7 +271,7 @@ class App:
         cfg_path = Path(args.config) if getattr(args, "config", None) \
             else (PROJECT_DIR / "config.json")
         self.config = load_config(cfg_path)
-        ensure_owner(self.config, cfg_path)
+        check_start_dates(args, self.config)
         keep_owner_out_of_names(self.config)
         self.paths = Paths(Path(self.config["output_dir"]))
         self.paths.ensure()
@@ -288,8 +301,7 @@ class App:
         self._cdp_mode = False
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
-            "discovered": 0, "statements": 0, "tax_documents": 0,
-            "insurance_documents": 0,
+            "discovered": 0, "statements": 0,
             "other": 0, "skipped_completed": 0, "skipped_out_of_scope": 0,
             "manual_review": 0, "failed": 0, "duplicate_filenames": 0,
             "left_for_next_run": 0, "validation_failures": 0, "dates": [], "new_files": [],
@@ -383,7 +395,7 @@ class App:
             log.warning("the run's downloads could not be swept (%s)", type(e).__name__)
         try:
             if self._cdp_mode:
-                # Never close the user's own signed-in tab; just detach.
+                # Never close the user's own signed-in tab, just detach.
                 pass
             elif self._context:
                 self._context.close()
@@ -411,7 +423,7 @@ class App:
         except Exception:
             where = ""
         # A blank tab this run opened itself is where the site layer opens
-        # the documents page; anything else off app.alpaca.markets stops.
+        # the documents page, and anything else off app.alpaca.markets stops.
         if not site.is_safe_url(where) and not (tabs.is_own(page) and where in ("", "about:blank")):
             self.progress.save(backup=True)
             print("\n!! The browser tab left Alpaca, so this run stops.")
@@ -440,7 +452,7 @@ class App:
 
         A second account opens its own browser, on its own port, with its own
         saved session - so nothing is duplicated in the launcher scripts. You
-        sign in; the tool attaches afterwards.
+        sign in. The tool attaches afterwards.
         """
         port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9292")
         profile = self.config["profile_dir"]
@@ -543,6 +555,9 @@ class App:
         # the way reaches the boundary below and stops the run, rather than
         # a prompt to sign in again.
         self.check_session(page)
+        # The run's own start date, which the list must reach back to
+        # unless it holds the account's application (site.reaches_back).
+        self.run.floor = self.args.start_date or self.config.get("default_start_date") or None
         try:
             docs = site.collect_download_docs(page, self.run)
         except site.SessionExpired:
@@ -551,11 +566,21 @@ class App:
             self.not_live()
         except site.DeadlineReached:
             self.deadline_reached()
+        except site.ListTooShort as short:
+            # Running again would stop the same way: only a start date the
+            # list reaches lets it be called whole.
+            print("\n!! Alpaca's list of documents starts at "
+                  f"{short.start or 'a date it did not give'} and holds no account application,")
+            print("   so it may not reach back to your account's first documents, and this run")
+            print("   stops rather than call the list read. To take what the list holds, set")
+            print("   --start-date, or default_start_date in config.json, to that date or later.")
+            self.write_failure("read the documents list", "the list does not reach back to the account")
+            raise SystemExit(1)
         except site.ListStopped as stop:
             # What was listed is kept, and the listing stays noted as one
             # that stopped, so neither this run nor a Resume calls it whole.
             for r in stop.docs:
-                self._record_rawdoc(r, site.BILLING_URL)
+                self._record_rawdoc(r, site.DOCUMENTS_URL)
             self.discovery.save()
             print(f"\n!! The list of Alpaca statements and trade confirmations stopped partway, since {stop}.")
             print(f"   The {len(stop.docs)} document(s) listed before it stopped are kept,")
@@ -563,7 +588,7 @@ class App:
             self.write_failure("read the documents list", "the list stopped partway")
             raise SystemExit(1)
         for r in docs:
-            n_new += self._record_rawdoc(r, site.BILLING_URL)
+            n_new += self._record_rawdoc(r, site.DOCUMENTS_URL)
         self.discovery.save()
         log.info("documents page: %d documents, %d new", len(docs), n_new)
 
@@ -596,7 +621,9 @@ class App:
             for key, said in (("twins", "JSON copies of trade confirmations"),
                               ("applications", "account applications"),
                               ("tax", "tax forms, not collected yet"),
-                              ("other", "documents of a type this app does not know")):
+                              ("other", "documents of a type this app does not know"),
+                              ("alike", "documents sharing a type and date with another, "
+                                        "which a row cannot tell apart")):
                 if counts.get(key):
                     print(f"  Skipped, {said}: {counts[key]}")
         return n_new
@@ -626,7 +653,7 @@ class App:
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
                      State.NO_RECEIPT_AVAILABLE.value, State.CANCELED.value):
             return True
-        # a review copy counts only if its PDF is still present and valid;
+        # a review copy counts only if its PDF is still present and valid, and
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
@@ -754,7 +781,7 @@ class App:
         except site.DocumentTurnedOff:
             # Alpaca has turned this document's Download off for now, so
             # nothing was pressed. It is left as it was, recorded nowhere,
-            # and the next run takes it; this run goes on to the next one.
+            # and the next run takes it, and this run goes on to the next one.
             log.info("the %s dated %s is left for the next run: its Download is turned off",
                      doc.summary or "document", doc.date or "?")
             self.stats["left_for_next_run"] += 1
@@ -810,11 +837,7 @@ class App:
         self.stats["new_files"].append(str(out_path))
         if doc.date:
             self.stats["dates"].append(doc.date)
-        if doc.category == doc_types.TAX:
-            self.stats["tax_documents"] += 1
-        elif doc.category == doc_types.INSURANCE:
-            self.stats["insurance_documents"] += 1
-        elif doc.category == doc_types.STATEMENT:
+        if doc.category == doc_types.STATEMENT:
             self.stats["statements"] += 1
         else:
             self.stats["other"] += 1
@@ -1144,8 +1167,6 @@ class App:
             f"Documents known:           {s['discovered']}",
             f"NEW files this run:        {len(new_files)}",
             f"Statements downloaded:     {s['statements']}",
-            f"Tax documents downloaded:  {s['tax_documents']}",
-            f"Insurance docs downloaded: {s['insurance_documents']}",
             f"Other documents:           {s['other']}",
             f"Skipped (already done):    {s['skipped_completed']}",
             f"Skipped (out of scope):    {s['skipped_out_of_scope']}",
@@ -1209,7 +1230,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None):
     args = build_parser().parse_args(argv)
     for d in (args.start_date, args.end_date):
-        if d and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+        if d and site.calendar_date(d) != d:
             print(f"Bad date '{d}': use YYYY-MM-DD")
             return 2
     app = App(args)
