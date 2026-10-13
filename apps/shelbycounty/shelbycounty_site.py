@@ -438,7 +438,10 @@ def _press_next(page) -> bool:
     before = _rows(page)
     tabs = tabs_now(page)
     try:
-        pressing.click(page, loc.first, css=pressing.BUTTONS, what="the table's NEXT", words=_words(), timeout=8000)
+        # A NEXT turned off where the footer says more pages stops the run
+        # (core STOPS), since the rest of the list cannot be read.
+        pressing.click(page, loc.first, css=pressing.BUTTONS, what="the table's NEXT", words=_words(),
+                       step="page the table")
     except pressing.Stop:
         raise
     except Exception as e:
@@ -862,7 +865,16 @@ def _press_for_blob(page, control, label: str, out_path: Path, trace: Optional[l
     _arm_blob_hook(page)
     tabs = tabs_now(page)
     try:
-        pressing.click(page, control, css=css, what=label, words=_words(), timeout=8000)
+        pressing.click(page, control, css=css, what=label, words=_words(),
+                       step="press a document's print control")
+    except pressing.TurnedOff:
+        # One row's control turned off leaves that document for review and
+        # the run goes on to the next.
+        log.info("the print control is turned off on the page, so nothing was pressed and the "
+                 "document is left for review")
+        if trace is not None:
+            trace.append({"note": "print control turned off"})
+        return False
     except pressing.Stop:
         raise
     except Exception as e:
