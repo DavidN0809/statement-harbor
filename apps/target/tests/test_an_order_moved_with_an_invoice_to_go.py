@@ -144,8 +144,8 @@ DAMAGED = {
 }
 
 
-@pytest.mark.parametrize("damage", sorted(DAMAGED))
-def test_a_damaged_list_reads_as_none_and_stops_nothing(tmp_path, damage):
+@pytest.mark.parametrize("case", sorted(DAMAGED))
+def test_a_damaged_list_reads_as_none_and_stops_nothing(tmp_path, case):
     """A value that is not what the walk writes reads as none, as every
     record value does. An entry whose file is not text names no invoice, so
     that invoice is fetched again, and one with no place is known by its
@@ -155,7 +155,7 @@ def test_a_damaged_list_reads_as_none_and_stops_nothing(tmp_path, damage):
     saved_one_of_two(old)
     records = json.loads((old / "progress.json").read_text(encoding="utf-8"))
     rec = records["Online:" + ORDER]
-    entry, counted = DAMAGED[damage]
+    entry, counted = DAMAGED[case]
     if isinstance(entry, dict):
         if entry["file"] == SECOND_FILE:
             entry = dict(entry, file=str(old / "Invoices" / SECOND_FILE))
