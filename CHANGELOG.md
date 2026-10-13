@@ -13,7 +13,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **Costco receipts say which part of Costco they came from (#60).** A file
   name pattern's `{store}` gives Warehouse, Gas Station, Car Wash, or Gas
   and Car Wash, read off the heading Costco prints on each warehouse
-  receipt, or Online, Delivery and the like for an order. Every row on the
+  receipt, or Online for an order. Every row on the
   Warehouse tab says In-Warehouse, gas included, so the store was the list's
   word and told nothing apart. Rename reads it off the heading of each
   receipt already saved, asking nothing of Costco, and a preview leaves

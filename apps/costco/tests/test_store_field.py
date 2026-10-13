@@ -181,6 +181,83 @@ def test_the_list_never_brings_in_warehouse_back_over_a_store_read():
     assert app._listed_store(p) == "Car Wash", "a row read again keeps what its receipt said"
 
 
+@pytest.mark.parametrize("kind, store, read", [
+    (IN_STORE, "Gas Station", True), (IN_STORE, "Warehouse", True),
+    (IN_STORE, "In-Warehouse", False), (IN_STORE, "", False),
+    (IN_STORE, ["Gas Station"], False), (ONLINE, "Online", True)])
+def test_every_write_says_whether_its_store_was_read(monkeypatch, kind, store, read):
+    """A Download again of a receipt saved before reads its heading, and the
+    write that would have marked the store read is held while the old record
+    stands. The writes after it, PDF_VERIFIED and COMPLETED, had no mark, so
+    the store was forgotten (review of #60)."""
+    app = _run_app(monkeypatch, [])
+    purchase = _listed(kind, store, "1234567890" if kind == ONLINE else "wh-1")
+    app._record_state(purchase, State.PDF_VERIFIED, extra={"downloaded_ok": True})
+    assert app.progress.get(purchase.key)["store_read"] is read
+
+
+def test_a_download_again_leaves_the_store_marked_in_the_record_and_the_list(monkeypatch):
+    """A gas receipt saved before this field existed, its store the list's
+    In-Warehouse, downloaded again. While the old record is held the store
+    reaches neither, so both are told once the new copy is saved."""
+    app = _run_app(monkeypatch, GAS)
+    app._write_csv_rows = lambda *a, **kw: None
+
+    def saved(page, purchase):
+        purchase.pdf_filename = "2026-03-15 Costco Gas Station Receipt (2).pdf"
+        app._record_state(purchase, State.PDF_VERIFIED, extra={"downloaded_ok": True})
+        return True
+    app._save_receipt = saved
+    purchase = _listed()
+    old = dict(purchase.to_dict(), downloaded_ok=True, state=State.COMPLETED.value,
+               pdf_filename="2026-03-15 Costco Gas Station Receipt.pdf")
+    app.progress.update(purchase.key, dict(old))
+    app.discovery.update(purchase.key, dict(old))
+    with contextlib.redirect_stdout(io.StringIO()):
+        app.process_purchases([purchase], dry_run=False)
+    for rec in (app.progress.get(purchase.key), app.discovery.get(purchase.key)):
+        assert (rec["store_info"], rec["store_read"]) == ("Gas Station", True)
+
+
+def test_a_refused_receipt_keeps_no_store_from_the_dialog_it_refused(monkeypatch):
+    """The check found the receipt printed is another purchase's, so the
+    heading read off that dialog is not this purchase's either."""
+    app = _run_app(monkeypatch, GAS)
+    app.write_failure = lambda *a, **kw: None
+    app._write_csv_rows = lambda *a, **kw: None
+    purchase = _listed()
+    app.discovery.update(purchase.key, dict(purchase.to_dict()))
+    app._store_before = (purchase.key, "")
+    purchase.store_info = "Gas Station"
+    got = SimpleNamespace(say=lambda: "another purchase", outcome="wrong", mechanism="print")
+    with contextlib.redirect_stdout(io.StringIO()):
+        app._refused(purchase, got)
+    for rec in (app.progress.get(purchase.key), app.discovery.get(purchase.key)):
+        assert (rec["store_info"], rec["store_read"]) == ("", False)
+
+
+def test_a_store_kept_from_before_never_names_a_warehouse_receipt(monkeypatch):
+    """Only the dialog on screen names a warehouse receipt. One whose
+    heading this run cannot read keeps its store for {store}, and is named
+    by its items, not Gas Station from an earlier read."""
+    app = _run_app(monkeypatch, ["Receipt", "SPRINGFIELD #1234", "E 123456 KS PAPER TOWELS 19.99 Y"])
+    purchase = _listed()
+    app.progress.update(purchase.key, {"purchase_type": IN_STORE, "store_info": "Gas Station",
+                                       "store_read": True})
+    _process(app, purchase)
+    assert purchase.store_info == "Gas Station"
+    assert purchase.summary != "Gas Station"
+
+
+def test_a_store_that_is_not_text_never_stops_an_online_order():
+    """A damaged discovery.json reached summary_from_kind on Resume, which
+    raised, and the order was recorded failed on every run."""
+    app = object.__new__(app_mod.App)
+    app.progress, app.discovery = _Store(), _Store()
+    assert app._listed_store(_listed(ONLINE, ["Travel"], "1234567890")) == ""
+    assert site.summary_from_kind(["Travel"]) == "" and site.summary_from_kind(None) == ""
+
+
 ROW = {"purchaseType": "WAREHOUSE", "href": "", "createdDateTime": "2026-03-15",
        "total": "$36.96", "status": "", "where": "SPRINGFIELD", "index": 0,
        "cardText": "In-Warehouse 03/15/2026 SPRINGFIELD Total $36.96 View Receipt"}

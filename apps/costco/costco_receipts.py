@@ -601,12 +601,15 @@ class App:
 
         # ---- extract ----
         purchase = site.extract_details(page, purchase)
+        # What the purchase had before this dialog was read, for a refusal
+        # to put back, since a dialog the check refuses is not this
+        # purchase's and neither is the store read off it.
+        self._store_before = (purchase.key, purchase.store_info)
         if purchase.purchase_type == IN_STORE:
             # The heading names the part of Costco, Warehouse or Gas
             # Station and the like, which no row on the list does (#60).
             purchase.store_info = site.receipt_store(page) or purchase.store_info
-        self._record_state(purchase, State.DETAILS_EXTRACTED,
-                           extra={"store_read": bool(purchase.store_info)})
+        self._record_state(purchase, State.DETAILS_EXTRACTED)
         self._note_store(purchase)
         if purchase.purchase_date:
             self.stats["dates_processed"].append(purchase.purchase_date)
@@ -619,8 +622,12 @@ class App:
         # Every row on the Warehouse tab is typed as a warehouse visit,
         # gas included, so the row cannot say it and the receipt's own
         # heading is what does.
-        told = (site.summary_from_kind(purchase.store_info)
-                or site.receipt_kind(page))
+        # Only the dialog on screen names a warehouse receipt, never a
+        # store kept from an earlier read (review of #60). An online order
+        # has no dialog, and the list's word for it can name it, Travel or
+        # Photo.
+        told = (site.receipt_kind(page) if purchase.purchase_type == IN_STORE
+                else site.summary_from_kind(purchase.store_info))
         purchase.summary = told or cls.summary
         purchase.confidence = classification.HIGH if told else cls.confidence
         review_needed = (not told) and cls.confidence == classification.LOW
@@ -659,6 +666,10 @@ class App:
         final_state = State.NEEDS_MANUAL_REVIEW if review_needed else State.COMPLETED
         self._record_state(purchase, final_state,
                            notes=("Low classification confidence" if review_needed else ""))
+        # Once a copy of its own is saved, a Download again of a receipt
+        # saved before tells the list its store too, which it could not
+        # while the old record was held (review of #60).
+        self._note_store(purchase)
         if review_needed:
             self.stats["manual_review"] += 1
             # Saved under a name it was unsure of, which Review Names
@@ -806,7 +817,11 @@ class App:
         produced a document belonging to a different purchase is a run
         whose other documents are now also in doubt."""
         why = "the receipt that printed is not this purchase"
+        key, before = getattr(self, "_store_before", (None, ""))
+        if key == purchase.key:
+            purchase.store_info = before
         self._record_state(purchase, State.NEEDS_MANUAL_REVIEW, notes=why)
+        self._note_store(purchase)
         self._write_csv_rows(purchase, receipt_status="Wrong document",
                              processing_status=State.NEEDS_MANUAL_REVIEW.value,
                              notes_extra=why)
@@ -916,6 +931,10 @@ class App:
         if notes:
             purchase.notes = (purchase.notes + "; " if purchase.notes else "") + notes
         rec = purchase.to_dict()
+        # Every write says whether its store was read, so a later write,
+        # PDF_VERIFIED or COMPLETED after a held DETAILS_EXTRACTED, never
+        # leaves a store read off a receipt unmarked (review of #60).
+        rec["store_read"] = self._store_is_read(purchase)
         if extra:
             rec.update(extra)
         not_shown.let_go_on_save(self, purchase, state, rec)
@@ -1152,13 +1171,23 @@ class App:
                 return info.strip()
         return ""
 
+    def _store_is_read(self, purchase: Purchase) -> bool:
+        """Whether a purchase's store is one to keep. An online order's
+        list word, or a store only a warehouse receipt's heading can give,
+        never the list's In-Warehouse."""
+        info = purchase.store_info
+        if not isinstance(info, str) or not info.strip():
+            return False
+        return purchase.purchase_type == ONLINE or info.strip() in site.WAREHOUSE_STORES
+
     def _listed_store(self, purchase: Purchase) -> str:
         """The store a row read off the list gives its purchase. The list
         names an online order's kind, and never the part of a warehouse a
         receipt came from, so a warehouse receipt keeps the one read off
         it, or none."""
         if purchase.purchase_type == ONLINE:
-            return purchase.store_info or ""
+            info = purchase.store_info
+            return info.strip() if isinstance(info, str) else ""
         return self._store_kept(purchase.key)
 
     def _forget_unread_store(self, purchase: Purchase) -> None:

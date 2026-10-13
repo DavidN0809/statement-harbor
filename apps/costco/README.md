@@ -178,7 +178,7 @@ heading.
 | Gas Station Receipt | Gas Station |
 | Car Wash Receipt | Car Wash |
 | Gas and Car Wash Receipt | Gas and Car Wash |
-| an online order | Online, or Costco's own word, Delivery and the like |
+| an online order | Online |
 
 A receipt saved before this was read gets its store at Rename, read off the
 heading of its own PDF, with nothing asked of Costco. A heading this does

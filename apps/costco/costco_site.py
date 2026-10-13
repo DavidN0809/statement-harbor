@@ -381,7 +381,7 @@ def summary_from_kind(store_info: str) -> str:
     Gas Station Receipt across the top. The API's purchaseType is not a
     guess. Empty for the kinds that describe a place rather than a
     purchase, which are left to the classifier (#47)."""
-    label = (store_info or "").strip()
+    label = store_info.strip() if isinstance(store_info, str) else ""
     return label if label in SELF_DESCRIBING else ""
 
 
@@ -1337,7 +1337,7 @@ _KIND_HEADING_RE = re.compile(
 _KIND_BY_HEADING = {"inwarehouse": "Warehouse", "gasandcarwash": "Gas and Car Wash",
                     "gasstation": "Gas Station", "carwash": "Car Wash"}
 # Every store a warehouse receipt can be given, so a store written by an
-# older version, "In-Warehouse" from the list, is told apart from one read.
+# older version, "In-Warehouse" from the list, is never marked as read.
 WAREHOUSE_STORES = frozenset(_KIND_BY_HEADING.values())
 # Where the heading sits, counted in lines that have something on them.
 # A few, because a Close control can come before it in the dialog's text.
