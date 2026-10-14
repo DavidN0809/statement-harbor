@@ -161,7 +161,7 @@ about PaperPull. Questions about these terms go to support@paperpull.net.
 PaperPull is made for people collecting their own records. It works only
 through a browser its user signs into, it reads only what that signed-in
 user can already see, and it stops at every sign-in step and security check
-for the user to handle. It never stores passwords, never answers a check
+for the user to handle. It never stores account passwords, never answers a check
 for the user, and never moves money or changes anything in an account.
 
 If you run a website PaperPull works with and object to it, write to
