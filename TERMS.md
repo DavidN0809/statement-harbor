@@ -31,8 +31,8 @@ other providers in a browser on your own computer or your own server. You
 sign in yourself, in that browser. PaperPull then reads the pages your
 account can already see and saves the documents the provider offers there,
 such as statements, bills and receipts, as files you keep. It can also read
-those files into spreadsheets. PaperPull never asks for your passwords,
-does not run on our computers, and does not send your documents or account
+those files into spreadsheets. PaperPull never asks for the passwords to
+your accounts, does not run on our computers, and does not send your documents or account
 details to us.
 
 ## 3. Your accounts and the providers' rules
