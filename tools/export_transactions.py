@@ -49,7 +49,7 @@ from typing import Dict, List, Optional, Tuple
 
 INDEX_SUFFIX = " Document Index.csv"
 CACHE_NAME = ".transactions-cache.json"
-CACHE_VERSION = 5      # 2: the index date drives the year, #29. 3: split decimals, empty brackets, #32. 4: sidebar bleed, neighbor descriptions. 5: dates checked against the period
+CACHE_VERSION = 7      # 2: the index date drives the year, #29. 3: split decimals, empty brackets, #32. 4: sidebar bleed, neighbor descriptions. 5: dates checked against the period. 6: credits signed by their heading, #32. 7: scattered lines rebuilt, #32
 
 # -- shapes -----------------------------------------------------------------------
 _MON = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?"
@@ -89,8 +89,22 @@ NOT_A_TRANSACTION = re.compile(
 PERIOD_RE = re.compile(
     r"(?:statement\s+period|billing\s+period|opening\s*/\s*closing\s+dates?|period|for the period|from)\s*:?\s*"
     r"(" + _DATE_ANY + r")\s*(?:to|-|–|—|through|thru)\s*(" + _DATE_ANY + r")", re.I)
-CLOSING_RE = re.compile(r"(?:closing\s+date|statement\s+date|statement\s+closing\s+date|as of)\s*:?\s*(" + _DATE_ANY + r")", re.I)
+# The labels tolerate a stray space inside a word, which is how a line
+# rebuilt from scattered characters reads ("Statement Clos ing Date09/13").
+CLOSING_RE = re.compile(r"(?:" + "|".join(_fuzzy(w) for w in ("closing date", "statement date",
+                                                              "statement closing date"))
+                        + r"|as of)\s*:?\s*(" + _DATE_ANY + r")", re.I)
 _ANY_DATE_RE = re.compile(_DATE_ANY, re.I)
+# A card statement that prints every amount unsigned tells a payment or a
+# refund from a purchase only by the heading it sits under (Navy Federal's
+# Visa, #32). The heading is a line of its own, and its section runs until
+# its total, the next TRANSACTIONS heading, or another section's heading.
+CREDITS_HEADING = re.compile(r"^\s*" + _fuzzy("payments and") + r"(?:\s+" + _fuzzy("other") + r")?\s+"
+                             + _fuzzy("credits") + r"\s*$", re.I)
+CREDITS_END = re.compile(r"^\s*(?:" + _fuzzy("total") + r"\b|" + _fuzzy("transactions") + r"\s*$|"
+                         + "|".join(_fuzzy(w) + r"\b" for w in ("purchases", "fees", "interest charged",
+                                                                  "cash advances", "balance transfers"))
+                         + r")", re.I)
 _MONTHS = {m: i + 1 for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
 
@@ -387,10 +401,43 @@ def _one_amount(amounts: List[Optional[float]], tokens: Optional[List[str]] = No
     return real[0] if real else 0.0
 
 
+def credit_rows(lines: List[str]) -> set:
+    """The indexes of the lines that sit under a PAYMENTS AND CREDITS
+    heading, from the heading to its total or the next heading. A section
+    the page break cut carries on when the heading is printed again."""
+    out, inside = set(), False
+    for i, line in enumerate(lines):
+        if CREDITS_HEADING.match(line):
+            inside = True
+            continue
+        if inside and CREDITS_END.match(line):
+            inside = False
+            continue
+        if inside:
+            out.add(i)
+    return out
+
+
+def _signs_from_headings(txns: List[dict]) -> Optional[List[float]]:
+    """Signed amounts for a card statement that prints none, a row under a
+    PAYMENTS AND CREDITS heading taken off the balance and every other row
+    added to it. None unless the statement is that kind, every amount
+    printed unsigned and at least one row under the heading."""
+    if not any(t.get("under_credits") for t in txns):
+        return None
+    if any(a is not None and a < 0 for t in txns for a in t["amounts"]):
+        return None
+    printed = [t["amounts"][0] if len(t["amounts"]) == 1 else _one_amount(t["amounts"], t.get("tokens"))
+               for t in txns]
+    return [-abs(a) if t.get("under_credits") else abs(a) for t, a in zip(txns, printed)]
+
+
 def _reconcile(txns: List[dict], begins: List[float], ends: List[float]) -> dict:
     """Signed amounts for these transactions and whether they add up, from
     the candidate balances. Tries a running balance column first, then the
-    amounts as printed against every begin/end pair."""
+    amounts as printed against every begin/end pair, then, for a card that
+    prints no signs, the signs its headings give (_signs_from_headings),
+    which count only when they add up to the cent."""
     if not txns:
         if begins and ends and any(abs(b - e) < 0.005 for b in begins for e in ends):
             return {"signed": [], "beginning": begins[0], "ending": ends[-1], "balances": [],
@@ -412,6 +459,14 @@ def _reconcile(txns: List[dict], begins: List[float], ends: List[float]) -> dict
             if abs(round(b + total, 2) - e) < 0.005:
                 return {"signed": printed, "beginning": b, "ending": e, "balances": [],
                         "status": "reconciled, signed amounts"}
+    headed = _signs_from_headings(txns)
+    if headed is not None:
+        headed_total = round(sum(headed), 2)
+        for b in begins:
+            for e in ends:
+                if abs(round(b + headed_total, 2) - e) < 0.005:
+                    return {"signed": headed, "beginning": b, "ending": e, "balances": [],
+                            "status": "reconciled, signs from the statement's headings"}
     out = {"signed": printed, "beginning": None, "ending": None, "balances": []}
     if begins and ends:
         out["beginning"], out["ending"] = begins[-1], ends[-1]
@@ -452,6 +507,9 @@ def parse_statement(lines: List[str], doc_date: Optional[str] = None) -> dict:
     year_hint = int(anchor[:4]) if anchor else None
     end_ym = (int(anchor[:4]), int(anchor[5:7])) if anchor else None
     txns = read_transactions(lines, year_hint, end_ym)
+    credits = credit_rows(lines)
+    for t in txns:
+        t["under_credits"] = t["line"] in credits
     marks = []                               # (line index, kind, value)
     read = {t["line"] for t in txns}
     for i, line in enumerate(lines):
@@ -589,6 +647,55 @@ def _bracketed_sections(txns: List[dict], marks: List[tuple]) -> Optional[List[d
 
 # -- PDFs, the index, the cache --------------------------------------------------
 
+# A page that comes out with this many lines of one or two characters has
+# a block whose characters sit at jittered heights, and pdfplumber breaks
+# each of its lines into a column of single characters. A Navy Federal Visa
+# statement's summary box did, and its closing date was lost with it (#32).
+SCATTER_MIN = 20
+# How far apart in height two characters of one rebuilt line may sit.
+BAND_PT = 4.0
+
+
+def _band_lines(chars: List[dict]) -> List[Tuple[float, str]]:
+    """Characters grouped into lines by height, each read left to right, a
+    space where the gap is wider than a quarter of a character. Returns
+    (top, text) for each line."""
+    out: List[Tuple[float, str]] = []
+    band: List[dict] = []
+    for c in sorted(chars, key=lambda c: c["top"]):
+        if band and c["top"] - band[0]["top"] > BAND_PT:
+            out.append(_band_text(band))
+            band = []
+        band.append(c)
+    if band:
+        out.append(_band_text(band))
+    return out
+
+
+def _band_text(band: List[dict]) -> Tuple[float, str]:
+    text, prev = "", None
+    for c in sorted(band, key=lambda c: c["x0"]):
+        if prev is not None and c["x0"] - prev["x1"] > max(1.0, 0.25 * (prev["x1"] - prev["x0"])):
+            text += " "
+        text += c.get("text", "")
+        prev = c
+    return min(c["top"] for c in band), re.sub(r"\s+", " ", text).strip()
+
+
+def page_lines(text_lines: List[dict]) -> List[str]:
+    """A page's lines as pdfplumber read them, with any block it scattered
+    into single characters rebuilt from those characters. Every line it
+    read whole is kept exactly as it was, and the rebuilt ones are put
+    back in their place by height."""
+    short = {i for i, tl in enumerate(text_lines) if len((tl.get("text") or "").strip()) <= 2}
+    if len(short) < SCATTER_MIN:
+        return [tl["text"] for tl in text_lines]
+    chars = [c for i in sorted(short) for c in (text_lines[i].get("chars") or [])]
+    kept = [(tl["top"], n, tl["text"]) for n, tl in enumerate(text_lines) if n not in short]
+    rebuilt = [(top, len(text_lines) + n, txt) for n, (top, txt) in enumerate(_band_lines(chars))]
+    return [txt for _, _, txt in sorted(kept + rebuilt)]
+
+
 def pdf_lines(path: Path) -> List[str]:
     import logging
     logging.getLogger("pdfminer").setLevel(logging.ERROR)
@@ -597,8 +704,8 @@ def pdf_lines(path: Path) -> List[str]:
     with pdfplumber.open(str(path)) as pdf:
         for page in pdf.pages:
             try:
-                for tl in page.extract_text_lines(layout=False, strip=True, return_chars=False):
-                    lines.append(tl["text"])
+                lines.extend(page_lines(page.extract_text_lines(layout=False, strip=True,
+                                                                return_chars=True)))
             except Exception:
                 text = page.extract_text() or ""
                 lines.extend(text.splitlines())

@@ -129,6 +129,28 @@ to the Capital One app, so Discover counts as supported.
   the same, and Discover counts as supported, so sixty providers are
   supported and seven wait for a tester.
 
+### Fixed
+- **The transaction export reconciles card statements that print no signs
+  (#32).** A Navy Federal Visa statement prints every amount unsigned and
+  tells a payment or a refund from a purchase only by the PAYMENTS AND
+  CREDITS heading above it, so the export summed everything as a charge
+  and called the statement not reconciled. Rows under that heading, which
+  can carry on after a page break, are now taken off the balance and the
+  rest added to it. That reading is used only for a statement that prints
+  no sign anywhere, and only when it adds up to the cent against the
+  statement's own balances. Every statement is read again once, since the
+  saved readings came from the old rule. Thanks to @dertbv for the sample
+  lines.
+- **The transaction export finds a statement period that pdfplumber
+  scattered (#32).** On a Navy Federal Visa statement the summary box's
+  characters sit at slightly different heights, and pdfplumber read each
+  of its lines as a column of single characters, so the Statement Closing
+  Date was lost and Period Start and Period End came out blank. A page
+  that comes out that way has those characters put back into lines by
+  height, while every line read whole stays exactly as it was, and the
+  closing date label now allows a stray space inside a word. Thanks to
+  @dertbv for working out what pdfplumber was doing.
+
 ## [0.49.0] - 2026-10-12
 
 Review names comes to the control panel, so PaperPull Server, which has no

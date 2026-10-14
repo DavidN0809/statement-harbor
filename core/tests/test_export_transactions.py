@@ -461,3 +461,147 @@ def test_the_cache_version_moved_with_the_shape_of_a_parse():
     """The cache is keyed on path, size and mtime, so an old parse survives
     a change to the parser and hides it. #32 said so explicitly."""
     assert xt.CACHE_VERSION >= 5
+
+
+# A Navy Federal Visa statement as pdfplumber reads it (#32), every value
+# made up. No amount is signed, a payment or refund is told from a purchase
+# only by the PAYMENTS AND CREDITS heading above it, the heading comes back
+# after the page break with a refund under it, the Submitted By column
+# wraps the merchant's town onto a line of its own, and there is no running
+# balance column.
+NFCU_VISA = """Closing Date 09/15/26
+Previous Balance $2,500.00
+New Balance $46.77
+TRANSACTIONS
+PAYMENTS AND CREDITS
+Trans Date Post Date Reference No. Description Submitted By Amount
+08/16/26 08/16/26 70000000000000000000001 NFO PAYMENT RECEIVED xxxx xxxx xxxx 0000 $1,482.17
+08/21/26 08/22/26 70000000000000000000002 EXAMPLE HARDWARE 000001* ANYTOWN xxxx xxxx xxxx 0000 $214.60
+VA
+08/30/26 08/30/26 70000000000000000000003 NFO PAYMENT RECEIVED xxxx xxxx xxxx 0000 $1,105.00
+TRANSACTIONS
+PAYMENTS AND CREDITS
+Trans Date Post Date R eference No. Description Submitted By Amount
+09/02/26 09/03/26 70000000000000000000004 EXAMPLE AI PLAN xxxx xxxx xxxx 0000 $19.99
+SOMETOWN CA
+TOTAL PAYMENTS AND CREDITS $2,821.76
+TRANSACTIONS
+PAT EXAMPLE xxxx xxxx xxxx 0000
+Trans Date Post Date Reference No. Description Amount
+08/14/26 08/15/26 20000000000000000000005 WAREHOUSE CLUB 00001 ANYTOWN VA $312.45
+08/15/26 08/17/26 20000000000000000000006 EXAMPLE MART T-0001 ANYTOWN VA $56.08
+""".splitlines()
+
+
+def test_a_card_that_signs_nothing_reconciles_by_its_credits_heading():
+    s = xt.parse_statement(NFCU_VISA)
+    assert s["status"] == "reconciled, signs from the statement's headings"
+    assert (s["beginning"], s["ending"]) == (2500.00, 46.77)
+    assert [t["amount"] for t in s["transactions"]] == [
+        -1482.17, -214.60, -1105.00, -19.99, 312.45, 56.08]
+    # The wrapped town is not a transaction of its own.
+    assert len(s["transactions"]) == 6
+
+
+def test_the_credits_section_carries_over_the_page_break_and_ends_at_its_total():
+    under = xt.credit_rows(NFCU_VISA)
+    lines = {NFCU_VISA[i] for i in under}
+    assert any("NFO PAYMENT" in line for line in lines)
+    assert any("EXAMPLE AI PLAN" in line for line in lines)
+    assert not any("WAREHOUSE CLUB" in line or "EXAMPLE MART" in line for line in lines)
+    assert not any(line.startswith("TOTAL") for line in lines)
+
+
+def test_headings_never_sign_a_statement_that_does_not_add_up_with_them():
+    # The same rows with the balances off by a dollar stay not reconciled,
+    # with the amounts as printed, rather than a guess.
+    off = [line.replace("New Balance $46.77", "New Balance $47.77") for line in NFCU_VISA]
+    s = xt.parse_statement(off)
+    assert s["status"].startswith("not reconciled")
+    assert all(t["amount"] > 0 for t in s["transactions"])
+    # Without the heading there is nothing to sign by.
+    bare = [line for line in NFCU_VISA if "PAYMENTS AND CREDITS" not in line or line.startswith("TOTAL")]
+    assert xt.parse_statement(bare)["status"].startswith("not reconciled")
+
+
+def test_a_statement_that_prints_signs_is_never_signed_by_its_headings():
+    # CHASE_CARD prints PAYMENTS AND OTHER CREDITS with signed amounts, and
+    # keeps reconciling on the signs as printed.
+    s = xt.parse_statement(CHASE_CARD)
+    assert s["status"].startswith("reconciled") and "headings" not in s["status"]
+
+
+def test_the_cache_is_read_again_for_the_heading_signs():
+    assert xt.CACHE_VERSION >= 6
+
+
+def test_the_navy_federal_summary_box_reads_its_balances_and_signs_nothing():
+    """The Visa's summary box as pdfplumber prints it (#32, values made up):
+    both balances on one line with the box's words glued on, Payments and
+    Other Credits printed signed, a split decimal, and, as on a September
+    statement, no closing date line at all, so the index date is the
+    anchor. The signed summary lines are not transactions and do not stop
+    the heading signs."""
+    box = ["Previous Balance $2,500.0 0 New Balance $46.77 Go Paperless",
+           "Payments -$2,587.17 Minimum Pay ment Due $25.00 Access up to 24 months of",
+           "Other Cred its -$234.59 Payment Due Date 10/07/2026",
+           "New Balance $46.77"]
+    body = [line for line in NFCU_VISA[3:]]
+    s = xt.parse_statement(box + body, "2026-09-15")
+    assert (s["beginning"], s["ending"]) == (2500.00, 46.77)
+    assert s["status"] == "reconciled, signs from the statement's headings"
+    assert len(s["transactions"]) == 6
+
+
+def _line(text, top, x0=40.0):
+    """A line as pdfplumber's extract_text_lines gives it, one char per
+    letter, 5 points wide."""
+    chars = [{"text": ch, "x0": x0 + 5 * i, "x1": x0 + 5 * i + 4.5, "top": top}
+             for i, ch in enumerate(text)]
+    return {"text": text, "top": top, "chars": chars}
+
+
+def _scattered(text, top, x0=300.0):
+    """The same line as pdfplumber scatters it when its characters sit at
+    jittered heights, one line per character (#32)."""
+    jitter = [0.0, 1.6, 0.4, 2.9, 1.1, 2.2, 0.7, 3.1]
+    out = []
+    for i, ch in enumerate(text):
+        if ch == " ":
+            continue
+        c = {"text": ch, "x0": x0 + 5 * i, "x1": x0 + 5 * i + 4.5, "top": top + jitter[i % len(jitter)]}
+        out.append({"text": ch, "top": c["top"], "chars": [c]})
+    return out
+
+
+def test_a_block_scattered_into_single_characters_is_rebuilt():
+    """A Navy Federal Visa summary box came out of pdfplumber as some 200
+    lines of one or two characters, and the Statement Closing Date line
+    went with it, so the statement had no period (#32). The scattered
+    characters are put back into lines by height, and every line read
+    whole is kept as it was, in its place."""
+    tls = ([_line("Credit Limit $9,000.00", 100.0)]
+           + _scattered("Statement Closing Date 09/13/2026", 120.0)
+           + _scattered("Payment Due Date 10/07/2026", 140.0)
+           + [_line("Days in Billing Cycle 31", 160.0)])
+    assert sum(1 for tl in tls if len(tl["text"]) <= 2) >= xt.SCATTER_MIN
+    lines = xt.page_lines(tls)
+    assert lines == ["Credit Limit $9,000.00", "Statement Closing Date 09/13/2026",
+                     "Payment Due Date 10/07/2026", "Days in Billing Cycle 31"]
+    assert xt.find_period(lines) == (None, "2026-09-13")
+
+
+def test_a_page_read_whole_is_left_exactly_as_pdfplumber_gave_it():
+    tls = [_line("Previous Balance $2,500.00", 100.0), _line("A", 110.0), _line("B", 118.0),
+           _line("08/16/26 NFO PAYMENT RECEIVED $1,482.17", 130.0)]
+    assert xt.page_lines(tls) == [tl["text"] for tl in tls]
+
+
+def test_a_closing_date_label_with_a_stray_space_is_still_read():
+    assert xt.find_period(["Statement Clos ing Date09/13/2026"]) == (None, "2026-09-13")
+    assert xt.find_period(["Statement Closing Date 08/13/2026", "Days in Billing Cycle 31"]) == (
+        None, "2026-08-13")
+
+
+def test_the_cache_is_read_again_for_the_rebuilt_lines():
+    assert xt.CACHE_VERSION >= 7
