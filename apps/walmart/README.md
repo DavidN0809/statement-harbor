@@ -13,13 +13,13 @@ CAPTCHAs or security checks.
 
 ## How Walmart differs from a normal run
 
-Walmart uses aggressive bot detection (PerimeterX "Robot or human?"). An
-automation-launched browser cannot pass it. So this tool does **not** launch
-its own browser, instead it **connects to an ordinary Chromium that YOU sign
-into**, over the DevTools protocol (`cdp_url` in `config.json`). A real human
-signs in to a real browser (no stealth, no evasion); the tool only reads the
-pages you are authorized to see. Because the browser is launched normally,
-`navigator.webdriver` is false and Walmart treats it as a human session.
+Walmart's site does not work in the browser build that Playwright installs,
+where it shows its "Robot or human?" check without end. So this tool does
+**not** launch its own browser. Instead it **connects to an ordinary browser
+that YOU open and sign into**, over the DevTools protocol (`cdp_url` in
+`config.json`). You sign in yourself and answer any check Walmart shows
+yourself (no stealth, no evasion), and the tool only reads the pages you are
+authorized to see.
 
 Consequence: **the signed-in browser window must stay OPEN the whole time**
 the tool runs. Closing it signs you out (Walmart uses in-memory session

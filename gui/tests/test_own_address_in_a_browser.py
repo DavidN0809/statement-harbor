@@ -88,6 +88,9 @@ def shop(tmp_path, monkeypatch):
     tmp_path."""
     for name in ("APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME"):
         monkeypatch.setenv(name, str(tmp_path / "settings"))
+    # Somebody who has accepted the terms, so the dialog the panel shows the
+    # first time it opens does not stand over what these tests press.
+    app_module._write_settings({"terms_accepted": app_module.TERMS_VERSION})
     monkeypatch.setenv("APPS_ROOT", str(tmp_path / "apps"))
     monkeypatch.setenv("PAPERPULL_CONFIG", str(tmp_path / "config"))
     for name in ("PAPERPULL_SERVER", "PAPERPULL_PASSWORD", "PAPERPULL_HOSTS"):

@@ -300,8 +300,8 @@ class App:
         saved session - so nothing is duplicated in the launcher scripts. You
         sign in; the tool attaches afterwards.
         """
-        # This provider's bot protection fingerprints the Playwright Chromium
-        # build as automation, so a real branded browser is tried first.
+        # This provider's site does not work in the Playwright Chromium
+        # build, so the person's own installed browser is tried first.
         port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9224")
         profile = self.config["profile_dir"]
         url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]

@@ -9,7 +9,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Terms of Use.** TERMS.md, also at paperpull.net/terms.html, says what
+  PaperPull does and does not promise, disclaims warranties, limits
+  liability, and takes away nothing the AGPL gives. The control panel, on
+  the desktop and on PaperPull Server, shows a short summary the first time
+  it opens and again whenever the terms change, and goes on once I
+  understand is pressed. The answer is kept in the panel's settings file,
+  so the server asks once for the box. The apps' own commands do not ask.
+  Every package carries TERMS.md, and the panel's About card links the
+  terms.
+
 ### Changed
+- **How the browser choice is described.** The Walmart, Amazon, Verizon,
+  Anthem and Chase apps say plainly why they sign in through the person's
+  own installed browser, which is that those sites do not work in the
+  browser build Playwright installs. Nothing about how they run changed.
 - **PaperPull is published by TNE Enterprises LLC.** PaperPull is a trade
   name of TNE Enterprises LLC, a Virginia company, which now holds the
   PaperPull name and the copyright notice. NOTICE.md, TRADEMARK.md and the

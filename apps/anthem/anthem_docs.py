@@ -330,10 +330,10 @@ class App:
         port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9242")
         profile = self.config["profile_dir"]
         url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]
-        # prefer_real=True: anthem.com runs Akamai Bot Manager, which fingerprints
-        # the bundled Playwright Chromium. A real branded Chrome/Edge with a
-        # persistent profile (where the MFA remember-device cookie lives) is the
-        # posture that passes; the app only ever attaches to it passively.
+        # prefer_real=True, since anthem.com does not work in the bundled
+        # Playwright Chromium. The person's own Chrome or Edge, with a
+        # persistent profile where the MFA remember-device cookie lives, does,
+        # and the app only ever attaches to it passively.
         name = browser_launcher.open_signin_browser(profile, port, url,
             prefer_real=True,
             mode=self.config.get("browser", "auto"))

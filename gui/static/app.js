@@ -4,6 +4,11 @@
 'use strict';
 // PaperPull Server, where the panel is in a browser on another computer.
 const SERVER = __SERVER__;
+// Whether the terms of use are still to be accepted, and which version
+// (gui/app.py). Read as text, so a page served with the placeholders left
+// as they are does not ask.
+const TERMS_DUE = '__TERMS_DUE__' === 'true';
+const TERMS_VERSION = '__TERMS_VERSION__';
 const $ = id => document.getElementById(id);
 
 function esc(s) {
@@ -1904,6 +1909,7 @@ const DO = {
   'rv-go': () => rvGo(),
   'sp-go': () => { $('dlg-support').close(); startRun(DLG_ROW, 'diagnose'); },
   'rc-go': () => { $('dlg-record').close(); startRun(DLG_ROW, 'record'); },
+  'tm-go': () => tmGo(),
   'dock-close': () => closeDock(),
   'dismiss-notice': () => notice('', ''),
   'open-sample': () => setSample(true),
@@ -1990,7 +1996,25 @@ function serverPage() {
     openDock(RUN.state === 'running' ? RUN.provider : '');
   });
 }
+// The terms of use, the first time the panel opens and again when they
+// change. Only I understand ends the dialog. Escape, or anything else that
+// closes it, brings it straight back. Once pressed the page goes on, and an
+// answer that could not be saved is said, so the terms come back next time.
+let TERMS_OK = !TERMS_DUE;
+function openTerms() {
+  const d = $('dlg-terms');
+  d.addEventListener('cancel', e => e.preventDefault());
+  d.addEventListener('close', () => { if (!TERMS_OK) d.showModal(); });
+  d.showModal();
+}
+async function tmGo() {
+  TERMS_OK = true;
+  $('dlg-terms').close();
+  try { await postJSON('/api/terms', {accepted: TERMS_VERSION}); }
+  catch (e) { notice('Your answer to the terms could not be saved, so they will be shown again next time. ' + e.message, 'warn'); }
+}
 applyTheme();
 serverPage();
 placeMove(false);
 load();
+if (TERMS_DUE) openTerms();

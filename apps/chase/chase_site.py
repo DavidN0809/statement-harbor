@@ -17,12 +17,12 @@ SAFETY (this is a credit-card account):
   Dropdowns are controls too - see MONEY_CONTROL_RE - and there is deliberately
   no code here that submits a form or confirms a dialog.
 
-A REAL BROWSER, ALWAYS: Chase runs bot protection that fingerprints the
-Playwright Chromium build. `cmd_open_browser` asks for an installed Edge or
-Chrome (prefer_real=True), like the Walmart and Verizon apps. This is not only
-about whether a page loads: a tripped bot check on a bank can mean a step-up
+A REAL BROWSER, ALWAYS: Chase's site does not work in the Playwright Chromium
+build. `cmd_open_browser` asks for an installed Edge or Chrome
+(prefer_real=True), like the Walmart and Verizon apps. This is not only about
+whether a page loads. A security check on a bank can mean a step-up
 verification loop or a temporary lock on a real account, so nothing here ever
-touches Chase from an obviously-automated browser.
+touches Chase from the bundled automation browser.
 
 WHAT THE LIVE PROBE ESTABLISHED (2026-08-18):
   * The document center is

@@ -17,7 +17,7 @@ control panel.
 
 ## A real browser, always
 
-Chase runs bot protection that fingerprints the Playwright Chromium build, so
+Chase's site does not work in the browser build Playwright installs, so
 `login` asks for an installed **Edge or Chrome** (`prefer_real=True`), like the
 Walmart and Verizon apps.
 
