@@ -25,14 +25,6 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Anthem and Chase apps say plainly why they sign in through the person's
   own installed browser, which is that those sites do not work in the
   browser build Playwright installs. Nothing about how they run changed.
-- **PaperPull is published by TNE Enterprises LLC.** PaperPull is a trade
-  name of TNE Enterprises LLC, a Virginia company, which now holds the
-  PaperPull name and the copyright notice. NOTICE.md, TRADEMARK.md and the
-  README say so, the Windows installer lists TNE Enterprises LLC as its
-  publisher in Installed apps, and the Mac app and the PaperPull Server
-  image carry the same name. The license is unchanged, AGPL-3.0, and
-  contributors keep the copyright in what they wrote. The code signature
-  still names Bryan Rhee until the signing certificate changes.
 
 ### Fixed
 - **An app in a source checkout follows the checkout's core again.** Before
