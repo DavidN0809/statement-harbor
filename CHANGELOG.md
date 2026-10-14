@@ -59,6 +59,27 @@ All notable changes to PaperPull are recorded here. Versioning follows
   window", since the browser that opens depends on the app and the
   computer. Thanks to @appchamp for the report.
 
+- **The transaction export reconciles card statements that print no signs
+  (#32).** A Navy Federal Visa statement prints every amount unsigned and
+  tells a payment or a refund from a purchase only by the PAYMENTS AND
+  CREDITS heading above it, so the export summed everything as a charge
+  and called the statement not reconciled. Rows under that heading, which
+  can carry on after a page break, are now taken off the balance and the
+  rest added to it. That reading is used only for a statement that prints
+  no sign anywhere, and only when it adds up to the cent against the
+  statement's own balances. Every statement is read again once, since the
+  saved readings came from the old rule. Thanks to @dertbv for the sample
+  lines.
+- **The transaction export finds a statement period that pdfplumber
+  scattered (#32).** On a Navy Federal Visa statement the summary box's
+  characters sit at slightly different heights, and pdfplumber read each
+  of its lines as a column of single characters, so the Statement Closing
+  Date was lost and Period Start and Period End came out blank. A page
+  that comes out that way has those characters put back into lines by
+  height, while every line read whole stays exactly as it was, and the
+  closing date label now allows a stray space inside a word. Thanks to
+  @dertbv for working out what pdfplumber was doing.
+
 ## [0.50.0] - 2026-10-13
 
 Two providers arrive, SDG&E bills from My Energy Center and Shelby County
@@ -128,28 +149,6 @@ to the Capital One app, so Discover counts as supported.
   history kept. The provider tables and the panel's line for Discover say
   the same, and Discover counts as supported, so sixty providers are
   supported and seven wait for a tester.
-
-### Fixed
-- **The transaction export reconciles card statements that print no signs
-  (#32).** A Navy Federal Visa statement prints every amount unsigned and
-  tells a payment or a refund from a purchase only by the PAYMENTS AND
-  CREDITS heading above it, so the export summed everything as a charge
-  and called the statement not reconciled. Rows under that heading, which
-  can carry on after a page break, are now taken off the balance and the
-  rest added to it. That reading is used only for a statement that prints
-  no sign anywhere, and only when it adds up to the cent against the
-  statement's own balances. Every statement is read again once, since the
-  saved readings came from the old rule. Thanks to @dertbv for the sample
-  lines.
-- **The transaction export finds a statement period that pdfplumber
-  scattered (#32).** On a Navy Federal Visa statement the summary box's
-  characters sit at slightly different heights, and pdfplumber read each
-  of its lines as a column of single characters, so the Statement Closing
-  Date was lost and Period Start and Period End came out blank. A page
-  that comes out that way has those characters put back into lines by
-  height, while every line read whole stays exactly as it was, and the
-  closing date label now allows a stray space inside a word. Thanks to
-  @dertbv for working out what pdfplumber was doing.
 
 ## [0.49.0] - 2026-10-12
 
@@ -3753,7 +3752,6 @@ anybody has sent in.
   file now, since an empty trace cannot be told from a run that never
   started (#35).
 
-
 ## [0.31.2] - 2026-09-23
 
 Five repairs, every one of them from a sentence a tester wrote rather
@@ -5594,7 +5592,6 @@ item below is a real defect that was found and fixed, not a precaution.
 - The control panel states the project's Python floor (3.11+) and checks it at
   startup, failing with one sentence rather than something obscure. Nothing
   under `gui/` had recorded which Python version it targets.
-
 
 ## [0.6.2] - 2026-08-18
 
