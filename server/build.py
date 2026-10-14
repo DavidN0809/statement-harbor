@@ -29,7 +29,7 @@ REPO = Path(__file__).resolve().parents[1]
 # tools/ is named one script at a time, the ones the panel runs, since the
 # rest of the folder is release and test machinery an image has no use for.
 ALLOWED = ("VERSION", "LICENSE", "LICENSE-MIT", "NOTICE.md", "TRADEMARK.md",
-           "paperpull.py", "core/", "apps/", "gui/", "packaging/paperpull.ico",
+           "TERMS.md", "paperpull.py", "core/", "apps/", "gui/", "packaging/paperpull.ico",
            "tools/add_account.py", "tools/status.py", "tools/export_purchases.py",
            "tools/export_transactions.py", "tools/make_sample.py",
            "tools/migrate.py", "server/")

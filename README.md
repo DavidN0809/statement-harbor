@@ -744,6 +744,11 @@ one as a service for other people, the same license applies to what you
 distribute, source included. Contributions before 2026-09-18 were made under
 MIT and that permission is kept, see [NOTICE.md](NOTICE.md).
 
+**Terms.** Using PaperPull means accepting its [Terms of Use](TERMS.md),
+which the control panel shows the first time it opens. They say what
+PaperPull does and does not promise and limit liability, and take away
+nothing the license gives you.
+
 **Name.** PaperPull is a trade name of TNE Enterprises LLC, which publishes
 this project. The name is not part of the license. A modified version needs
 its own name, so that anything called PaperPull is this project. What that

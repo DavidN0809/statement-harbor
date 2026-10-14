@@ -76,7 +76,7 @@ RUN useradd --create-home --uid 1000 pp \
  && mkdir -p /data /profiles /config /browser \
  && chown pp:pp /data /profiles /config /browser
 
-COPY VERSION LICENSE LICENSE-MIT NOTICE.md TRADEMARK.md paperpull.py /opt/paperpull/
+COPY VERSION LICENSE LICENSE-MIT NOTICE.md TRADEMARK.md TERMS.md paperpull.py /opt/paperpull/
 COPY core /opt/paperpull/core
 # The apps as the packaged desktop build keeps them, templates the panel
 # makes each provider's folder from, run by this one Python with no

@@ -3518,6 +3518,40 @@ async def api_naming_save(request: Request):
             "changed": changed}
 
 
+# -- the terms of use ---------------------------------------------------------
+#
+# TERMS.md, accepted from the page the first time it opens, once for each
+# version of the terms. The version is the terms' effective date, the date at
+# the top of TERMS.md, so changing the terms means changing both, and the
+# page asks again. The answer is kept in the settings file, so on the server
+# it lives in /config and is asked once for the box, not once per browser.
+# The page is told in the HTML whether to ask, so nothing waits on a request,
+# and a page that cannot save the answer still goes on, asking again next
+# time. The apps' own commands do not ask.
+TERMS_VERSION = "2026-10-13"
+
+
+def terms_due() -> bool:
+    return _read_settings().get("terms_accepted") != TERMS_VERSION
+
+
+@app.post("/api/terms", dependencies=[Depends(_same_origin_only)])
+async def api_terms(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    if not isinstance(body, dict) or body.get("accepted") != TERMS_VERSION:
+        raise HTTPException(409, "those are not the current terms, reload the page")
+    data = _read_settings()
+    data["terms_accepted"] = TERMS_VERSION
+    try:
+        _write_settings(data)
+    except OSError as e:
+        raise HTTPException(500, "could not save the answer: %s" % e)
+    return {"accepted": TERMS_VERSION}
+
+
 # The line along the bottom of the page. The desktop one says the panel runs
 # on this computer and offers the paid Store edition. Neither is true of
 # PaperPull Server, which is free and runs on a box of the person's own, so
@@ -3541,7 +3575,9 @@ def index():
     footer = FOOTER_SERVER if server else FOOTER_DESKTOP
     return (HTML.replace("__FOOTER__", footer)
             .replace("__VERSION__", VERSION).replace("__SERVER_BAR__", bar)
-            .replace("__SERVER__", "true" if server else "false"))
+            .replace("__SERVER__", "true" if server else "false")
+            .replace("__TERMS_VERSION__", TERMS_VERSION)
+            .replace("__TERMS_DUE__", "true" if terms_due() else "false"))
 
 
 # The PaperPull icon, for the browser tab the panel opens in. There is one

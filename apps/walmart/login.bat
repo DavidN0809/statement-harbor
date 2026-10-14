@@ -8,8 +8,8 @@ echo  Walmart Receipts - sign in
 echo ============================================================
 if not "%~1"=="" echo Account: %~1
 echo.
-echo A browser window opens - Microsoft Edge if installed (it passes
-echo Walmart's bot check far better than the bundled Chromium), else
+echo A browser window opens - Microsoft Edge if installed (Walmart's site
+echo works far better there than in the bundled Chromium), else
 echo Chrome/Chromium. Then:
 echo   1. Sign in to Walmart (handle any "Robot or human?" check). If this is
 echo      your first time on Edge, you'll need to sign in again here.

@@ -173,14 +173,13 @@ class App:
     def browser(self):
         """Return the supervised browser context.
 
-        Walmart uses aggressive bot detection (PerimeterX) that blocks
-        Playwright's own launched browser. So the default mode here is
-        CDP-attach: the user runs `login.bat`, which opens an ordinary
-        Chromium and lets the user sign in as a human (passing any
-        challenge). This tool then connects to that already-open browser
-        over the DevTools protocol and reads the pages the user is
-        authorized to see. navigator.webdriver stays false; no stealth or
-        evasion is used. Set "cdp_url" to "" in config.json to fall back to
+        Walmart's site does not work in the browser Playwright launches
+        itself. So the default mode here is CDP-attach. The user runs
+        `login.bat`, which opens their own ordinary browser, and signs in
+        there, answering any check Walmart shows themselves. This tool then
+        connects to that already-open browser over the DevTools protocol and
+        reads the pages the user is authorized to see. No stealth or evasion
+        is used. Set "cdp_url" to "" in config.json to fall back to
         launching a dedicated browser instead.
         """
         if self._context is not None:
@@ -306,8 +305,8 @@ class App:
         saved session - so nothing is duplicated in the launcher scripts. You
         sign in; the tool attaches afterwards.
         """
-        # This provider's bot protection fingerprints the Playwright Chromium
-        # build as automation, so a real branded browser is tried first.
+        # This provider's site does not work in the Playwright Chromium
+        # build, so the person's own installed browser is tried first.
         port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9222")
         profile = self.config["profile_dir"]
         url = site.URLS.get("orders") or site.URLS.get("login") or site.URLS["home"]

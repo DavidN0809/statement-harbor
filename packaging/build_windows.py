@@ -97,7 +97,7 @@ PACKAGES = ["playwright>=1.44", "pypdf>=4.2", "fastapi>=0.110", "openpyxl>=3.1",
 # be sitting in a checkout.
 INCLUDE_TOP = ("gui", "core", "apps", "tools", "paperpull.py", "paperpull.bat",
                "VERSION", "LICENSE", "LICENSE-MIT", "NOTICE.md", "TRADEMARK.md",
-               "PRIVACY.md",
+               "PRIVACY.md", "TERMS.md",
                "README.md", "PROVIDERS.md", "SECURITY.md", "CHANGELOG.md")
 EXCLUDE_PARTS = {".venv", "__pycache__", ".pytest_cache", "tests",
                  "Backups", "Logs", "Diagnostics", "Manual Review"}

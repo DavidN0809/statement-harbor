@@ -292,6 +292,9 @@ ROUTES = {
     ("POST", "/api/naming/save"): dict(body={"app": SHOP, "scope": "own",
                                              "pattern": "{date} {provider}"},
                                        desktop="changes", server="changes"),
+    # Accepting the terms writes the answer to the settings file.
+    ("POST", "/api/terms"): dict(body={"accepted": app_module.TERMS_VERSION},
+                                 desktop="changes", server="changes"),
     ("GET", "/"): dict(page=True, desktop="reads", server="reads"),
     ("GET", "/favicon.ico"): dict(page=True, desktop="reads", server="reads"),
     ("GET", "/fonts/{name}"): dict(page=True, ask="/fonts/AtkinsonHyperlegibleNext.ttf",

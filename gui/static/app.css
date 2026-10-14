@@ -439,6 +439,14 @@ dialog::backdrop { background: var(--overlay); }
 .dlg-head p { margin-top: 6px; color: var(--ink-2); }
 .dlg-body { padding: 20px 24px 8px; display: flex; flex-direction: column; gap: 18px; }
 .dlg-foot { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; padding: 16px 24px 24px; }
+/* The terms keep I understand, and the sentence saying what it accepts, in
+   sight on a short screen, and the summary scrolls instead. The title takes
+   the first focus, not the link. */
+#dlg-terms { overflow: hidden; }
+#dlg-terms form { display: flex; flex-direction: column; max-height: calc(100vh - 48px); }
+#dlg-terms .dlg-body { overflow: auto; min-height: 0; }
+#dlg-terms .tm-accept { padding: 12px 24px 0; flex: none; }
+#dlg-terms h2:focus { outline: none; }
 .rv-list { display: flex; flex-direction: column; gap: 16px; max-height: 46vh; overflow: auto; padding-right: 4px; }
 .rv-item { display: flex; flex-direction: column; gap: 6px; }
 .rv-file { font-weight: 700; font-size: 14px; color: var(--ink-2); word-break: break-word; }

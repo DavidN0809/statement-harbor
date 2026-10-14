@@ -33,9 +33,9 @@ The Anthem portal is behind mandatory MFA and, at the edge, Akamai Bot Manager.
 Two things follow.
 
 - **You sign in, and you check "remember this device."** The tool never handles
-  your password or your one-time code. Signing in yourself in a real, branded
-  Chrome/Edge (which `login.bat` launches) with a persistent profile is also the
-  posture that passes the bot check; the remembered-device cookie then lets
+  your password or your one-time code. You sign in yourself in your own Chrome
+  or Edge (which `login.bat` opens) with a persistent profile, since anthem.com
+  does not work in the bundled Chromium. The remembered-device cookie then lets
   later runs skip the MFA prompt.
 - **EOBs are Protected Health Information.** They name providers, dates of
   service, diagnoses and claim amounts. Keep the output folder somewhere safe.

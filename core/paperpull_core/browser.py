@@ -8,10 +8,10 @@ here automates a login.
 Two flavors:
 
 * Most providers are happy with the Chromium that Playwright installs.
-* A few (Walmart, Verizon) run bot protection that fingerprints that build as
-  automation and shows a "robot or human" wall on loop. Those pass far more
-  reliably in a real, branded browser, so they ask for Edge or Chrome first
-  and fall back to Chromium.
+* A few (Walmart, Verizon) do not work in that build, where their sites show
+  a "robot or human" wall on loop. Those work far more reliably in the
+  person's own installed browser, so they ask for Edge or Chrome first and
+  fall back to Chromium.
 
 Windows, macOS and Linux are all supported. The only real difference is where
 the browsers live, which is what BROWSERS below records.
