@@ -518,6 +518,15 @@ def test_the_installed_playwright_puts_chromium_where_it_is_looked_for(monkeypat
         release, ", ".join(missed))
 
 
+
+class _EndedProcess:
+    """What subprocess.Popen hands back for a browser that has already
+    ended, handing its address to a copy running elsewhere."""
+
+    def poll(self):
+        return 0
+
+
 def test_a_window_that_opens_without_a_debugging_port_is_reported(monkeypatch, tmp_path, capsys):
     """Launching is not the same as listening. When Edge or Chrome is already
     running, a new launch can hand the address to the existing session and drop
@@ -533,7 +542,7 @@ def test_a_window_that_opens_without_a_debugging_port_is_reported(monkeypatch, t
     monkeypatch.setattr(browser, "_real_browsers", lambda: [(browser.EDGE, "/x/edge")])
     monkeypatch.setattr(browser, "_bundled_chromium", lambda: [])
     monkeypatch.setattr(browser, "fetch_bundled_chromium", lambda *a, **k: False)
-    monkeypatch.setattr(browser.subprocess, "Popen", lambda args, **kw: None)
+    monkeypatch.setattr(browser.subprocess, "Popen", lambda args, **kw: _EndedProcess())
     monkeypatch.setattr(browser, "wait_for_debug_port", lambda port, timeout=20.0: False)
     assert browser.open_signin_browser(tmp_path / "p", "9231", "https://example.test") is None
     said = capsys.readouterr().out.lower()

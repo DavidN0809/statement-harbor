@@ -75,8 +75,9 @@ def test_the_app_attaches_to_the_window_you_signed_into():
 
 def test_an_install_made_before_this_still_works():
     """Nobody's setup changes under them. With no cdp_url it launches
-    here, exactly as it did."""
-    assert "launch_persistent_context" in BROWSER
+    here, exactly as it did, through the core's launch_own_browser, which
+    launches the same persistent profile and says so (#90)."""
+    assert "launch_own_browser" in BROWSER
     assert "No cdp_url" in BROWSER or "no cdp_url" in BROWSER.lower()
 
 

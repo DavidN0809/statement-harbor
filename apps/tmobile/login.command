@@ -26,7 +26,7 @@ fi
 echo '============================================================'
 echo 'T-Mobile Documents - sign in'
 echo '============================================================'
-echo 'A normal Chromium window will open. Then:'
+echo 'A browser window with a profile of its own will open. Then:'
 echo '1. Sign in to T-Mobile (do all the 2FA / device approval yourself)'
 echo '2. Open your Bills page (Account -> Bill -> View bill history)'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'

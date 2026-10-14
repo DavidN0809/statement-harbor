@@ -8,7 +8,7 @@ echo  Dominion Documents - sign in
 echo ============================================================
 if not "%~1"=="" echo Account: %~1
 echo.
-echo A normal Chromium window will open. Then:
+echo A browser window with a profile of its own will open. Then:
 echo   1. Sign in to Dominion (do all the 2FA / device approval yourself).
 echo   2. Go to Account -^> Billing ^& payments (your bill history).
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.

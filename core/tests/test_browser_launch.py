@@ -68,6 +68,14 @@ def test_nothing_starting_at_all_is_still_not_a_traceback(monkeypatch, tmp_path,
                              tmp_path / "profile", "9222", "https://bank.example/") is None
 
 
+class _EndedProcess:
+    """What subprocess.Popen hands back for a browser that has already
+    ended, handing its address to a copy running elsewhere."""
+
+    def poll(self):
+        return 0
+
+
 def test_the_profile_is_an_absolute_path_before_the_browser_sees_it(monkeypatch, tmp_path, no_waiting):
     """A relative --user-data-dir is resolved by the browser, from wherever
     it thinks it is, which once made two profiles out of one setting and
@@ -76,7 +84,7 @@ def test_the_profile_is_an_absolute_path_before_the_browser_sees_it(monkeypatch,
 
     def popen(cmd, **_k):
         seen["args"] = cmd
-        return None
+        return _EndedProcess()
     monkeypatch.setattr(browser.subprocess, "Popen", popen)
     monkeypatch.chdir(tmp_path)
 
@@ -91,7 +99,7 @@ def test_the_profile_is_an_absolute_path_before_the_browser_sees_it(monkeypatch,
 def test_the_port_and_url_reach_the_browser(monkeypatch, tmp_path, no_waiting):
     seen = {}
     monkeypatch.setattr(browser.subprocess, "Popen",
-                        lambda cmd, **_k: seen.setdefault("args", cmd))
+                        lambda cmd, **_k: (seen.setdefault("args", cmd), _EndedProcess())[1])
     browser._launch("edge.exe", browser.EDGE, tmp_path / "p", "9231",
                     "https://bank.example/signin")
     assert "--remote-debugging-port=9231" in seen["args"]

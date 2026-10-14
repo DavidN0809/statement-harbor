@@ -8,7 +8,7 @@ echo  Amazon Receipts - sign in
 echo ============================================================
 if not "%~1"=="" echo Account: %~1
 echo.
-echo A normal Chromium window will open. Then:
+echo A browser window with a profile of its own will open. Then:
 echo   1. Sign in to Amazon (handle any OTP / puzzle yourself).
 echo   2. Go to Your Orders and confirm you see the orders.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.

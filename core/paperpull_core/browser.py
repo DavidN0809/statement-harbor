@@ -537,6 +537,62 @@ def fetch_bundled_chromium(assume_yes: bool = False) -> bool:
     return True
 
 
+def launch_own_browser(chromium, user_data_dir, **kwargs):
+    """A browser of the app's own, for settings that name no cdp_url, said
+    out loud. Every app opens one that way when its config has no cdp_url,
+    while its sign-in opens the person's own browser on the app's port, so
+    the run and the sign-in used different browsers with nothing said, and
+    the run's window looked signed out (#90). The launch is unchanged.
+    `chromium` is Playwright's browser type, and the rest goes to its
+    launch_persistent_context as it was."""
+    print("This app's settings name no cdp_url, so this run opens a browser of its")
+    print("own, with the profile in %s," % user_data_dir)
+    print("instead of attaching to the window you signed in with, and it is signed in")
+    print("only if you sign in there. To use your sign-in window, copy the cdp_url")
+    print("line from config.example.json into this app's config.json.")
+    return chromium.launch_persistent_context(user_data_dir, **kwargs)
+
+
+def debug_port_holder(port: str, timeout: float = 1.5) -> Optional[str]:
+    """What answers as a browser on the debugging port right now, by the
+    name it gives itself ("Chrome/141.0.7390.54"), or None when nothing
+    does."""
+    import json
+    import urllib.request
+    try:
+        url = "http://127.0.0.1:%d/json/version" % int(port)
+    except (TypeError, ValueError):
+        return None
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            info = json.loads(r.read().decode("utf-8", "replace"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(info, dict) or not info.get("webSocketDebuggerUrl"):
+        return None
+    return str(info.get("Browser") or "a browser")
+
+
+def _open_tab_in(port: str, url: str) -> bool:
+    """Ask the browser already on the port to open `url` in a new tab,
+    through its own debugging endpoint. False when it would not."""
+    import urllib.parse
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d/json/new?%s" % (int(port), urllib.parse.quote(url, safe=":/?=&%")),
+            method="PUT")
+        with urllib.request.urlopen(req, timeout=3) as r:
+            return 200 <= r.status < 300
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+# What open_signin_browser answers with when the port was already held, in
+# place of the name of a browser it opened.
+ALREADY_ON_PORT = "the browser already on this port"
+
+
 def open_signin_browser(profile_dir, port: str, url: str,
                         prefer_real: bool = False, mode: str = AUTO,
                         allow_fetch: bool = True) -> Optional[str]:
@@ -549,7 +605,24 @@ def open_signin_browser(profile_dir, port: str, url: str,
     A browser can be installed and still fail to open a debugging port, and
     checking for the file on disk cannot tell the difference. Only when nothing
     answers, and only then, is the 400 MB download offered.
+
+    A port another browser already holds is said and used, never launched
+    over. A browser started there cannot take the port, so it opened as a
+    window the run could never reach, while the wait for the port heard the
+    old browser and called the sign-in done, and the person signed in to
+    the one window the run would not use (#90). The sign-in page is opened
+    in the browser that holds the port instead, which is the one a run
+    attaches to.
     """
+    held = debug_port_holder(port)
+    if held:
+        print("A browser is already listening on port %s (%s)." % (port, held))
+        print("Runs attach to that browser, so it is the one to sign in with. It is")
+        print("usually the window from an earlier sign-in. If it is not one you")
+        print("recognize, close it and sign in again.")
+        if _open_tab_in(port, url):
+            print("The sign-in page is open in a new tab there.")
+        return ALREADY_ON_PORT
     candidates = browser_candidates(prefer_real=prefer_real, mode=mode)
 
     if not candidates and allow_fetch and mode != INSTALLED:
@@ -689,6 +762,16 @@ def _launch(exe: str, name: str, profile_dir, port: str,
 
     if not answered:
         print(f"\nThe window opened, but no debugging port answered on {port}.")
+        # A window left open here was a browser no run could reach, and the
+        # next candidate opened beside it on the same port (#90). A first
+        # process that handed the address to a copy already running has
+        # ended by now, so only a browser this call started is closed.
+        if proc.poll() is None:
+            try:
+                proc.terminate()
+                print("That window was closed, since a run could not use it.")
+            except OSError:
+                pass
         if name in (EDGE, CHROME):
             print(f"That usually means {name} was already running, so it handed")
             print("the address to the existing window and ignored the settings")

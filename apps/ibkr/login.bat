@@ -8,7 +8,7 @@ echo  Interactive Brokers Documents - sign in
 echo ============================================================
 if not "%~1"=="" echo Account: %~1
 echo.
-echo A normal Chromium window will open. Then:
+echo A browser window with a profile of its own will open. Then:
 echo   1. Sign in to Interactive Brokers (do all the 2FA / verification yourself).
 echo   2. Open Performance ^& Reports, then Statements.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
