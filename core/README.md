@@ -92,6 +92,14 @@ time on a machine, so a second run waits for the first and says whose it
 is. `--stop` ends this checkout's run along with everything it started,
 and `--replace` ends it and runs again.
 
+The runner runs this package's tests as two suites, `core` and
+`core-browsers`, so neither is the one long suite a run or a CI part waits
+for. `core-browsers` takes each test file whose own code drives a real
+browser, and every other file stays in `core`, the privacy canary
+included. `tools/pytest_plugins/core_part.py` holds the rule. Plain
+`pytest` in this folder names neither, so it still runs every test, and
+`--suites core,core-browsers` runs both through the runner.
+
 Several suites skip themselves when a library is missing, and a skip is a
 quiet line nobody reads. One of them is `test_failure_canary.py`, the only
 test holding the promise that a failure file carries no page content, and
