@@ -1179,7 +1179,7 @@ def test_every_core_test_file_runs_in_exactly_one_of_the_two(monkeypatch):
     has. The canary stays in core though it starts a browser, and pytest run
     by hand in core/, with no part named, still runs every file."""
     cp = _core_part()
-    files = sorted((REPO / "core" / "tests").glob("test_*.py"))
+    files = sorted({f for pattern in cp.PYTHON_FILES for f in (REPO / "core" / "tests").glob(pattern)})
     assert len(files) > 100
     kept = {}
     for part in rat.CORE_PARTS:
@@ -1212,6 +1212,34 @@ def test_a_browser_named_only_in_words_does_not_move_a_file(tmp_path):
     canary = tmp_path / "test_failure_canary.py"
     canary.write_text("def test_it():\n    launch()\n", encoding="utf-8")
     assert cp.drives_a_browser(canary) and cp.part_of(canary) == "core"
+
+
+def test_a_file_pytest_collects_by_any_pattern_runs_in_one_suite(tmp_path, monkeypatch):
+    """pytest also collects *_test.py, and pytest.ini may name other
+    patterns. The hook reads the run's own python_files, so such a file is
+    left out of one suite, never out of neither and run in both (review)."""
+    cp = _core_part()
+
+    class Config:
+        def __init__(self, patterns):
+            self.patterns = patterns
+
+        def getini(self, name):
+            assert name == "python_files"
+            return self.patterns
+
+    for name, patterns in [("drives_test.py", ["test_*.py", "*_test.py"]), ("check_drives.py", ["check_*.py"]),
+                           ("test_drives.py", ["test_*.py", "*_test.py"])]:
+        f = tmp_path / name
+        f.write_text("def test_it():\n    sync_playwright()\n", encoding="utf-8")
+        kept = []
+        for part in rat.CORE_PARTS:
+            monkeypatch.setenv(cp.PART, part)
+            if cp.pytest_ignore_collect(f, Config(patterns)) is None:
+                kept.append(part)
+        assert kept == ["core-browsers"], name
+    monkeypatch.setenv(cp.PART, "core")
+    assert cp.pytest_ignore_collect(tmp_path / "drives_test.py", None), "pytest's default patterns without a config"
 
 
 SPLIT_FILES = {

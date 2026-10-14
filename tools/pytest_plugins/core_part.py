@@ -20,6 +20,7 @@ The runner names the part in PAPERPULL_CORE_PART and loads this plugin with
 hand in core/ still runs every test.
 """
 import ast
+import fnmatch
 import os
 from pathlib import Path
 
@@ -42,9 +43,16 @@ DRIVES = frozenset({
 KEPT_IN_CORE = frozenset({"test_failure_canary.py"})
 
 
-def is_test_file(path) -> bool:
-    p = Path(path)
-    return p.suffix == ".py" and p.name.startswith("test_")
+# pytest's own default for the files it collects tests from. The hook reads
+# the run's python_files, so a pattern set in pytest.ini counts too. A file
+# pytest collects that this did not count as a test file would be left out
+# of neither suite and so run in both.
+PYTHON_FILES = ("test_*.py", "*_test.py")
+
+
+def is_test_file(path, patterns=PYTHON_FILES) -> bool:
+    name = Path(path).name
+    return name.endswith(".py") and any(fnmatch.fnmatch(name, p) for p in patterns)
 
 
 def drives_a_browser(path) -> bool:
@@ -72,6 +80,7 @@ def part_of(path) -> str:
 
 def pytest_ignore_collect(collection_path, config):
     want = os.environ.get(PART, "")
-    if want not in (CORE, BROWSERS) or not is_test_file(collection_path):
+    patterns = config.getini("python_files") if config is not None else PYTHON_FILES
+    if want not in (CORE, BROWSERS) or not is_test_file(collection_path, patterns or PYTHON_FILES):
         return None
     return True if part_of(collection_path) != want else None

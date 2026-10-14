@@ -207,13 +207,15 @@ def test_no_part_of_ci_plans_far_longer_than_the_others():
     the job's 45 on CI while the other parts took 25 to 28, and two runs of
     12 were stopped at the limit. As two suites, the file's own plan keeps
     every part within a tenth of the average, each core suite by a time of
-    its own. A suite that grows past an average part is the next to split."""
+    its own. A suite that grows past an average part is the next to split.
+    A new app with no time yet is planned as a middling suite, as in the
+    test above, so it needs no entry for its first push."""
     times = rat.load_times(REPO / "tools" / "suite_times.json")
-    names = [n for n, _d, _kind in rat.suites(False)]
-    assert set(names) <= set(times), "a suite with no time is planned as a middling one"
+    names = [n for n, _d, _kind in rat.suites(False)] + ["a_new_app"]
+    assert set(rat.CORE_PARTS) <= set(times), "each core suite is planned by a time of its own"
     loads = [sum(rat.expected(n, times) for n in rat.shard_of(names, times, k, 6)) for k in range(1, 7)]
     assert max(loads) <= 1.1 * sum(loads) / 6, loads
-    assert max(times[n] for n in names) < sum(loads) / 6
+    assert max(rat.expected(n, times) for n in names) < sum(loads) / 6
 
 
 def test_a_part_runs_only_its_own_suites(fake_run, tmp_path, monkeypatch, capsys):
