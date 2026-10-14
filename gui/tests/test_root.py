@@ -11,6 +11,7 @@ GUI's test suite needs nothing beyond what the GUI itself already needs.
 import asyncio
 import inspect
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -478,6 +479,205 @@ def test_the_core_check_runs_even_after_the_file_sweep_has_been_done(tmp_path,
         app_module._REFRESHED_ROOTS.discard(str(root))
     assert "Costco Receipts" in out
     assert (site / "paperpull_core" / "__init__.py").is_file()
+
+
+# An app's setup.bat inside a checkout installs the core editable from two
+# folders up, which leaves only a finder in site-packages. Python asks that
+# finder after its own search of site-packages, so a paperpull_core folder
+# the panel copied in beside it won every import, and since refresh_installs
+# passes over the checkout's own apps, nothing ever refreshed that copy.
+
+def _checkout(tmp_path, monkeypatch):
+    """A checkout the panel runs from, with one app of its own, and the
+    panel pointed at it. The space in its name puts a %20 in the address
+    pip records, so reading it back is tested too."""
+    checkout = tmp_path / "my checkout"
+    core = checkout / "core" / "paperpull_core"
+    core.mkdir(parents=True)
+    (core / "__init__.py").write_text("# the checkout's core\n", encoding="utf-8")
+    (core / "recorder.py").write_text("# the checkout's recorder\n", encoding="utf-8")
+    (checkout / "gui").mkdir()
+    install = checkout / "apps" / "target"
+    install.mkdir(parents=True)
+    (install / "target_receipts.py").write_text("def main(): pass\n", encoding="utf-8")
+    monkeypatch.setattr(app_module, "HERE", checkout / "gui")
+    monkeypatch.setattr(app_module, "apps_root", lambda: checkout / "apps")
+    return checkout, install
+
+
+def _editable_venv(install, source, with_core=False, site_rel="Lib/site-packages"):
+    """A venv with the core installed the way `pip install -e` leaves it, a
+    finder and a dist-info whose direct_url.json says editable and where.
+    The source is a folder or the address itself."""
+    site = install / ".venv" / site_rel
+    site.mkdir(parents=True, exist_ok=True)
+    if with_core:
+        (site / "paperpull_core").mkdir()
+        (site / "paperpull_core" / "__init__.py").write_text("# old\n", encoding="utf-8")
+    (site / "__editable__.paperpull_core-0.1.6.pth").write_text(
+        "import __editable___paperpull_core_0_1_6_finder; "
+        "__editable___paperpull_core_0_1_6_finder.install()\n", encoding="utf-8")
+    info = site / "paperpull_core-0.1.6.dist-info"
+    info.mkdir()
+    url = source if isinstance(source, str) else source.as_uri()
+    (info / "direct_url.json").write_text(json.dumps(
+        {"dir_info": {"editable": True}, "url": url}), encoding="utf-8")
+    return site
+
+
+def _list_apps(root):
+    """refresh_installs as the page calls it, on a fresh panel run and then
+    on a later listing."""
+    app_module._REFRESHED_ROOTS.discard(str(root))
+    try:
+        app_module.refresh_installs()
+        app_module.refresh_installs()
+    finally:
+        app_module._REFRESHED_ROOTS.discard(str(root))
+
+
+def test_a_checkout_app_on_an_editable_core_is_not_given_a_copy(tmp_path, monkeypatch):
+    checkout, install = _checkout(tmp_path, monkeypatch)
+    site = _editable_venv(install, checkout / "core")
+
+    _list_apps(checkout / "apps")
+
+    assert not (site / "paperpull_core").exists(), \
+        "a copy now hides the checkout's core from this app"
+
+
+@pytest.mark.parametrize("site_rel", ["Lib/site-packages", "lib/python3.12/site-packages"],
+                         ids=["windows", "mac and linux"])
+def test_a_copy_an_earlier_panel_left_over_an_editable_core_comes_out(tmp_path,
+                                                                     monkeypatch,
+                                                                     site_rel):
+    """Every venv that met the old panel holds one, and it would hide the
+    checkout's core from that app for good."""
+    checkout, install = _checkout(tmp_path, monkeypatch)
+    site = _editable_venv(install, checkout / "core", with_core=True, site_rel=site_rel)
+
+    _list_apps(checkout / "apps")
+
+    assert not (site / "paperpull_core").exists(), "the old copy still hides the core"
+    left = [p.name for p in site.iterdir() if p.name.startswith("paperpull_core")]
+    assert left == ["paperpull_core-0.1.6.dist-info"], left
+    assert (checkout / "core" / "paperpull_core" / "__init__.py").read_text(
+        encoding="utf-8") == "# the checkout's core\n"
+
+
+def test_an_editable_core_whose_source_is_gone_still_gets_one(tmp_path, monkeypatch):
+    """A checkout that was moved leaves the editable install pointing at
+    nothing, and then the copy is the only core the app has."""
+    checkout, install = _checkout(tmp_path, monkeypatch)
+    site = _editable_venv(install, tmp_path / "moved away" / "core")
+
+    _list_apps(checkout / "apps")
+
+    assert (site / "paperpull_core" / "__init__.py").read_text(
+        encoding="utf-8") == "# the checkout's core\n"
+
+
+@pytest.mark.parametrize("url", ["file://[no end/core", "file:///C|/x|y/core",
+                                 "not an address", "file:///core%00/x"])
+def test_an_address_that_cannot_be_read_never_stops_the_listing(tmp_path, monkeypatch,
+                                                                url):
+    """pip never writes these, but a hand-edited file must not take the
+    page's list of apps down with it. The venv is treated as having no
+    editable core, as before."""
+    checkout, install = _checkout(tmp_path, monkeypatch)
+    site = _editable_venv(install, url)
+
+    _list_apps(checkout / "apps")
+
+    assert (site / "paperpull_core" / "__init__.py").is_file()
+
+
+def test_an_address_naming_site_packages_itself_leaves_the_copy(tmp_path, monkeypatch):
+    """Then the copy would count as its own editable source, and taking it
+    out would leave the app no core at all."""
+    checkout, install = _checkout(tmp_path, monkeypatch)
+    site = install / ".venv" / "Lib" / "site-packages"
+    _editable_venv(install, site, with_core=True)
+
+    _list_apps(checkout / "apps")
+
+    # The very same file, not one seeded again after it was taken out.
+    assert (site / "paperpull_core" / "__init__.py").read_text(encoding="utf-8") == "# old\n"
+
+
+def test_an_install_outside_the_checkout_keeps_this_panels_core(tmp_path, monkeypatch):
+    """Its code is refreshed from this panel's templates on every panel
+    run, so its core has to be this panel's as well, and an editable source
+    can be some other, older checkout. Its copy is kept and kept current."""
+    checkout, _ = _checkout(tmp_path, monkeypatch)
+    install = tmp_path / "installs" / "Target Receipts"
+    install.mkdir(parents=True)
+    (install / "target_receipts.py").write_text("def main(): pass\n", encoding="utf-8")
+    site = _editable_venv(install, checkout / "core", with_core=True)
+
+    made = app_module.ensure_core(install)
+
+    assert "paperpull_core/__init__.py" in made
+    assert (site / "paperpull_core" / "__init__.py").read_text(
+        encoding="utf-8") == "# the checkout's core\n"
+
+
+def test_the_packaged_build_and_the_server_still_seed_and_refresh(tmp_path, monkeypatch):
+    """Both keep the apps as templates/apps with no apps/ beside them, and
+    neither is a checkout, even for an install inside the program's own
+    folder. One with no core gets one, and a copy over an editable core is
+    kept current as before."""
+    program = tmp_path / "program"
+    core = program / "core" / "paperpull_core"
+    core.mkdir(parents=True)
+    (core / "__init__.py").write_text("# the program's core\n", encoding="utf-8")
+    (program / "gui").mkdir()
+    template = program / "templates" / "apps" / "target"
+    template.mkdir(parents=True)
+    (template / "target_receipts.py").write_text("def main(): pass\n", encoding="utf-8")
+    root = program / "accounts"
+    bare = root / "Target Receipts"
+    on_editable = root / "Target Receipts - second"
+    for d in (bare, on_editable):
+        d.mkdir(parents=True)
+        (d / "target_receipts.py").write_text("def main(): pass\n", encoding="utf-8")
+    monkeypatch.setattr(app_module, "HERE", program / "gui")
+    monkeypatch.setattr(app_module, "apps_root", lambda: root)
+    assert app_module._is_packaged()
+    bare_site = _fake_venv(bare)
+    editable_site = _editable_venv(on_editable, program / "core", with_core=True)
+
+    _list_apps(root)
+
+    for site in (bare_site, editable_site):
+        assert (site / "paperpull_core" / "__init__.py").read_text(
+            encoding="utf-8") == "# the program's core\n", site
+
+
+def _link_folder(target, link):
+    if sys.platform == "win32":
+        import _winapi
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        os.symlink(target, link, target_is_directory=True)
+
+
+def test_a_linked_core_folder_over_an_editable_core_is_left_alone(tmp_path, monkeypatch):
+    """The panel only ever copies files, so a link is somebody's own doing."""
+    checkout, install = _checkout(tmp_path, monkeypatch)
+    site = _editable_venv(install, checkout / "core")
+    mine = tmp_path / "my core" / "paperpull_core"
+    mine.mkdir(parents=True)
+    (mine / "__init__.py").write_text("# mine\n", encoding="utf-8")
+    try:
+        _link_folder(mine, site / "paperpull_core")
+    except OSError as e:
+        pytest.skip("cannot make a folder link here (%s)" % e)
+
+    _list_apps(checkout / "apps")
+
+    assert (site / "paperpull_core" / "__init__.py").read_text(encoding="utf-8") == "# mine\n"
+    assert (mine / "__init__.py").read_text(encoding="utf-8") == "# mine\n"
 
 
 def test_a_new_install_is_given_the_account_holders_name(tmp_path, monkeypatch):

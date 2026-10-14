@@ -34,6 +34,7 @@ import sysconfig
 import tempfile
 import threading
 import urllib.parse
+import urllib.request
 import zipfile
 import time
 from typing import Optional
@@ -1815,10 +1816,21 @@ def ensure_core(dst: Path, stamp: str = "") -> list:
     from a wheel the packaged build ships. An install made here has
     neither,
     so setup finished cleanly and left a venv that could not import
-    anything. Found by adding Costco and running it."""
+    anything. Found by adding Costco and running it.
+
+    An install inside this checkout is the exception. Its setup.bat finds
+    the core two folders up and installs it editable, so it already runs
+    the checkout's core as it changes, and a copy put beside that wins
+    every import. Nothing ever refreshed such a copy, since refresh_installs
+    passes over the checkout's own apps, so every core change after the
+    day it was made missed that app. So nothing is copied there, and a copy
+    an earlier panel left is taken out."""
     core_src = HERE.parent / "core" / "paperpull_core"
     venv = dst / ".venv"
     if not core_src.is_dir() or not venv.is_dir():
+        return []
+    if _on_checkout_editable_core(dst):
+        _drop_core_copy(venv)
         return []
     stamp = stamp or datetime.now().strftime("%Y-%m-%d-%H%M%S")
     pkg = None
@@ -1850,6 +1862,79 @@ def ensure_core(dst: Path, stamp: str = "") -> list:
             continue
         out.append("paperpull_core/" + item.name)
     return out
+
+
+def _editable_core(venv: Path):
+    """The core folder an editable install in this venv runs, or None.
+
+    `pip install -e` leaves the package in its source folder and puts only
+    a finder in site-packages, which Python asks after its own search of
+    site-packages, so a paperpull_core folder there wins over it. pip
+    records the install in the dist-info's direct_url.json (PEP 610), which
+    says whether it is editable and where the source is. None as well when
+    that source no longer holds a core, as after the checkout was moved,
+    since then the venv has no core of its own to run, and when the source
+    is the folder in site-packages itself, which is no editable install. A
+    file this cannot read is passed over, so it never stops the listing."""
+    site = _site_packages(venv)
+    if site is None:
+        return None
+    for info in sorted(site.glob("paperpull_core-*.dist-info")):
+        try:
+            data = json.loads((info / "direct_url.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        dir_info = data.get("dir_info")
+        if not (isinstance(dir_info, dict) and dir_info.get("editable") is True):
+            continue
+        try:
+            url = urllib.parse.urlparse(str(data.get("url", "")))
+            if url.scheme != "file" or url.netloc not in ("", "localhost"):
+                continue
+            pkg = Path(urllib.request.url2pathname(url.path)) / "paperpull_core"
+            if ((pkg / "__init__.py").is_file()
+                    and pkg.resolve() != (site / "paperpull_core").resolve()):
+                return pkg
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _on_checkout_editable_core(dst: Path) -> bool:
+    """Whether an install sits inside the checkout this panel runs from and
+    its venv runs the core as an editable install, which is what the app's
+    own setup.bat makes there."""
+    if _is_packaged():
+        return False
+    try:
+        inside = dst.resolve().is_relative_to(HERE.parent.resolve())
+    except OSError:
+        return False
+    return inside and _editable_core(dst / ".venv") is not None
+
+
+def _drop_core_copy(venv: Path) -> bool:
+    """Take out a paperpull_core folder sitting in site-packages over an
+    editable install. pip keeps an editable package in its source folder,
+    so only an earlier panel's ensure_core put one there. It is renamed off
+    the import path in one step first, so a failure part way through never
+    leaves half a package for an import to find, and then deleted. A link
+    is someone's own doing and is left alone. True when a copy came out."""
+    site = _site_packages(venv)
+    if site is None:
+        return False
+    pkg = site / "paperpull_core"
+    try:
+        if not pkg.is_dir() or pkg.resolve() != pkg.parent.resolve() / pkg.name:
+            return False
+        gone = site / ("paperpull_core-panel-copy-%d" % time.time_ns())
+        pkg.rename(gone)
+    except OSError:
+        return False
+    shutil.rmtree(gone, ignore_errors=True)
+    return True
 
 
 _REFRESHED_ROOTS: set = set()
@@ -1917,7 +2002,11 @@ def _seed_missing_cores(root: Path) -> dict:
         venv = d / ".venv"
         if not venv.is_dir():
             continue
-        if any(True for _ in venv.rglob("paperpull_core/__init__.py")):
+        # An install in this checkout on an editable core goes to ensure_core
+        # even with a copy in it, which is how a copy an earlier panel left
+        # there comes out. Nothing else ever looks at the checkout's own apps.
+        if (not _on_checkout_editable_core(d)
+                and any(True for _ in venv.rglob("paperpull_core/__init__.py"))):
             continue
         made = ensure_core(d)
         if made:

@@ -34,6 +34,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   contributors keep the copyright in what they wrote. The code signature
   still names Bryan Rhee until the signing certificate changes.
 
+### Fixed
+- **An app in a source checkout follows the checkout's core again.** Before
+  #65 each app in a checkout had a .venv of its own, and its setup installed
+  the shared core editable, so the app ran the checkout's core as it
+  changed. The control panel then copied the core into that .venv, where
+  the copy won every import, and since the panel never refreshes a
+  checkout's own apps, every later core change missed that app. The panel
+  no longer copies the core over an editable install in its own checkout,
+  and it takes out a copy an earlier panel left there. Installs outside the
+  checkout, the packaged app and PaperPull Server keep their copy of the
+  core and still have it brought up to date as before.
+
 ## [0.50.0] - 2026-10-13
 
 Two providers arrive, SDG&E bills from My Energy Center and Shelby County
