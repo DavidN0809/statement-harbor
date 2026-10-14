@@ -7,6 +7,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Changed
+- **PaperPull is published by TNE Enterprises LLC.** PaperPull is a trade
+  name of TNE Enterprises LLC, a Virginia company, which now holds the
+  PaperPull name and the copyright notice. NOTICE.md, TRADEMARK.md and the
+  README say so, the Windows installer lists TNE Enterprises LLC as its
+  publisher in Installed apps, and the Mac app and the PaperPull Server
+  image carry the same name. The license is unchanged, AGPL-3.0, and
+  contributors keep the copyright in what they wrote. The code signature
+  still names Bryan Rhee until the signing certificate changes.
+
 ## [0.50.0] - 2026-10-13
 
 Two providers arrive, SDG&E bills from My Energy Center and Shelby County

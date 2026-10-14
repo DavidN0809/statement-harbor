@@ -283,7 +283,7 @@ def write_bundle() -> None:
         "LSMinimumSystemVersion": "11.0",
         "LSArchitecturePriority": ["arm64"],
         "NSHighResolutionCapable": True,
-        "NSHumanReadableCopyright": "Copyright (c) 2026 Bryan Rhee. AGPL-3.0. https://github.com/rheeloaded/paperpull",
+        "NSHumanReadableCopyright": "Copyright (c) 2026 PaperPull, a trade name of TNE Enterprises LLC. AGPL-3.0. https://github.com/rheeloaded/paperpull",
     }
     if icon:
         plist["CFBundleIconFile"] = icon
