@@ -3752,6 +3752,7 @@ anybody has sent in.
   file now, since an empty trace cannot be told from a run that never
   started (#35).
 
+
 ## [0.31.2] - 2026-09-23
 
 Five repairs, every one of them from a sentence a tester wrote rather
@@ -5592,6 +5593,7 @@ item below is a real defect that was found and fixed, not a precaution.
 - The control panel states the project's Python floor (3.11+) and checks it at
   startup, failing with one sentence rather than something obscure. Nothing
   under `gui/` had recorded which Python version it targets.
+
 
 ## [0.6.2] - 2026-08-18
 
