@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Sixty providers are supported today, all built on the same pattern.
+Sixty-one providers are supported today, all built on the same pattern.
 Seven more, Wells Fargo, SBA, Verizon Mobile,
 Meijer, American Family, Stripe and FedEx, are built and waiting for someone with an account to
 test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
@@ -73,6 +73,7 @@ test them ([#27](https://github.com/rheeloaded/paperpull/issues/27),
 | [`adp`](apps/adp) | ADP Workforce Now | Pay statements, W-2s | Statement services from inside the page, nothing clicked, real Edge/Chrome. Requested in [#46](https://github.com/rheeloaded/paperpull/issues/46) |
 | [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy docs | ASP.NET WebForms; one documented disclosure dialog |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | JSON API; same-dated statements named from the PDF |
+| [`alpaca`](apps/alpaca) | Alpaca | Brokerage and crypto statements, trade confirmations | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 22 documents saved on a full run.** Each row's own Download pressed once, and only the download from the link the page hands that press is kept. A Paper account is never read |
 | [`amazon`](apps/amazon) | Amazon (any country's store, `marketplace` setting) | Order invoices (full history) | Per-year order pagination |
 | [`amfam`](apps/amfam) | American Family Insurance | Billing statements, policy documents, declarations, ID cards | **Untested, built without an account. Have one? [Help test it](apps/amfam/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). |
 | [`amex`](apps/amex) | American Express | Statements, Year-End Summary | Click-nav SPA; in-memory session |
@@ -626,7 +627,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **sixty-seven** apps pass their tests, the sixty that are
+- ✅ All **sixty-eight** apps pass their tests, the sixty-one that are
   supported and the seven still waiting for a tester, 21,939 of them
   across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
@@ -710,7 +711,8 @@ found a bug and diagnosed it to the line.
   run against a retail account's monthly statements and tax documents,
   the Optum Bank app, built and run against an HSA, the Shelby County
   Trustee app, run against a Memphis parcel's sixteen years of receipts,
-  and the SDG&E app, run against a new account's first eight bills.
+  the SDG&E app, run against a new account's first eight bills, and the
+  Alpaca app, run whole against a Live brokerage account.
 - [@marecabo](https://github.com/marecabo), Amazon's legal invoice PDFs on
   the German store.
 - [@watling777](https://github.com/watling777), the tester behind AT&T,
