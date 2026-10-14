@@ -1,0 +1,3 @@
+Alpaca statements and trade confirmations from the Live account documents page (app.alpaca.markets)
+
+See README.md for setup and supervised pilot instructions.

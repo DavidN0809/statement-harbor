@@ -12,6 +12,7 @@
     "aafmaa": {"gets": "Annual statements, policy and insurance documents", "group": "insurance"},
     "adp": {"gets": "Pay statements and W-2s", "group": "pay"},
     "affirm": {"gets": "Loan agreements, one per loan", "group": "loans"},
+    "alpaca": {"gets": "Statements and trade confirmations", "group": "investing"},
     "ally": {"gets": "Account statements, tax forms", "group": "banks"},
     "amazon": {"gets": "Order invoices, your full history", "group": "shopping"},
     "amex": {"gets": "Card statements, year-end summaries", "group": "banks"},

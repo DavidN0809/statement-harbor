@@ -426,7 +426,112 @@ def test_coinbase_takes_its_statement_from_the_folder(left, browser_context, pro
         pg.close()
 
 
-DRIVEN_ELSEWHERE_HERE = {"verizon", "vanguard", "ibkr", "coinbase"}
+ALPACA_ACCOUNT = "acc0ffee-1234-4abc-8def-0123456789ab"
+ALPACA_DOC = "0f0f0f0f-1234-4abc-8def-0123456789ab"
+ALPACA_LINK = "/api/v1/accounts/%s/documents/%s/url" % (ALPACA_ACCOUNT, ALPACA_DOC)
+ALPACA_PAGE = ("<!doctype html><meta charset='utf-8'><table><tbody><tr><td>2026-08-31</td>"
+               "<td>account_statement</td><td><p onclick=\"fetch('%s').then(r => r.json())"
+               ".then(j => setTimeout(() => { location.href = j.url + '%%s'; }, %%d))\">"
+               "Download</p></td></tr></tbody>"
+               "</table>" % ALPACA_LINK)
+
+
+def _alpaca(provider, monkeypatch, browser_context, tmp_path, left, elsewhere="", later_ms=0,
+            run=None, after=None, site=None):
+    """Drive Alpaca's own capture on the test's page. `elsewhere` is added
+    to the link the page then downloads from, so a download that did not
+    come from the link handed over can be made, and the page starts the
+    download `later_ms` after the link answers. `after(page)` runs while the
+    page is still open, whether the capture took the document or not."""
+    site = site or site_of(REPO / "apps" / "alpaca")
+    words = list(site.private_words())
+    monkeypatch.setattr(site, "is_safe_url", lambda url: url.startswith(provider.base + "/"))
+    monkeypatch.setattr(site, "is_download_url", lambda url: url.startswith(provider.base + "/"))
+    monkeypatch.setattr(site, "check_live", lambda page, state: None)
+    provider.pages["/alpaca"] = (ALPACA_PAGE % (elsewhere, later_ms)).encode("utf-8")
+    provider.pages[ALPACA_LINK] = ('{"id": "%s", "url": "%s/doc"}'
+                                   % (ALPACA_DOC, provider.base)).encode("utf-8")
+    pg = browser_context.new_page()
+    try:
+        pg.goto(provider.base + "/alpaca")
+        staging, out = folder_for(tmp_path, "alpaca", left)
+        (staging / "someone else's.pdf").write_bytes(OLD)
+        site.set_download_dir(pg, staging)
+        provider.reset()
+        return site, staging, out, site._catch_document(
+            pg, run or site.Run(), staging, 1, ALPACA_DOC, "2026-08-31", "account_statement",
+            out, [])
+    finally:
+        if after is not None:
+            after(pg)
+        pg.close()
+        # The download's own name is made private as it is read, as the
+        # account number it carries at Alpaca is. Not kept past this test.
+        site.set_private_words(words)
+
+
+@pytest.mark.parametrize("left", [False, True], ids=["empty folder", "same name already there"])
+def test_alpaca_takes_its_document_from_the_folder(left, browser_context, provider,
+                                                   tmp_path, monkeypatch):
+    """Alpaca presses a row's own Download once. The page asks for that
+    document's link, GET .../documents/<uuid>/url answering {id, url}, and
+    the browser downloads the presigned file, which the app takes through
+    the core only when it came from that link. Here the test's provider
+    answers the link call and serves the file, so its host stands in for
+    app.alpaca.markets and for the bucket, and the Live account's check,
+    which reads Alpaca's own address and account switcher, is stood in
+    for."""
+    _site, staging, out, got = _alpaca(provider, monkeypatch, browser_context, tmp_path, left)
+    check("alpaca", got, provider, out, staging)
+
+
+@pytest.mark.parametrize("left", [False, True], ids=["empty folder", "same name already there"])
+def test_alpaca_leaves_a_download_from_another_address_as_it_is(
+        left, browser_context, provider, tmp_path, monkeypatch):
+    """The only download after the press did not come from exactly the link
+    Alpaca handed over, so it is not the press's own and the press's own did
+    not come. Nothing is saved, the run stops, and that download, which
+    the app cannot tell is its own, is left in the folder as it is, never
+    canceled or removed."""
+    from paperpull_core import pressing
+    with pytest.raises(pressing.Stop) as stop:
+        _alpaca(provider, monkeypatch, browser_context, tmp_path, left, elsewhere="?other=1")
+    assert stop.value.reason == "the download came from elsewhere"
+    assert len(provider.served) == 1, "the page's download was never made"
+    staging = tmp_path / ".alpaca-downloads"
+    assert not (tmp_path / "Statements" / "2026-08-31 Statement.pdf").exists()
+    assert sorted(p.name for p in staging.iterdir()) == [NAME, "someone else's.pdf"]
+    assert (staging / NAME).read_bytes() == provider.served[0], "it was not left as it was"
+
+
+def test_alpaca_removes_a_download_that_comes_after_it_stopped_waiting(
+        browser_context, provider, tmp_path, monkeypatch):
+    """The press brings its download only after the capture stopped
+    waiting, so the capture stops the run with nothing taken. The browser
+    then saves the download into the app's folder under the provider's
+    name, which at Alpaca is the account number. The run hears it all the
+    same, and since it comes from exactly the link Alpaca handed that press,
+    at its end cancels it and discards the file the core can tell is that
+    download's. Another file in the folder stays, and so does the folder."""
+    from paperpull_core import pressing
+    site = site_of(REPO / "apps" / "alpaca")
+    run = site.Run()
+    monkeypatch.setattr(site, "DOWNLOAD_WAIT_MS", 1000)
+    monkeypatch.setattr(site, "LATE_DOWNLOAD_WAIT_MS", 6000)
+    closed = []
+    with pytest.raises(pressing.Stop) as stop:
+        _alpaca(provider, monkeypatch, browser_context, tmp_path, False, later_ms=2500,
+                run=run, after=lambda pg: closed.append(run.close()), site=site)
+    assert stop.value.reason == "no download came"
+    staging = tmp_path / ".alpaca-downloads"
+    assert len(provider.served) == 1, "the late download was never made"
+    assert run.owed_link is None and run.unbound == 0, "the late download was not the press's"
+    assert closed == [1], "the late download's file was not discarded"
+    assert sorted(p.name for p in staging.iterdir()) == ["someone else's.pdf"]
+    assert not (tmp_path / "Statements" / "2026-08-31 Statement.pdf").exists()
+
+
+DRIVEN_ELSEWHERE_HERE = {"verizon", "vanguard", "ibkr", "coinbase", "alpaca"}
 
 # Apps that point the browser at a folder and take nothing from it, so
 # there is no capture here to drive, and why. Each is held to that below.
