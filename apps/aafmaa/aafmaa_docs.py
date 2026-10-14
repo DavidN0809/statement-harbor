@@ -248,7 +248,7 @@ class App:
         else:
             profile = Path(self.config["profile_dir"])
             profile.mkdir(parents=True, exist_ok=True)
-            self._context = self._pw.chromium.launch_persistent_context(
+            self._context = browser_launcher.launch_own_browser(self._pw.chromium, 
                 str(profile), headless=False, accept_downloads=True,
                 viewport={"width": 1400, "height": 950})
             self._cdp_mode = False
@@ -334,7 +334,7 @@ class App:
         saved session - so nothing is duplicated in the launcher scripts. You
         sign in; the tool attaches afterwards.
         """
-        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9224")
+        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9238")
         profile = self.config["profile_dir"]
         url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]
         name = browser_launcher.open_signin_browser(profile, port, url,

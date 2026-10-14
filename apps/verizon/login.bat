@@ -8,7 +8,7 @@ echo  Verizon Documents - sign in
 echo ============================================================
 if not "%~1"=="" echo Account: %~1
 echo.
-echo A normal Chromium window will open. Then:
+echo A browser window with a profile of its own will open. Then:
 echo   1. Sign in to Verizon (do all the 2FA / device approval yourself).
 echo   2. Go to Account -^> Reports ^& statements (Documents / Tax center).
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.

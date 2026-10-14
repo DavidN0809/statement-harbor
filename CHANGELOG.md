@@ -19,6 +19,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
   contributors keep the copyright in what they wrote. The code signature
   still names Bryan Rhee until the signing certificate changes.
 
+### Fixed
+- **A sign-in and the runs after it use one browser, or say why not (#90).**
+  On an Intel Mac, a Citi run opened a second window on another profile and
+  found it signed out, though the sign-in had gone well. Each of these could
+  lead there without a word, and none does any more.
+  - A sign-in that finds another browser already listening on the app's
+    port now says so, opens the sign-in page in that browser, which is the
+    one a run attaches to, and launches nothing beside it. A browser started
+    there could never take the port, while the wait for the port heard the
+    old one and called the sign-in done.
+  - A sign-in browser that never opened its debugging port is closed rather
+    than left open beside the next one tried.
+  - A config with no `cdp_url` still has the run open a browser of its own,
+    and the run now says so, names its profile folder, and says how to use
+    the sign-in window instead.
+  - Seventeen apps fell back to port 9224, Wealthfront's, when a config named
+    no port, so two apps could meet on one port. Each now falls back to the
+    port its own example config names.
+  The sign-in launchers of 21 apps no longer promise "a normal Chromium
+  window", since the browser that opens depends on the app and the
+  computer. Thanks to @appchamp for the report.
+
 ## [0.50.0] - 2026-10-13
 
 Two providers arrive, SDG&E bills from My Energy Center and Shelby County
