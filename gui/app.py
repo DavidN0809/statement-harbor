@@ -1873,7 +1873,9 @@ def _editable_core(venv: Path):
     records the install in the dist-info's direct_url.json (PEP 610), which
     says whether it is editable and where the source is. None as well when
     that source no longer holds a core, as after the checkout was moved,
-    since then the venv has no core of its own to run."""
+    since then the venv has no core of its own to run, and when the source
+    is the folder in site-packages itself, which is no editable install. A
+    file this cannot read is passed over, so it never stops the listing."""
     site = _site_packages(venv)
     if site is None:
         return None
@@ -1887,12 +1889,16 @@ def _editable_core(venv: Path):
         dir_info = data.get("dir_info")
         if not (isinstance(dir_info, dict) and dir_info.get("editable") is True):
             continue
-        url = urllib.parse.urlparse(str(data.get("url", "")))
-        if url.scheme != "file" or url.netloc not in ("", "localhost"):
+        try:
+            url = urllib.parse.urlparse(str(data.get("url", "")))
+            if url.scheme != "file" or url.netloc not in ("", "localhost"):
+                continue
+            pkg = Path(urllib.request.url2pathname(url.path)) / "paperpull_core"
+            if ((pkg / "__init__.py").is_file()
+                    and pkg.resolve() != (site / "paperpull_core").resolve()):
+                return pkg
+        except (OSError, ValueError):
             continue
-        pkg = Path(urllib.request.url2pathname(url.path)) / "paperpull_core"
-        if (pkg / "__init__.py").is_file():
-            return pkg
     return None
 
 
