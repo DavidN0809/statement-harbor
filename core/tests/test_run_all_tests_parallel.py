@@ -177,7 +177,7 @@ CANARY_PASSED = [{"outcome_of": "core/tests/test_failure_canary.py::test_it", "w
 
 def test_one_at_a_time_keeps_the_old_order(fake_run, tmp_path, monkeypatch):
     seen = []
-    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S: (
+    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S, **_: (
         seen.append(d.name) or ("1 passed", 0, list(CANARY_PASSED) if d.name == rat.CANARY_SUITE else [])))
     fake_run({n: tmp_path / n for n in ("core", "gui", "amazon")}, {"amazon": 500, "core": 5})
     assert rat.main(["--jobs", "1"]) == 0
@@ -202,9 +202,25 @@ def test_the_parts_cover_every_suite_once_and_finish_close_together():
     assert max(loads) <= sum(loads) / 6 + max(times.values())
 
 
+def test_no_part_of_ci_plans_far_longer_than_the_others():
+    """Whole, core was planned alone in part 1 and took 36 to 45 minutes of
+    the job's 45 on CI while the other parts took 25 to 28, and two runs of
+    12 were stopped at the limit. As two suites, the file's own plan keeps
+    every part within a tenth of the average, each core suite by a time of
+    its own. A suite that grows past an average part is the next to split.
+    A new app with no time yet is planned as a middling suite, as in the
+    test above, so it needs no entry for its first push."""
+    times = rat.load_times(REPO / "tools" / "suite_times.json")
+    names = [n for n, _d, _kind in rat.suites(False)] + ["a_new_app"]
+    assert set(rat.CORE_PARTS) <= set(times), "each core suite is planned by a time of its own"
+    loads = [sum(rat.expected(n, times) for n in rat.shard_of(names, times, k, 6)) for k in range(1, 7)]
+    assert max(loads) <= 1.1 * sum(loads) / 6, loads
+    assert max(rat.expected(n, times) for n in names) < sum(loads) / 6
+
+
 def test_a_part_runs_only_its_own_suites(fake_run, tmp_path, monkeypatch, capsys):
     seen = []
-    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S: (seen.append(d.name) or ("1 passed", 0, [])))
+    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S, **_: (seen.append(d.name) or ("1 passed", 0, [])))
     times = {"a": 100, "b": 90, "c": 20, "d": 10}
     fake_run({n: tmp_path / n for n in times}, times)
     assert rat.main(["--shard", "1/2", "--jobs", "1"]) == 0
@@ -229,7 +245,7 @@ def test_a_suite_may_run_twice_its_time_and_never_less_than_half_an_hour():
 
 def test_each_suite_is_run_with_its_own_limit(fake_run, tmp_path, monkeypatch):
     given = {}
-    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S: (
+    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S, **_: (
         given.__setitem__(d.name, timeout) or ("1 passed", 0, [])))
     fake_run({n: tmp_path / n for n in ("long", "short", "new")}, {"long": 1500, "short": 5})
     assert rat.main(["--jobs", "2"]) == 0
@@ -574,7 +590,8 @@ def test_a_suite_out_of_time_is_not_the_end_of_the_run(fake_run, tmp_path, monke
                   """)})
     real = rat.run_suite
     monkeypatch.setattr(rat, "run_suite",
-                        lambda d, py, timeout=rat.SUITE_LIMIT_S: real(d, py, timeout=3 if d.name == "slow" else timeout))
+                        lambda d, py, timeout=rat.SUITE_LIMIT_S, **kw: real(d, py, timeout=3 if d.name == "slow" else timeout,
+                                                                             **kw))
     assert rat.main(["--jobs", "2"]) == 1
     lines = capsys.readouterr().out.splitlines()
     out = "\n".join(lines)
@@ -646,7 +663,7 @@ def test_a_test_out_of_time_leaves_every_threads_stack_in_the_kept_output(fake_r
         "due": SOON + 3, "part": str(tmp_path / "due.part"), "mark": str(mark)})})
     real, now = rat.run_suite, {}
     monkeypatch.setattr(rat, "run_suite",
-                        lambda d, py, timeout=1800: real(d, py, timeout=now["limit"], stacks_after=SOON))
+                        lambda d, py, timeout=1800, **kw: real(d, py, timeout=now["limit"], stacks_after=SOON, **kw))
     # A limit that ran out before the stacks were due proves nothing, so it is
     # tried again with a longer one, as for the test that only sleeps above.
     for limit in (10, 30, 90):
@@ -688,8 +705,8 @@ def test_stacks_written_during_a_test_that_passed_leave_its_summary_alone(fake_r
     fake_run({"slow": suite_with(tmp_path / "s", "slow", SLOW % {"seconds": SOON + 3})})
     real, seen = rat.run_suite, []
 
-    def run_suite(d, py, timeout=1800):
-        came = real(d, py, timeout=timeout, stacks_after=SOON)
+    def run_suite(d, py, timeout=1800, **kw):
+        came = real(d, py, timeout=timeout, stacks_after=SOON, **kw)
         seen.append(came[0])
         return came
     monkeypatch.setattr(rat, "run_suite", run_suite)
@@ -719,7 +736,7 @@ def test_a_suite_that_ended_after_its_stacks_were_written_prints_none_of_them(fa
     fake_run({"gone": suite_with(tmp_path / "s", "gone", GONE % {"seconds": SOON + 3})})
     real = rat.run_suite
     monkeypatch.setattr(rat, "run_suite",
-                        lambda d, py, timeout=1800: real(d, py, timeout=timeout, stacks_after=SOON))
+                        lambda d, py, timeout=1800, **kw: real(d, py, timeout=timeout, stacks_after=SOON, **kw))
     assert rat.main(["--jobs", "1"]) == 1
     out = capsys.readouterr().out
     assert any(ln.split()[:2] == ["FAIL", "gone"] for ln in out.splitlines()), out
@@ -842,14 +859,14 @@ def test_a_run_inside_a_test_takes_no_lock(fake_run, tmp_path, monkeypatch):
     def must_not_wait(lock, replace):
         raise AssertionError("a run inside a test waited for the machine's lock")
     monkeypatch.setattr(rat, "take_turn", must_not_wait)
-    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S: ("1 passed", 0, []))
+    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S, **_: ("1 passed", 0, []))
     fake_run({"only": tmp_path / "only"})
     assert os.environ.get("PYTEST_CURRENT_TEST")
     assert rat.main(["--jobs", "2"]) == 0
 
 
 def test_each_run_keeps_its_times_and_writes_them_only_when_asked(fake_run, tmp_path, monkeypatch):
-    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S: ("1 passed", 0, []))
+    monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S, **_: ("1 passed", 0, []))
     fake_run({"x": tmp_path / "x", "y": tmp_path / "y"}, {"x": 7})
     assert rat.main(["--jobs", "2"]) == 0
     assert set(json.loads((tmp_path / "test-output" / "times.json").read_text())) == {"x", "y"}
@@ -920,7 +937,7 @@ def timed_suites(monkeypatch, took: dict, failing=(), empty=(), canary_ran=True)
     monkeypatch.setattr(rat, "ThreadPoolExecutor", InOrder)
     started, limits = [], {}
 
-    def run_suite(d, py, timeout=rat.SUITE_LIMIT_S):
+    def run_suite(d, py, timeout=rat.SUITE_LIMIT_S, **_):
         started.append(d.name)
         limits[d.name] = timeout
         if took[d.name] is None:

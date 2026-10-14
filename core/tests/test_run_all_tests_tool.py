@@ -18,8 +18,13 @@ They also check that every suite runs on the newest Playwright the
 machine holds, as CI and the packaged app do, and that a run where one
 could not is refused, and that a suite's counts come from pytest's own
 last line, whatever a test's thread printed after it.
+
+And that the core's tests, run as two suites from one folder, run each
+file in exactly one of them, the canary in core, and that a core-browsers
+that collects nothing fails.
 """
 import functools
+import importlib.util
 import io
 import json
 import os
@@ -914,7 +919,7 @@ def run_with(environments, asked_afresh, tmp_path, monkeypatch):
     def make(suites: dict, names: list, builds=("1234", "1243"), unfinished=()) -> dict:
         ran = {}
 
-        def run_suite(d, py, timeout=rat.SUITE_LIMIT_S):
+        def run_suite(d, py, timeout=rat.SUITE_LIMIT_S, **_):
             ran[d.name] = py
             return "1 passed in 0.01s", 0, list(CANARY_PASSED) if d.name == rat.CANARY_SUITE else []
         monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
@@ -1142,3 +1147,159 @@ def test_named_suites_take_no_shard_and_keep_no_times(one_suite, capsys, tmp_pat
     assert rat.main(["--suites", "kroger", "--jobs", "1", "--write-times"]) == 0
     assert (tmp_path / "times.json").read_text(encoding="utf-8") == before, \
         "a part run's times are not the times of a full run"
+
+
+# -- the core's two suites -------------------------------------------------------
+#
+# Whole, core ran alone in CI's part 1 and took 36 to 45 minutes of the job's
+# 45, and two runs of 12 were stopped at the limit with nothing failed. So
+# its tests run as two suites from the one folder, core and core-browsers,
+# which takes the files whose own code drives a real browser.
+
+def _core_part():
+    spec = importlib.util.spec_from_file_location("core_part_under_test", rat.PLUGINS / "core_part.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_core_runs_as_two_suites_from_its_one_folder():
+    """The plugin and the runner name the two the same, the canary's suite
+    is the first, and a quick run holds both."""
+    cp = _core_part()
+    assert rat.CORE_PARTS == (cp.CORE, cp.BROWSERS) == ("core", "core-browsers")
+    assert rat.CANARY_SUITE == cp.CORE
+    for quick in (False, True):
+        core = [(name, d, kind) for name, d, kind in rat.suites(quick) if d == REPO / "core"]
+        assert core == [(name, REPO / "core", "core") for name in rat.CORE_PARTS], quick
+
+
+def test_every_core_test_file_runs_in_exactly_one_of_the_two(monkeypatch):
+    """By the plugin's own hook, as pytest asks it, over every file the core
+    has. The canary stays in core though it starts a browser, and pytest run
+    by hand in core/, with no part named, still runs every file."""
+    cp = _core_part()
+    files = sorted({f for pattern in cp.PYTHON_FILES for f in (REPO / "core" / "tests").glob(pattern)})
+    assert len(files) > 100
+    kept = {}
+    for part in rat.CORE_PARTS:
+        monkeypatch.setenv(cp.PART, part)
+        kept[part] = {f.name for f in files if cp.pytest_ignore_collect(f, None) is None}
+    assert kept["core"] | kept["core-browsers"] == {f.name for f in files}
+    assert not kept["core"] & kept["core-browsers"]
+    assert cp.drives_a_browser(REPO / "core" / "tests" / rat.CANARY_FILE.split("/")[-1])
+    assert "test_failure_canary.py" in kept["core"]
+    assert {"test_pressing_in_a_browser.py", "test_delivery_live.py"} <= kept["core-browsers"]
+    assert 20 <= len(kept["core-browsers"]) < len(kept["core"])
+    monkeypatch.delenv(cp.PART)
+    assert all(cp.pytest_ignore_collect(f, None) is None for f in files)
+    assert cp.pytest_ignore_collect(REPO / "core" / "tests" / "conftest.py", None) is None
+
+
+def test_a_browser_named_only_in_words_does_not_move_a_file(tmp_path):
+    cp = _core_part()
+    for name, text, drives in [
+            ("test_docstring.py", '"""Calls sync_playwright and launch, in words."""\n', False),
+            ("test_comment.py", "# browser = p.chromium.launch()\nX = 'launch'\n", False),
+            ("test_a_name_alone.py", "def test_it():\n    assert launch is not None\n", False),
+            ("test_broken.py", "def test_it(:\n    sync_playwright()\n", False),
+            ("test_called.py", "def test_it():\n    with sync_playwright() as p:\n        pass\n", True),
+            ("test_a_method.py", "def test_it(p):\n    p.chromium.launch()\n", True),
+            ("test_a_helper.py", "def test_it():\n    drawn_browser()\n", True)]:
+        (tmp_path / name).write_text(text, encoding="utf-8")
+        assert cp.drives_a_browser(tmp_path / name) is drives, name
+        assert cp.part_of(tmp_path / name) == ("core-browsers" if drives else "core"), name
+    canary = tmp_path / "test_failure_canary.py"
+    canary.write_text("def test_it():\n    launch()\n", encoding="utf-8")
+    assert cp.drives_a_browser(canary) and cp.part_of(canary) == "core"
+
+
+def test_a_file_pytest_collects_by_any_pattern_runs_in_one_suite(tmp_path, monkeypatch):
+    """pytest also collects *_test.py, and pytest.ini may name other
+    patterns. The hook reads the run's own python_files, so such a file is
+    left out of one suite, never out of neither and run in both (review)."""
+    cp = _core_part()
+
+    class Config:
+        def __init__(self, patterns):
+            self.patterns = patterns
+
+        def getini(self, name):
+            assert name == "python_files"
+            return self.patterns
+
+    for name, patterns in [("drives_test.py", ["test_*.py", "*_test.py"]), ("check_drives.py", ["check_*.py"]),
+                           ("test_drives.py", ["test_*.py", "*_test.py"])]:
+        f = tmp_path / name
+        f.write_text("def test_it():\n    sync_playwright()\n", encoding="utf-8")
+        kept = []
+        for part in rat.CORE_PARTS:
+            monkeypatch.setenv(cp.PART, part)
+            if cp.pytest_ignore_collect(f, Config(patterns)) is None:
+                kept.append(part)
+        assert kept == ["core-browsers"], name
+    monkeypatch.setenv(cp.PART, "core")
+    assert cp.pytest_ignore_collect(tmp_path / "drives_test.py", None), "pytest's default patterns without a config"
+
+
+SPLIT_FILES = {
+    "tests/test_plain.py": "import os, pathlib\n\ndef test_plain():\n"
+                           "    pathlib.Path(os.environ['RAN_IN'], 'plain').touch()\n",
+    "tests/test_drives.py": "import os, pathlib\n\ndef test_drives():\n"
+                            "    pathlib.Path(os.environ['RAN_IN'], 'drives').touch()\n"
+                            "    if False:\n        sync_playwright()\n",
+    "tests/test_failure_canary.py": "import os, pathlib\n\ndef test_it():\n"
+                                    "    pathlib.Path(os.environ['RAN_IN'], 'canary').touch()\n"
+                                    "    if False:\n        launch()\n",
+}
+
+
+def test_each_of_the_cores_suites_runs_only_its_own_files(tmp_path, monkeypatch):
+    """Through run_suite, so a real pytest with the plugin, each test leaving
+    a mark of its own. No part named runs everything, as for any suite."""
+    (tmp_path / "pytest.ini").write_text((REPO / "pytest.ini").read_text(encoding="utf-8"), encoding="utf-8")
+    suite = tmp_path / "core"
+    for rel, text in SPLIT_FILES.items():
+        _write(suite, rel, text)
+    ran = {}
+    for part in ("", *rat.CORE_PARTS):
+        marks = tmp_path / ("marks-" + (part or "whole"))
+        marks.mkdir()
+        monkeypatch.setenv("RAN_IN", str(marks))
+        output, code, _records = rat.run_suite(suite, Path(sys.executable), timeout=300,
+                                               **({"part": part} if part else {}))
+        assert code == 0, output
+        ran[part] = sorted(p.name for p in marks.iterdir())
+    assert ran == {"": ["canary", "drives", "plain"], "core": ["canary", "plain"], "core-browsers": ["drives"]}
+
+
+def _both_core_suites(one_suite, monkeypatch, files):
+    suite = one_suite(files)
+    monkeypatch.setattr(rat, "suites", lambda quick: [(name, suite, "core") for name in rat.CORE_PARTS])
+    return suite
+
+
+def test_a_run_of_both_core_suites_counts_each_test_once(one_suite, monkeypatch, tmp_path, capsys):
+    _both_core_suites(one_suite, monkeypatch, SPLIT_FILES)
+    monkeypatch.setenv("RAN_IN", str(tmp_path))
+    assert rat.main(["--jobs", "1"]) == 0
+    out = capsys.readouterr().out
+    lines = {ln.split()[1]: ln for ln in out.splitlines() if ln.split()[:1] == ["ok"]}
+    assert "2 passed" in lines["core"] and "1 passed" in lines["core-browsers"], out
+    assert "\n3 passed, 0 failed, 0 skipped" in out, out
+    assert out.rstrip().endswith("all suites passed, privacy canary included"), out
+
+
+def test_a_core_browsers_that_collects_nothing_fails(one_suite, monkeypatch, tmp_path, capsys):
+    """Then the rule placing the core's files found no browser file, so the
+    split has gone wrong, and a run is not to pass on it."""
+    files = {k: v for k, v in SPLIT_FILES.items() if k != "tests/test_drives.py"}
+    _both_core_suites(one_suite, monkeypatch, files)
+    monkeypatch.setenv("RAN_IN", str(tmp_path))
+    assert rat.main(["--jobs", "1"]) == 1
+    out = capsys.readouterr().out
+    assert ("FAIL core-browsers    collected no test, so the core's split into two suites "
+            "has gone wrong") in out, out
+    assert "FAILING SUITE  core-browsers" in out, out
+    assert any(ln.split()[:2] == ["ok", "core"] for ln in out.splitlines()), out
+    assert "all suites passed" not in out, out

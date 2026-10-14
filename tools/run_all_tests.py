@@ -1,7 +1,7 @@
 """Run every test in the repository, and say plainly what did not run.
 
     python tools/run_all_tests.py
-    python tools/run_all_tests.py --quick     core and gui only
+    python tools/run_all_tests.py --quick     the core's two suites, gui and server only
     python tools/run_all_tests.py --jobs 4    four suites at a time
     python tools/run_all_tests.py --shard 2/6 the second of six parts, for CI
     python tools/run_all_tests.py --stop      stop this checkout's run
@@ -193,6 +193,15 @@ several runners together finish in about the time of the longest part.
 Each part refuses to pass on what it ran, and the privacy canary runs in
 the part that holds the core.
 
+The core's tests run as two suites from the one folder, core and
+core-browsers, which takes the files whose own code drives a real browser
+(tools/pytest_plugins/core_part.py says which). Whole, core ran alone in
+CI's part 1 and took 36 to 45 minutes of the job's 45 while the other
+parts took 25 to 28, and here a whole run took about as long as core
+alone. Every file runs in exactly one of the two, a new one in core unless
+it drives a browser, and the canary always in core. A core-browsers that
+collects nothing fails, since then the split itself has gone wrong.
+
 A part plans from that file alone, never from a record of the machine it
 runs on, since each part works out the split for itself and all of them
 have to agree. CI's times are close to this machine's when it is quiet.
@@ -243,10 +252,16 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
-# The plugin that writes down where each failure happened. Its folder holds
-# nothing else, so putting it on a suite's path cannot shadow a module.
+# The plugins a suite runs with, the one that writes down where each failure
+# happened and the one that says which of the core's two suites a file is in.
+# Their folder holds nothing else, and no module of any suite shares their
+# names, so putting it on a suite's path cannot shadow a module.
 PLUGINS = REPO / "tools" / "pytest_plugins"
 WHERE = "where_it_failed"
+CORE_PART = "core_part"
+CORE_PART_ENV = "PAPERPULL_CORE_PART"
+# The core's two suites, both run from core/, each told which it is.
+CORE_PARTS = ("core", "core-browsers")
 WHERE_FILE = "PAPERPULL_WHERE_IT_FAILED"
 # The test file whose every test the plugin writes down, passed or not.
 OUTCOMES_OF = "PAPERPULL_OUTCOMES_OF"
@@ -439,8 +454,8 @@ def candidates() -> list:
 
 
 def suites(quick: bool) -> list:
-    out = [("core", REPO / "core", "core"), ("gui", REPO / "gui", "gui"),
-           ("server", REPO / "server", "server")]
+    out = [(name, REPO / "core", "core") for name in CORE_PARTS]
+    out += [("gui", REPO / "gui", "gui"), ("server", REPO / "server", "server")]
     if not quick:
         out += [(d.name, d, "app") for d in sorted((REPO / "apps").iterdir())
                 if d.is_dir() and not d.name.startswith(".") and (d / "tests").is_dir()]
@@ -637,19 +652,27 @@ def descendants(pid: int) -> list:
     return found
 
 
-def run_suite(d: Path, py: Path, timeout: int = SUITE_LIMIT_S, stacks_after: int = STACKS_AFTER):
+def run_suite(d: Path, py: Path, timeout: int = SUITE_LIMIT_S, stacks_after: int = STACKS_AFTER,
+              part: str = ""):
     """Run one suite. Its whole output, its exit code, and what the plugin
     wrote down, each failure and how each test of the suite's own canary
     file ended, which only the core suite has. A suite that runs out of
     time is ended with everything it started and comes back as a failure
     that says so. A test still running after stacks_after seconds, and not
-    yet failed, has every thread's stack written into the output first."""
+    yet failed, has every thread's stack written into the output first.
+    part names which of the core's two suites this is, so its folder's
+    files of the other one are left out (CORE_PARTS)."""
     fd, record = tempfile.mkstemp(prefix="paperpull-where-", suffix=".jsonl")
     os.close(fd)
     env = with_this_core(PLUGINS)
     env[WHERE_FILE] = record
     env[OUTCOMES_OF] = str(d / CANARY_FILE)
     env[IN_RUN] = "1"
+    env.pop(CORE_PART_ENV, None)
+    chosen = []
+    if part:
+        env[CORE_PART_ENV] = part
+        chosen = ["-p", CORE_PART]
     try:
         # Left in the runner's process group, so Ctrl+C, a closed terminal or
         # a kill of the run's group reaches the suite as it reaches the
@@ -657,8 +680,8 @@ def run_suite(d: Path, py: Path, timeout: int = SUITE_LIMIT_S, stacks_after: int
         # them, and the runner passing them on still lost suites. So
         # stop_tree follows what the suite started instead of ending a group.
         proc = subprocess.Popen([str(py), "-m", "pytest", "-q", "--no-header",
-                                 "-rsfE", "-p", "no:cacheprovider", "-p", WHERE,
-                                 "-o", "faulthandler_timeout=%d" % stacks_after],
+                                 "-rsfE", "-p", "no:cacheprovider", "-p", WHERE] + chosen +
+                                ["-o", "faulthandler_timeout=%d" % stacks_after],
                                 cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, errors="replace", env=env)
         with _RUNNING_LOCK:
@@ -1213,7 +1236,7 @@ def stop_earlier(lock: RunLock) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--quick", action="store_true", help="core and gui only")
+    ap.add_argument("--quick", action="store_true", help="the core's two suites, gui and server only")
     ap.add_argument("--jobs", type=int, default=None,
                     help="suites run at once, %d here by default" % default_jobs())
     ap.add_argument("--shard", default=None, metavar="K/N",
@@ -1341,7 +1364,9 @@ def run(args, lock=None) -> int:
     def one(item):
         name, d, py = item
         started = time.time()
-        out, returncode, records = run_suite(d, py, timeout=limit_of(name, times))
+        # Only the core's two suites are told a part, and each is told its own.
+        part = {"part": name} if name in CORE_PARTS else {}
+        out, returncode, records = run_suite(d, py, timeout=limit_of(name, times), **part)
         return name, out, returncode, records, time.time() - started
 
     def report(name, out, returncode, records, seconds):
@@ -1361,6 +1386,13 @@ def run(args, lock=None) -> int:
                 failed += int(n)
         skip_lines.extend(ln for ln in out.splitlines() if ln.startswith("SKIPPED"))
         ok = returncode in (0, 5)
+        # pytest's 5 is "collected nothing". For core-browsers that means the
+        # rule placing the core's files found no browser file, or left them
+        # all out, so the split has gone wrong and says nothing true about
+        # where they ran. core itself is held to its canary instead.
+        if name == CORE_PARTS[1] and returncode == 5:
+            ok = False
+            summary = "collected no test, so the core's split into two suites has gone wrong"
         if not ok:
             broken.append((name, summary))
         print("%-4s %-16s %s" % ("ok" if ok else "FAIL", name, summary[:92]), flush=True)

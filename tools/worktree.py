@@ -337,15 +337,18 @@ def suites_for(tree: Path, changed) -> list:
     for path in changed:
         parts = path.replace("\\", "/").split("/")
         if parts[0] == "apps" and len(parts) > 2:
-            name = parts[1] if (tree / "apps" / parts[1] / "tests").is_dir() else ""
+            found = [parts[1]] if (tree / "apps" / parts[1] / "tests").is_dir() else []
         elif parts[0] in ("core", "tools"):
-            name = "core"
+            # The core's tests run as two suites from one folder, and either
+            # can meet the change (tools/pytest_plugins/core_part.py).
+            found = ["core", "core-browsers"]
         elif parts[0] in ("gui", "server") and len(parts) > 1:
-            name = parts[0]
+            found = [parts[0]]
         else:
-            name = ""
-        if name and name not in names:
-            names.append(name)
+            found = []
+        for name in found:
+            if name not in names:
+                names.append(name)
     return names
 
 
