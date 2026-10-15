@@ -55,6 +55,8 @@ class MailTriggers:
             return
         client = None
         try:
+            if any(c in cfg["folder"] for c in "\r\n\0") or len(cfg["folder"]) > 256:
+                raise ValueError("invalid billing folder")
             # No implicit plaintext even on loopback; trust Bridge's exported
             # certificate through cafile. Dedicated Bridge credentials only.
             context = ssl.create_default_context(cafile=cfg.get("ca_file"))

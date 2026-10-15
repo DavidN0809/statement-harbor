@@ -185,6 +185,14 @@ dashboard with the same care as an authenticated bank browser.
 
 ## Optional integrations and REST-only deployment
 
+For local onboarding without service credentials, run
+`docker compose -f deploy/compose.local.yaml up -d` and open
+`http://127.0.0.1:8765`. Retrieve the initial setup code from that collector's
+container log and choose your dashboard password yourself. This variant has
+persistent archive, settings, profile and browser volumes, and no consume mount.
+Delivery therefore stays PENDING until Paperless is configured. Existing provider
+sign-in remains interactive. There is no embedded LLM or model-service dependency.
+
 See [INTEGRATIONS.md](INTEGRATIONS.md) for state semantics, credentials, sender
 validation and recovery. For a local REST-only trial, copy and privately edit
 `deploy/integrations.api.example.json`, set `HARBOR_INTEGRATIONS_FILE` and

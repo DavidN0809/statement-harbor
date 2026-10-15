@@ -34,7 +34,7 @@ password, checked unauthenticated/authenticated routes, created a synthetic
 provider configuration and ran the container self-test. Chrome
 155.0.8059.79 ran with its namespace sandbox and seccomp active. The test checked
 that VNC was not reachable outside the container. It then removed only its
-own test project and volumes. The final local image ID is
+own test project and volumes. The Milestone 1/2 local image ID was
 `sha256:c1caef5c846c4cc8cdad8cca29275a7bc090cee7ca2101c5c2503bec73c68ced`.
 This is a local image ID, not a published registry digest.
 
@@ -44,3 +44,41 @@ provider authentication longevity and ingestion processing remain UNVERIFIED.
 Kubernetes manifests were structurally checked, not deployed to the homelab.
 See OPERATIONS.md and STATEMENT-HARBOR.md for remaining acceptance steps and
 the deliberate UNCERTAIN state for ambiguous consume-folder handoffs.
+
+
+## Advanced integration implementation validation
+
+The continuation implements Paperless API delivery, optional Bridge triggers,
+Home Assistant intervention notices, publication-cycle expectations, bounded
+publication retries and historical backfill. No LLM SDK, model calls or AI-service
+runtime was added.
+
+- Broad Windows GUI/server/core integration run: 899 passed, 8 platform skips,
+  one route-test fixture initialization failure. The fixture was corrected;
+  the route/automation/browser/server rerun passed all 291 checks.
+- Latest focused Windows API, outbox, integration and deployment checks: 37 passed.
+- Linux production-image runtime checks: 104 passed. An earlier expanded test
+  invocation also selected build-context tests that require Git, which is
+  intentionally absent from the runtime image. Those build tests passed on the
+  Windows development host; the Linux runtime selection excludes them.
+- Isolated existing Ally suite: 124 passed. Nelnet: 43 passed.
+- Real browser dashboard check passed, including archive-expectation edits.
+- Docker build and smoke/self-test passed with namespace sandbox and seccomp on.
+- REST-only Compose configuration and actual `kubectl kustomize deploy` rendering
+  passed. The rendered Deployment has no consume PVC dependency and mounts its
+  integration configuration and secret references read-only.
+- Source lint passed. The pinned integration diff fe93dae0..495b67c3 completed
+  source-backed security review with no reportable findings. This is limited to
+  that change set, with no real provider or homelab penetration testing. A later
+  two-line mail-folder validation guard and local-onboarding Compose example were
+  separately inspected and tested as ordinary implementation changes.
+
+A persistent local onboarding container is started separately from the temporary
+smoke project, using deploy/compose.local.yaml. It has no Paperless mount or token:
+this does not establish real ingestion. The configured homelab Kubernetes API was
+unreachable during read-only discovery, so no cluster resources were modified.
+NCSECU and SoFi remain disabled boundaries requiring actual authenticated portal
+implementation, and FFSB-NC remains a disabled mortgage placeholder. The project
+must not be described as fully operational for those providers.
+
+Latest built onboarding image: `sha256:e32e5e3a10b2304922db6fd5c273e8f46cf6843e2cded2330a008852ba51cf52`. Local `/healthz` returned HTTP 200 and Docker reported healthy.
