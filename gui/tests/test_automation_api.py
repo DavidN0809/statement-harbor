@@ -48,6 +48,27 @@ def test_authentication_origin_and_host_protect_schedule(client):
     assert not before["settings"]["enabled"]
 
 
+def test_backfill_range_is_durable_bounded_and_clears_after_success(client):
+    schedule(client)
+    assert client.post("/api/automation/backfill", json={"app": "Synthetic Bank", "start": "2026-02-30", "end": "2026-10-01"}).status_code == 400
+    assert client.post("/api/automation/backfill", json={"app": "Synthetic Bank", "start": "2026-01-01", "end": "2026-10-01"}).status_code == 200
+    store = panel.app.state.automation
+    assert store.rows()[0]["range_start"] == "2026-01-01"
+    store.finish("Synthetic Bank", "primary", "FAILED")
+    assert store.rows()[0]["range_end"] == "2026-10-01"
+    store.finish("Synthetic Bank", "primary", "COMPLETED")
+    assert store.rows()[0]["range_start"] == ""
+
+
+def test_expectations_and_notification_suppression(client):
+    rule = {"start": "2026-01-01", "cycle": "quarterly"}
+    assert client.post("/api/automation/expectations", json={"app": "Synthetic Bank", "rules": [rule]}).status_code == 200
+    assert client.post("/api/automation/notifications", json={"app": "Synthetic Bank", "disabled": True}).status_code == 200
+    value = client.get("/api/automation").json()["integrations"]
+    assert value["suppression"] == {"Synthetic Bank": True}
+    assert value["expectations"][0]["rules"] == [rule]
+
+
 @pytest.mark.parametrize("operation,data", [
     ("schedule", {"app": "Unknown"}),
     ("schedule", {"app": "Synthetic Bank", "cron": "invalid"}),

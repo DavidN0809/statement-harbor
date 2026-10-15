@@ -35,3 +35,19 @@ def test_compose_trial_publishes_only_private_dashboard_and_preserves_sandbox():
     assert service["security_opt"] == ["seccomp=../server/seccomp-chrome.json"]
     assert "privileged" not in service
     assert service["environment"]["TZ"] == "America/New_York"
+
+
+def test_rest_only_deployments_mount_configuration_and_secrets_privately():
+    yaml = pytest.importorskip("yaml")
+    service = yaml.safe_load((ROOT / "deploy" / "compose.api.yaml").read_text())["services"]["collector"]
+    assert service["ports"] == ["127.0.0.1:8765:8765"]
+    config = next(v for v in service["volumes"] if isinstance(v, dict))
+    assert config["read_only"]
+    assert service["secrets"] == ["paperless_token"]
+    patch = yaml.safe_load((ROOT / "deploy" / "kubernetes-api.patch.yaml").read_text())
+    pod = patch["spec"]["template"]["spec"]
+    mounts = pod["containers"][0]["volumeMounts"]
+    assert next(m for m in mounts if m["name"] == "consume")["$patch"] == "delete"
+    assert all(m["readOnly"] for m in mounts if m["name"] != "consume")
+    secrets = next(v for v in pod["volumes"] if v["name"] == "integrations-secrets")
+    assert secrets["secret"]["defaultMode"] == 0o440

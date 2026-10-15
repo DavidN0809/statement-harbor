@@ -9,7 +9,8 @@ packaging workflows are dormant in this fork until those artifacts are renamed.
 
 ## Current scope
 
-Milestones 1 and 2 have source implementations and synthetic regression tests.
+Milestones 1 and 2 and the locally testable advanced integrations have source
+implementations and synthetic regression tests.
 No real financial credentials were used. The Docker build and local container
 smoke/self-test passed, including Chrome's namespace sandbox and seccomp.
 Homelab Kubernetes deployment, actual provider session persistence and
@@ -35,18 +36,29 @@ Implemented:
 - Durable PDF validation and consume-folder outbox, independent delivery
   retries, atomic publication, and conservative handling of ambiguous crashes.
 
-Deferred to later milestones:
+Additional implementation:
 
-- NCSECU and SoFi adapters, FFSB-NC portal investigation and disabled placeholder.
-  No selectors or download support have been invented for them.
-- Proton Bridge IMAP triggers and Home Assistant API notifications. Current
-  intervention notices are dashboard states, not push notifications.
-- Paperless REST API ingestion, task-success confirmation and richer metadata.
-  Current delivery is the existing consume-folder transport with durable tracking.
-- Publication-cycle-aware missing-statement reconciliation and seasonal checks.
-  Upstream status analysis is retained. No new monthly/quarterly reconciler is claimed.
-- A separate historical-backfill wizard. Existing per-provider date scope and
-  supervised Run All remain available. Scheduled runs honor that configuration.
+- Optional Paperless REST delivery with durable submission/task state, original
+  SHA-256 verification, safe metadata and independent ingestion retries.
+- Optional Proton Bridge read-only IMAP hints with authenticated-sender checks,
+  durable UID cursors and no hyperlink or attachment retrieval.
+- Persistent Home Assistant intervention notices, deduplication and per-provider
+  suppression. Transient delivery failures have an hour's grace.
+- Local monthly/quarterly/annual archive expectations, separate financial account
+  keys, opt-in bounded publication retries and durable historical backfill.
+- Consume-folder and REST-only Compose/Kubernetes deployment examples and mounted
+  secret references. See [INTEGRATIONS.md](INTEGRATIONS.md).
+
+Outstanding live-account dependency:
+
+NCSECU and SoFi are disabled adapter boundaries, **not implemented download
+adapters**. Their authenticated document lists and download controls need an
+actual authorized session. FFSB-NC remains a disabled mortgage placeholder;
+public eStatements do not establish mortgage coverage. Aqua and Rutherford are
+future entries. No selectors or provider functionality have been invented.
+See [PROVIDER-VALIDATION.md](PROVIDER-VALIDATION.md) for evidence and acceptance.
+The complete project definition of done remains unfulfilled until those provider
+adapters, actual service ingestion and homelab deployment are validated.
 
 ## Architecture audit
 

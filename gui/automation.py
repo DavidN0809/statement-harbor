@@ -56,6 +56,10 @@ class Store:
                   state TEXT NOT NULL);
             """)
             db.execute("INSERT OR IGNORE INTO settings VALUES (1, ?)", (json.dumps(DEFAULTS),))
+            columns = {r[1] for r in db.execute("PRAGMA table_info(schedules)")}
+            for column in ("range_start", "range_end"):
+                if column not in columns:
+                    db.execute(f"ALTER TABLE schedules ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
         os.chmod(self.path, 0o600)
 
     @contextmanager
@@ -110,7 +114,13 @@ class Store:
         with self.db() as db:
             return [dict(r) for r in db.execute("SELECT at,app,state FROM events ORDER BY id DESC LIMIT 100")]
 
-    def request(self, app, account, reauthenticated=False):
+    def request(self, app, account, reauthenticated=False, start="", end=""):
+        if start or end:
+            from datetime import date
+            first, last = date.fromisoformat(start), date.fromisoformat(end)
+            if first > last or (last - first).days > 3660:
+                raise ValueError("invalid historical range")
+            start, end = first.isoformat(), last.isoformat()
         with self.db() as db:
             row = db.execute("SELECT state,next FROM schedules WHERE app=? AND account=?", (app, account)).fetchone()
             if row is None:
@@ -121,13 +131,23 @@ class Store:
                 raise ValueError("resolve the sign-in or challenge, then explicitly resume")
             if row[0] == "RATE_LIMITED" and row[1] > time.time():
                 raise ValueError("provider backoff is still active")
-            db.execute("UPDATE schedules SET requested=1, state='READY', failures=0 WHERE app=? AND account=?", (app, account))
+            if reauthenticated and not start and not end:
+                pending = db.execute("SELECT range_start,range_end FROM schedules WHERE app=? AND account=?", (app, account)).fetchone()
+                start, end = pending
+            db.execute("UPDATE schedules SET requested=1, state='READY', failures=0,range_start=?,range_end=? WHERE app=? AND account=?", (start, end, app, account))
 
     def recover(self):
         # Called only after the exclusive process lock is acquired. Missed jobs
         # coalesce to one run. A full discovery reuses the engine's sticky ledger.
         with self.db() as db:
             db.execute("UPDATE schedules SET state='READY',requested=2 WHERE state='RUNNING'")
+
+    def trigger(self, app, account):
+        """Untrusted external hints never override enablement, backoff or auth."""
+        with self.db() as db:
+            row = db.execute("SELECT * FROM schedules WHERE app=? AND account=?", (app, account)).fetchone()
+            if row and row["state"] not in HUMAN | {"RUNNING", "FAILED", "RATE_LIMITED"}:
+                db.execute("UPDATE schedules SET requested=2 WHERE app=? AND account=?", (app, account))
 
     def claim(self, app, account, now):
         cfg = self.settings()
@@ -160,6 +180,8 @@ class Store:
                 due = now + max(cfg["min_interval"], cfg["retry_seconds"] * 2 ** (failures - 1))
             success = now if state in {"COMPLETED", "NO_NEW_DOCUMENTS"} else row["successful"]
             db.execute("UPDATE schedules SET state=?, next=?,failures=?,successful=?,new_files=? WHERE app=? AND account=?", (state, due, failures, success, count, app, account))
+            if state in {"COMPLETED", "NO_NEW_DOCUMENTS"}:
+                db.execute("UPDATE schedules SET range_start='',range_end='' WHERE app=? AND account=?", (app, account))
             # Fixed enum and provider install name only, no child output or account.
             db.execute("INSERT INTO events(at,app,state) VALUES (?,?,?)", (now, app, state))
             db.execute("DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT 500)")

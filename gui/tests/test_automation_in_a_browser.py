@@ -64,6 +64,14 @@ def test_dashboard_schedule_controls_and_intervention_notice(tmp_path, monkeypat
                     page.get_by_role("button", name="Disable provider", exact=True).first.click()
                 page.wait_for_function("document.querySelectorAll('#rows button').length > 0 && [...document.querySelectorAll('#rows button')].some(b => b.textContent === 'Enable provider')")
                 assert all(not row["provider_enabled"] for row in store.rows())
+                page.locator("#rules").fill('[{"start":"2026-01-01","cycle":"quarterly"}]')
+                with page.expect_response("**/api/automation/expectations") as saved:
+                    page.get_by_role("button", name="Save expectations", exact=True).click()
+                assert saved.value.status == 200
+                page.locator("#rules").fill('[]')
+                page.locator("#loadRules").click()
+                assert 'quarterly' in page.locator("#rules").input_value()
+                assert 'UNVERIFIED' in page.locator("#pendingProviders").inner_text()
                 assert not errors, errors
                 output = Path(__file__).resolve().parents[2] / "test-output"
                 output.mkdir(exist_ok=True)

@@ -1,0 +1,30 @@
+# Adjust namespace labels and ports to actual homelab services. Apply only
+# after reviewing. These are additive to the default public-HTTPS egress rule.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: optional-integrations
+  namespace: statement-harbor
+spec:
+  podSelector:
+    matchLabels: {app: statement-harbor}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: paperless}
+          podSelector:
+            matchLabels: {app: paperless}
+      ports: [{protocol: TCP, port: 8000}]
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: home-assistant}
+          podSelector:
+            matchLabels: {app: home-assistant}
+      ports: [{protocol: TCP, port: 8123}]
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: proton-bridge}
+          podSelector:
+            matchLabels: {app: proton-bridge}
+      ports: [{protocol: TCP, port: 1143}]

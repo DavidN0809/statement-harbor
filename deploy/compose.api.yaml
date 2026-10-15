@@ -1,0 +1,40 @@
+# Standalone REST-only deployment: no shared consume volume required.
+name: statement-harbor
+services:
+  collector:
+    image: statement-harbor:dev
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    shm_size: 2gb
+    security_opt:
+      - seccomp=../server/seccomp-chrome.json
+    ports:
+      - "127.0.0.1:8765:8765"
+    environment:
+      TZ: America/New_York
+      PUID: "1000"
+      PGID: "1000"
+      PAPERPULL_DURABLE_DELIVERY: "1"
+      HARBOR_INTEGRATIONS: /run/harbor/integrations.json
+    volumes:
+      - ./data:/data
+      - profiles:/profiles
+      - settings:/config
+      - browser:/browser
+      - type: bind
+        source: ${HARBOR_INTEGRATIONS_FILE:?Set HARBOR_INTEGRATIONS_FILE}
+        target: /run/harbor/integrations.json
+        read_only: true
+    secrets:
+      - paperless_token
+    mem_limit: 4g
+    cpus: 2
+secrets:
+  paperless_token:
+    file: ${PAPERLESS_TOKEN_FILE:?Set PAPERLESS_TOKEN_FILE}
+volumes:
+  profiles:
+  settings:
+  browser:

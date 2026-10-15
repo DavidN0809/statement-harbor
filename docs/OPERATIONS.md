@@ -181,3 +181,36 @@ and local logs under upstream's rules. Do not publish them. Account aliases,
 provider-install names, PDFs, browser profiles and private state are sensitive
 even when central automation logs contain no account numbers. Protect the
 dashboard with the same care as an authenticated bank browser.
+
+
+## Optional integrations and REST-only deployment
+
+See [INTEGRATIONS.md](INTEGRATIONS.md) for state semantics, credentials, sender
+validation and recovery. For a local REST-only trial, copy and privately edit
+`deploy/integrations.api.example.json`, set `HARBOR_INTEGRATIONS_FILE` and
+`PAPERLESS_TOKEN_FILE` to absolute local paths, then use
+`docker compose -f deploy/compose.api.yaml up -d`. This variant needs no consume
+mount. Mount additional Bridge/HA secret files read-only when enabling them.
+
+For Kubernetes REST mode, edit the service origin in the example used by
+`deploy/kustomization.yaml`. Create namespace `statement-harbor` and a private
+Secret named `harbor-integrations`, with keys matching the configured filenames
+(e.g. `paperless_token`). Supply values from local files using Kubernetes tooling;
+do not write them into a committed manifest. Render `kubectl kustomize deploy`
+and review the result before applying. It removes the consume PVC reference
+from the Deployment and mounts configuration and Secret volumes read-only.
+The sample image still needs a locally available immutable image/digest.
+
+The default NetworkPolicy refuses private-network egress. Add only the actual
+Paperless/HA/Bridge endpoints and ports using
+`deploy/integrations-network.example.yaml` as a starting point. Its labels are
+examples and require adaptation. For a private HTTPS reverse proxy outside the
+cluster, allow only its actual IP/443. Keep DNS, browser sandbox, profile isolation,
+filesystem permissions and private ingress controls from the base deployment.
+
+Backups must also retain `expectations`, `publication_retries`, `mail_cursor`,
+`notices` and `suppression` in automation.sqlite3, plus new API transport/task
+columns in delivery.sqlite3. Stop the application or use SQLite online backup;
+copying a live file without its transaction state is unsafe. Credentials and
+Bridge certificates need separate encrypted backup. On restore, API submissions
+reconcile before any resend, and mail baselines only when its UIDVALIDITY changed.

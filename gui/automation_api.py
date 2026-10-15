@@ -29,6 +29,8 @@ def install(panel):
         app.state.automation = store
         from paperpull_core.outbox import Outbox
         app.state.outbox = Outbox(server_mode.config_dir() / "delivery.sqlite3")
+        from integration_worker import Integrations
+        app.state.integrations = Integrations(store, app.state.outbox, panel)
 
         async def execute(row):
             # Recover completed PDFs from an interrupted attempt whose summary
@@ -40,7 +42,8 @@ def install(panel):
                 root = panel._account_root(meta, row["account"])
                 outbox = Outbox(server_mode.config_dir() / "delivery.sqlite3")
                 await asyncio.to_thread(outbox.reconcile, root, row["app"], row["account"], row["attempted"])
-            response = panel._start_run(row["app"], row["account"], "all", (), scheduled=True)
+            scope = panel._scope_flags(start=row.get("range_start", ""), end=row.get("range_end", ""))
+            response = panel._start_run(row["app"], row["account"], "all", scope or (), scheduled=True)
             state, result, code = None, None, None
             async for chunk in response.body_iterator:
                 if isinstance(chunk, bytes):
@@ -88,6 +91,10 @@ def install(panel):
         async def delivery_loop():
             while True:
                 await asyncio.to_thread(app.state.outbox.flush)
+                try:
+                    await asyncio.to_thread(app.state.integrations.tick)
+                except Exception:
+                    app.state.integrations.status = "UNAVAILABLE"
                 await asyncio.sleep(60)
 
         delivery_task = asyncio.create_task(delivery_loop())
@@ -104,6 +111,7 @@ def install(panel):
             del app.state.outbox
             del app.state.dispatcher
             del app.state.automation_tasks
+            del app.state.integrations
 
     app.router.lifespan_context = lifespan
 
@@ -137,11 +145,15 @@ def install(panel):
 
     @app.get("/api/automation", dependencies=[Depends(panel._same_origin_only)])
     def overview():
+        from dataclasses import asdict
+        from paperpull_core.pending_providers import PROVIDERS
         value = store()
         return {"settings": value.settings(), "schedules": value.rows(), "events": value.events(),
                 "accounts": {key: meta["accounts"] for key, meta in panel.discover_apps().items()
                              if meta.get("runnable", True)},
-                "delivery": app.state.outbox.counts()}
+                "delivery": app.state.outbox.counts(), "documents": app.state.outbox.overview(),
+                "integrations": app.state.integrations.overview(),
+                "pending_providers": [asdict(provider) for provider in PROVIDERS]}
 
     @app.post("/api/automation/{operation}", dependencies=[Depends(panel._same_origin_only)])
     async def change(operation: str, request: Request):
@@ -154,6 +166,8 @@ def install(panel):
                 value.settings(data)
             elif operation == "delivery":
                 # Local disk operation only. Never starts a provider run.
+                if data.get("id"):
+                    app.state.outbox.retry(data["id"])
                 await asyncio.to_thread(app.state.outbox.flush)
             else:
                 provider, account = data.get("app"), data.get("account", "primary")
@@ -165,8 +179,14 @@ def install(panel):
                               data.get("zone", "America/New_York"), data.get("enabled", False))
                 elif operation == "provider":
                     value.provider(provider, data.get("enabled"))
+                elif operation == "notifications":
+                    app.state.integrations.notices.suppress(provider, data.get("disabled"))
+                elif operation == "expectations":
+                    app.state.integrations.put(provider, account, data.get("rules"))
                 elif operation in {"run", "reauthenticated"}:
                     value.request(provider, account, operation == "reauthenticated")
+                elif operation == "backfill":
+                    value.request(provider, account, start=data["start"], end=data["end"])
                 else:
                     raise ValueError("unknown operation")
         except (ValueError, TypeError, KeyError):

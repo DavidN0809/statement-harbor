@@ -129,3 +129,26 @@ everywhere at once.
 ## Reporting
 
 The same way as for the desktop app, see [SECURITY.md](SECURITY.md).
+# Statement Harbor optional integration boundaries
+
+The fork's optional integrations are configured by the administrator through a
+private JSON file and mounted secret files. The dashboard cannot set service
+origins or retrieve credentials. HTTP clients reject redirects and ambient
+proxies, verify TLS, bound responses and use fixed API paths. Private HTTP is an
+explicit deployment opt-in. NetworkPolicy must allow only configured internal
+services in addition to provider HTTPS access. The consume transport is retained.
+
+Proton Bridge is read through STARTTLS IMAP, read-only folder selection and
+BODY.PEEK headers. Only exact senders with a passing aligned DMARC result from
+the first verified trusted Authentication-Results header may queue a provider
+hint. Administrators must establish this header trust boundary for their actual
+Bridge installation. No email URL, attachment or HTML is followed. Hints cannot
+override authentication states, enablement, rate limits or trusted provider code.
+
+Paperless API uploads commit SUBMITTING before network submission. Ambiguous
+results reconcile without resending; retrieved originals require a SHA-256 match.
+Metadata and notifications discard free-text provider titles and account details.
+Home Assistant receives fixed intervention messages and opaque notification IDs.
+Its outage and Bridge outages do not stop the provider dispatcher. Unvalidated
+NCSECU, SoFi and future provider boundaries cannot perform page interactions.
+

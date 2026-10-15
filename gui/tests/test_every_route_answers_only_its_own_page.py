@@ -383,6 +383,9 @@ def box(tmp_path, monkeypatch):
                         Store(tmp_path / "config" / "automation.sqlite3"), raising=False)
     monkeypatch.setattr(app_module.app.state, "outbox",
                         Outbox(tmp_path / "config" / "delivery.sqlite3"), raising=False)
+    from integration_worker import Integrations
+    monkeypatch.setattr(app_module.app.state, "integrations",
+                        Integrations(app_module.app.state.automation, app_module.app.state.outbox, app_module), raising=False)
     b.root = tmp_path / "apps"
     b.elsewhere = tmp_path / "Elsewhere"
     b.elsewhere.mkdir()

@@ -1,0 +1,9 @@
+{
+  "paperless": {
+    "mode": "api",
+    "url": "https://paperless.home.arpa",
+    "token_file": "/run/secrets/paperless_token",
+    "create_metadata": true,
+    "account_categories": {}
+  }
+}

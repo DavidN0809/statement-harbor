@@ -94,12 +94,33 @@ async function refresh() {
     }), button('Run now', () => post('run', key)),
     button('Resolved, resume', () => post('reauthenticated', key)),
     button(row.provider_enabled ? 'Disable provider' : 'Enable provider',
-      () => post('provider', {...key, enabled: !row.provider_enabled})));
+      () => post('provider', {...key, enabled: !row.provider_enabled})),
+    button(model.integrations?.suppression[row.app] ? 'Enable notices' : 'Suppress notices',
+      () => post('notifications', {...key, disabled: !model.integrations?.suppression[row.app]})));
     tr.append(actions);
     $('rows').append(tr);
   }
   $('delivery').textContent = Object.entries(model.delivery)
     .map(([state, count]) => state + ': ' + count).join(' · ') || 'No documents queued.';
+  if (model.integrations) {
+    const value = model.integrations;
+    $('integrations').textContent = 'Configuration: ' + value.status + ' · Mail: ' + value.mail + ' · Notifications: ' + value.notifications;
+    $('missing').textContent = value.missing.map(row => row.app + ' / ' + row.account + ': missing ' + row.periods.join(', ')).join(' · ') || 'No missing documents detected for configured expectations.';
+  }
+  $('deliveryRows').replaceChildren();
+  $('pendingProviders').replaceChildren();
+  for (const provider of model.pending_providers || []) {
+    const li = document.createElement('li');
+    li.textContent = provider.name + ' · ' + provider.verification + ' · ' + provider.products.join(', ');
+    $('pendingProviders').append(li);
+  }
+  for (const row of model.documents || []) {
+    const p = document.createElement('p');
+    p.className = 'small';
+    p.textContent = row.provider + ' / ' + row.account + ' · ' + row.state + (row.error ? ' · ' + row.error : '');
+    if (row.state === 'API_FAILED') p.append(' ', button('Retry ingestion', () => post('delivery', {id: row.id})));
+    $('deliveryRows').append(p);
+  }
   const attention = model.schedules.filter(row => advice[row.state]);
   $('attention').textContent = attention.map(row => row.app + ': ' + advice[row.state]).join(' ');
   if (model.delivery.PENDING || model.delivery.CORRUPT || model.delivery.UNCERTAIN) {
@@ -136,5 +157,23 @@ $('schedule').onsubmit = async event => {
   } catch (error) { say(error.message); }
 };
 $('retryDelivery').onclick = () => post('delivery', {}).catch(error => say(error.message));
+$('loadRules').onclick = () => {
+  const group = model.integrations.expectations.find(row => row.app === $('provider').value && row.account === $('account').value);
+  $('rules').value = JSON.stringify(group?.rules || [], null, 2);
+};
+$('expectations').onsubmit = async event => {
+  event.preventDefault();
+  try {
+    await post('expectations', {app: $('provider').value, account: $('account').value, rules: JSON.parse($('rules').value)});
+  } catch (error) { say(error.message); }
+};
 refresh().catch(error => say(error.message));
 setInterval(() => refresh().catch(error => say(error.message)), 10000);
+
+$('backfill').onsubmit = async event => {
+  event.preventDefault();
+  try {
+    await post('backfill', {app: $('provider').value, account: $('account').value,
+      start: $('backfillStart').value, end: $('backfillEnd').value});
+  } catch (error) { say(error.message); }
+};
