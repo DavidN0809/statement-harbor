@@ -1,0 +1,13 @@
+# REST-only alternative: kubectl kustomize deploy | kubectl apply -f -
+# Create the harbor-integrations Secret separately before deploying.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - kubernetes.yaml
+configMapGenerator:
+  - name: harbor-integrations-config
+    namespace: statement-harbor
+    files:
+      - integrations.json=integrations.api.example.json
+patches:
+  - path: kubernetes-api.patch.yaml

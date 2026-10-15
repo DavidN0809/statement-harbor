@@ -31,6 +31,9 @@ permissions:
 
 jobs:
   build:
+    # Statement Harbor distributes the server image. Keep upstream desktop
+    # packaging dormant until those products receive a separate fork identity.
+    if: github.repository == 'rheeloaded/paperpull'
     runs-on: windows-latest
     # The environment is what the Azure federated credential trusts. Its
     # secrets and variables hold the signing details.

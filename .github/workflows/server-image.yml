@@ -61,17 +61,17 @@ jobs:
         run: python server/build.py
 
       - name: Start it the way SERVER.md says, and check it
-        run: python server/smoke.py --image paperpull-server:dev
+        run: python server/smoke.py --image statement-harbor:dev
 
       - name: Keep the tested image for the publish job
         if: github.event_name == 'release'
-        run: docker save "paperpull-server:$(tr -d '[:space:]' < VERSION)" | gzip -1 > paperpull-server.tar.gz
+        run: docker save "statement-harbor:$(tr -d '[:space:]' < VERSION)" | gzip -1 > statement-harbor.tar.gz
 
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'release'
         with:
-          name: paperpull-server-image
-          path: paperpull-server.tar.gz
+          name: statement-harbor-image
+          path: statement-harbor.tar.gz
           # Already compressed, and only the publish job reads it.
           compression-level: 0
           retention-days: 7
@@ -94,7 +94,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: paperpull-server-image
+          name: statement-harbor-image
 
       - name: Push it to the GitHub Container Registry
         env:
@@ -102,24 +102,24 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           version="${TAG#v}"
-          image="ghcr.io/${OWNER,,}/paperpull-server"
-          gunzip -c paperpull-server.tar.gz | docker load
+          image="ghcr.io/${OWNER,,}/statement-harbor"
+          gunzip -c statement-harbor.tar.gz | docker load
           printf '%s' "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-          docker tag "paperpull-server:$version" "$image:$version"
+          docker tag "statement-harbor:$version" "$image:$version"
           docker push "$image:$version"
           # A prerelease is for its testers, and latest stays on the last
           # release everyone gets.
           if [ "$PRERELEASE" != "true" ]; then
-            docker tag "paperpull-server:$version" "$image:latest"
+            docker tag "statement-harbor:$version" "$image:latest"
             docker push "$image:latest"
           fi
           docker logout ghcr.io
 
       - name: Check that anyone can pull it
         run: |
-          image="ghcr.io/${OWNER,,}/paperpull-server:${TAG#v}"
+          image="ghcr.io/${OWNER,,}/statement-harbor:${TAG#v}"
           if docker manifest inspect "$image" > /dev/null 2>&1; then
             echo "anyone can pull $image"
           else
-            echo "::warning title=The server image is private::GitHub makes a new package private, so nobody can pull $image yet. Make it public once, in the package's settings under Danger Zone, https://github.com/users/${OWNER}/packages/container/paperpull-server/settings"
+            echo "::warning title=The server image is private::GitHub makes a new package private, so nobody can pull $image yet. Make it public once, in the package's settings under Danger Zone, https://github.com/users/${OWNER}/packages/container/statement-harbor/settings"
           fi

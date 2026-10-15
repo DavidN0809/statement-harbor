@@ -1,4 +1,8 @@
-# PaperPull Server
+# Statement Harbor Server, derived from PaperPull
+
+This fork adds durable automation. Start with [the fork overview](docs/STATEMENT-HARBOR.md)
+and [the operational runbook](docs/OPERATIONS.md). Build the fork image locally
+before starting it. A published fork image is not yet available.
 
 PaperPull for an always-on machine at home, such as a NAS
 or a home server, used from a browser on any computer on your home network.
@@ -9,7 +13,8 @@ It is the same PaperPull with the same limits. It does not sign in for you.
 You sign in to each provider yourself, on a browser screen the server shows
 in your browser, and a bank that signs you out after a few minutes needs
 you there again next time, as it would on the desktop. It does not run on a
-schedule yet. You start each run from the panel.
+schedule in upstream. This fork adds an opt-in scheduler under **Automation**.
+It reuses the provider's saved session and stops for human authentication.
 
 It has privacy and security pages of its own, [PRIVACY-SERVER.md](PRIVACY-SERVER.md)
 and [SECURITY-SERVER.md](SECURITY-SERVER.md), because unlike the desktop app
@@ -38,7 +43,7 @@ a Raspberry Pi cannot run it.
 ## Get the image
 
 `compose.yaml` names the image every PaperPull release publishes,
-`ghcr.io/rheeloaded/paperpull-server:latest`, and Docker downloads it from
+`ghcr.io/davidn0809/statement-harbor:latest`, and Docker downloads it from
 GitHub the first time the project starts. Before a release publishes it,
 the image is built from that release's code, started the way this page
 describes and checked, and only that very image goes out.
@@ -48,12 +53,12 @@ yourself then, from a checkout of this repository, on any computer with
 Docker and Python.
 
 ```bash
-python server/build.py --save paperpull-server.tar
+python server/build.py --save statement-harbor.tar
 ```
 
-That builds `paperpull-server:dev` from the files git tracks, nothing else
+That builds `statement-harbor:dev` from the files git tracks, nothing else
 from the folder, and writes it to a file you can import on the NAS. Write
-`paperpull-server:dev` as the `image:` in `compose.yaml` to use it.
+`statement-harbor:dev` as the `image:` in `compose.yaml` to use it.
 Building it downloads its parts from Debian, the Python Package Index and
 Google.
 
@@ -136,7 +141,7 @@ The labels in the UGOS Docker app may differ a little from these.
 3. The setup code is in the container's log. Open the `paperpull` container
    in the Docker app and look at its log.
 
-With an image you built yourself, import `paperpull-server.tar` first. In
+With an image you built yourself, import `statement-harbor.tar` first. In
 the Docker app, open **Image** and choose to add or import a local image.
 
 Synology and Unraid should work the same way and have not been tried yet.

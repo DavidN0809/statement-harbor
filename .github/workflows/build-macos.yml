@@ -24,6 +24,8 @@ env:
 
 jobs:
   build:
+    # Do not distribute this modified fork under upstream's desktop identity.
+    if: github.repository == 'rheeloaded/paperpull'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4

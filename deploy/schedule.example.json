@@ -1,0 +1,17 @@
+{
+  "settings": {
+    "enabled": false,
+    "concurrency": 2,
+    "retry_seconds": 21600,
+    "max_retries": 2,
+    "min_interval": 21600,
+    "timeout_seconds": 3600
+  },
+  "schedule": {
+    "app": "Ally Statements",
+    "account": "primary",
+    "enabled": false,
+    "cron": "0 9 10 * *",
+    "zone": "America/New_York"
+  }
+}

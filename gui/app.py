@@ -532,7 +532,7 @@ class NotInAFrame:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
-        own = scope.get("path", "").startswith("/screen/novnc/")
+        own = scope.get("path", "") == "/screen" or scope.get("path", "").startswith("/screen/novnc/")
 
         async def framed(message):
             if message["type"] == "http.response.start":
@@ -1116,6 +1116,14 @@ RUN_LOG = "panel-runs.json"
 RUN_LOG_KEEP = 20
 # (app name, account) -> {"action", "started"} for each run streaming now.
 _RUNS: dict = {}
+
+
+def _run_limit_reached():
+    store = getattr(app.state, "automation", None)
+    return (server_mode.enabled() and store is not None
+            and len(_RUNS) >= store.settings()["concurrency"])
+
+
 # The runs that download, whose ending decides whether an account was left
 # partway. A Login, a Discover or a Verify that stops leaves nothing to
 # continue, so it never makes a row say Continue.
@@ -3168,7 +3176,7 @@ async def api_review_names_apply(request: Request):
 
 
 def _start_run(app: str, account: str, action: str, scope_flags, redownload=False,
-               review: Optional[str] = None):
+               review: Optional[str] = None, scheduled=False):
     """A run of one app for one account, streamed to the page. `review` is
     Review Names' new summaries as JSON, handed to the app in a file of this
     run's own that is gone once the run ends (_hand_over)."""
@@ -3197,6 +3205,10 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
     blocked = setup_needed(meta)
     cmd = (_review_cmd(meta, account) if review is not None
            else _build_cmd(meta, account, action, scope_flags, redownload))
+    if scheduled:
+        # Keep the trusted interpreter and -P boundary, replacing only the
+        # entry point with a core wrapper around the SAME provider main().
+        cmd = [*cmd[:2], "-m", "paperpull_core.automation_runner", *cmd[2:]]
 
     if blocked:
         # Said here rather than let the app start under an interpreter
@@ -3226,6 +3238,11 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         # things that keep code on the image side and data on the /data
         # side. On the desktop it only carries the version through.
         env = _run_env(meta)
+        if scheduled:
+            env["HARBOR_SCHEDULED"] = "1"
+            env["HARBOR_EXPECTED_PROFILE"] = server_mode.profile_for(meta["name"], account)
+            from paperpull_core.process_lock import account_lock_path
+            env["HARBOR_ACCOUNT_LOCK"] = str(account_lock_path(server_mode.config_dir(), app, account))
         # When the run began, so that only a list of new files this run
         # wrote is handed to the server's plug-ins afterwards.
         started = time.time()
@@ -3235,6 +3252,16 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             yield "data: A history file is being imported. Run this once it has finished.\n\n"
             yield "event: done\ndata: 1\n\n"
             return
+        if action != "login" and _run_limit_reached():
+            yield "data: The global account concurrency limit has been reached.\n\n"
+            yield "event: done\ndata: 1\n\n"
+            return
+        if server_mode.enabled():
+            from paperpull_core.process_lock import account_busy
+            if account_busy(server_mode.config_dir(), app, account):
+                yield "data: A scheduled worker still owns this account. Wait for it to end.\n\n"
+                yield "event: done\ndata: 1\n\n"
+                return
         # One run per account. A second, from another tab, would put two
         # downloaders on one progress.json, one browser and one folder.
         # Checked and claimed with nothing awaited between, so two requests
@@ -3334,6 +3361,10 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
                 parsed = run_result.parse(line)
                 if parsed is not None:
                     result = parsed
+                elif scheduled and line.strip() in {
+                        "HARBOR_STATE AUTH_REQUIRED", "HARBOR_STATE CHALLENGE_REQUIRED",
+                        "HARBOR_STATE RATE_LIMITED", "HARBOR_STATE PAUSED"}:
+                    yield "event: automation-state\ndata: %s\n\n" % line.strip().split()[1]
                 else:
                     yield f"data: {line.rstrip()}\n\n"
             code = await to_thread.run_sync(proc.wait)
@@ -3652,9 +3683,8 @@ FOOTER_DESKTOP = (
     '<a href="https://github.com/rheeloaded/paperpull#support" target="_blank" rel="noopener">'
     'buy the Store edition</a></span>')
 FOOTER_SERVER = (
-    '<span>PaperPull Server v__VERSION__ &middot; read-only, runs on your own server</span>\n'
-    '  <span>Free, and it costs money to make. If it saves you time, you can '
-    '<a href="https://ko-fi.com/rheeloaded" target="_blank" rel="noopener">donate on Ko-fi</a>.</span>')
+    '<span>Statement Harbor v__VERSION__ &middot; derived from PaperPull, AGPL-3.0-only</span>\n'
+    '<a href="https://github.com/DavidN0809/statement-harbor">Source code</a>')
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -3662,7 +3692,12 @@ def index():
     server = server_mode.enabled()
     bar = server_mode.server_bar() if server else ""
     footer = FOOTER_SERVER if server else FOOTER_DESKTOP
-    return (HTML.replace("__FOOTER__", footer)
+    page = HTML
+    if server:
+        page = page.replace("PaperPull", "Statement Harbor")
+        page = page.replace('<img src="/favicon.ico" alt="">', '')
+        page = page.replace('<link rel="icon" href="/favicon.ico">', '')
+    return (page.replace("__FOOTER__", footer)
             .replace("__VERSION__", VERSION).replace("__SERVER_BAR__", bar)
             .replace("__SERVER__", "true" if server else "false")
             .replace("__TERMS_VERSION__", TERMS_VERSION)
@@ -3727,4 +3762,10 @@ def _page() -> str:
 
 
 HTML = _page()
+
+# Imported after the panel's run and request-validation functions exist.
+import automation_api  # noqa: E402
+automation_api.install(sys.modules[__name__])
+import screen_input  # noqa: E402
+screen_input.install(sys.modules[__name__])
 

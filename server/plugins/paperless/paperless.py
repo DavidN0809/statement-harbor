@@ -81,6 +81,40 @@ def main() -> int:
         return 1
     files = [Path(p) for p in event.get("new_files") or []]
     files = [p for p in files if p.suffix.lower() in KINDS and p.is_file()]
+    if os.environ.get("PAPERPULL_DURABLE_DELIVERY") == "1":
+        from paperpull_core.outbox import Outbox
+        config = Path(os.environ.get("PAPERPULL_CONFIG") or "/config")
+        outbox = Outbox(config / "delivery.sqlite3")
+        root = Path(os.environ.get("PAPERLESS_CONSUME_DIR") or "/paperless")
+        dest = destination(event)
+        if root.is_dir():
+            try:
+                dest.mkdir(exist_ok=True)
+            except OSError:
+                pass  # Persist the queue and retry locally when writable.
+        identities = outbox.identities(event["archive_root"]) if event.get("archive_root") else {}
+        records = {}
+        if event.get("archive_root"):
+            try:
+                records = json.loads((Path(event["archive_root"]) / "progress.json").read_text(encoding="utf-8"))
+                if not isinstance(records, dict):
+                    records = {}
+            except (ValueError, OSError):
+                pass
+        enqueue_failed = False
+        for src in files:
+            try:
+                outbox.enqueue(src, dest, str(event.get("provider") or "Institution"),
+                               str(event.get("account") or "primary"),
+                               identity=identities.get(str(src.resolve())),
+                               metadata=records.get(identities.get(str(src.resolve())), {}))
+            except (OSError, ValueError, TypeError):
+                enqueue_failed = True
+        if enqueue_failed:
+            print("Some documents could not be queued. Inspect the private archive and storage permissions.")
+        counts = outbox.flush()
+        print("Paperless handoff: " + json.dumps(counts, sort_keys=True))
+        return int(enqueue_failed or any(counts.get(state) for state in ("PENDING", "CORRUPT", "UNCERTAIN", "API_FAILED", "SUBMITTING")))
     if not files:
         return 0
     root = Path(os.environ.get("PAPERLESS_CONSUME_DIR") or "/paperless")

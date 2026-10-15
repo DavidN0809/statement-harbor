@@ -1,0 +1,32 @@
+# Local onboarding before Paperless or the homelab network is configured.
+# No consume folder is mounted: delivery remains PENDING until configured.
+name: statement-harbor
+services:
+  collector:
+    image: statement-harbor:dev
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    shm_size: 2gb
+    security_opt:
+      - seccomp=../server/seccomp-chrome.json
+    ports:
+      - "127.0.0.1:8765:8765"
+    environment:
+      TZ: America/New_York
+      PUID: "1000"
+      PGID: "1000"
+      PAPERPULL_DURABLE_DELIVERY: "1"
+    volumes:
+      - archive:/data
+      - profiles:/profiles
+      - settings:/config
+      - browser:/browser
+    mem_limit: 4g
+    cpus: 2
+volumes:
+  archive:
+  profiles:
+  settings:
+  browser:

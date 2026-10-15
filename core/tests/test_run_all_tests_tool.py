@@ -742,16 +742,17 @@ def _environment(folder: Path, packages: dict) -> Path:
 # to read a PDF with, one has the newest Playwright and no pytest, one has
 # everything the core suite needs but Playwright, and one has all of it.
 HOLDING = {
-    "panel": {"pytest": "9.1.1", "playwright": "1.63.0", "pypdf": "6.19.0"},
+    "panel": {"pytest": "9.1.1", "playwright": "1.63.0", "pypdf": "6.19.0", "yaml": "6.0.3"},
     "app": {"pytest": "9.1.1", "playwright": "1.62.0", "pypdf": "6.16.1"},
     "spreadsheets": {"pytest": "9.1.1", "playwright": "1.62.0", "pypdf": "6.16.1",
                      "openpyxl": "3.1.5", "pdfplumber": "0.11.10"},
-    "panel_ui": {"pytest": "9.1.1", "playwright": "1.62.0", "fastapi": "0.141.1"},
+    "panel_ui": {"pytest": "9.1.1", "playwright": "1.62.0", "fastapi": "0.141.1",
+                 "apscheduler": "3.11.2", "httpx": "0.28.1"},
     "browser_only": {"pytest": "9.1.1", "playwright": "1.63.0"},
     "no_pytest": {"playwright": "1.64.0", "pypdf": "6.20.0"},
     "no_browser": {"pytest": "9.1.1", "pypdf": "6.19.0", "openpyxl": "3.1.5", "pdfplumber": "0.11.10"},
     "everything": {"pytest": "9.1.1", "playwright": "1.63.0", "pypdf": "6.19.0",
-                   "openpyxl": "3.1.5", "pdfplumber": "0.11.10"},
+                   "openpyxl": "3.1.5", "pdfplumber": "0.11.10", "yaml": "6.0.3"},
 }
 
 
@@ -799,9 +800,9 @@ def test_a_suite_runs_on_the_newest_playwright_here_not_its_own_older_one(enviro
 def test_of_two_with_the_same_playwright_the_earlier_runs_it(environments, asked_afresh, tmp_path):
     """So a run uses one environment wherever it can, as CI does."""
     _, panel = environments["panel"]
-    _, browser_only = environments["browser_only"]
-    assert rat.python_for(tmp_path, "server", [panel, browser_only])[0] == panel
-    assert rat.python_for(tmp_path, "server", [browser_only, panel])[0] == browser_only
+    _, other = environments["everything"]
+    assert rat.python_for(tmp_path, "server", [panel, other])[0] == panel
+    assert rat.python_for(tmp_path, "server", [other, panel])[0] == other
 
 
 def test_an_environment_without_pytest_runs_no_suite(environments, asked_afresh, tmp_path):

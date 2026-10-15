@@ -146,7 +146,7 @@ def test_text_files_get_lf_and_binary_files_are_left_alone(working_copy, tmp_pat
 
 def test_a_saved_image_keeps_the_tag_server_md_names(monkeypatch, tmp_path):
     """SERVER.md has a person who imports the saved file write
-    paperpull-server:dev in compose.yaml, and an import brings back only the
+    statement-harbor:dev in compose.yaml, and an import brings back only the
     tags that were saved. Saving the version alone left nothing by that name."""
     seen = []
 
@@ -158,12 +158,12 @@ def test_a_saved_image_keeps_the_tag_server_md_names(monkeypatch, tmp_path):
         return subprocess.CompletedProcess(cmd, 0, out, out)
 
     monkeypatch.setattr(build.subprocess, "run", run)
-    assert build.main(["--save", str(tmp_path / "paperpull-server.tar")]) == 0
+    assert build.main(["--save", str(tmp_path / "statement-harbor.tar")]) == 0
     saved = [c for c in seen if c[:2] == ["docker", "save"]]
     version = (REPO / "VERSION").read_text(encoding="utf-8").strip()
     assert len(saved) == 1
-    assert {"paperpull-server:dev", "paperpull-server:%s" % version} <= set(saved[0])
-    assert "`paperpull-server:dev`" in (REPO / "SERVER.md").read_text(encoding="utf-8")
+    assert {"statement-harbor:dev", "statement-harbor:%s" % version} <= set(saved[0])
+    assert "`statement-harbor:dev`" in (REPO / "SERVER.md").read_text(encoding="utf-8")
 
 
 # -- the Dockerfile and the folder agree ------------------------------------------------

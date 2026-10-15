@@ -1,4 +1,18 @@
-# PaperPull
+# Statement Harbor
+
+This repository is **Statement Harbor**, a modified fork of PaperPull with
+durable server automation. Start with [the fork overview](docs/STATEMENT-HARBOR.md),
+[operations](docs/OPERATIONS.md) and [validation status](docs/VALIDATION.md).
+The upstream README is preserved below for the inherited provider tools.
+Real-account operation and the deployment environment remain UNVERIFIED.
+The collector has no embedded LLM, model API calls or AI-service dependency.
+For local onboarding: `docker compose -f deploy/compose.local.yaml up -d`, then
+open <http://127.0.0.1:8765>. Configure Paperless before enabling collection;
+this onboarding variant leaves delivery pending rather than claiming ingestion.
+
+---
+
+# PaperPull (upstream documentation)
 
 ![Version](https://img.shields.io/github/v/tag/rheeloaded/paperpull?sort=semver&label=version&color=blue)
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)

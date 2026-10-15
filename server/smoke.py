@@ -1,6 +1,6 @@
 """Start PaperPull Server the way SERVER.md tells a person to, and check it.
 
-    python server/smoke.py --image paperpull-server:dev
+    python server/smoke.py --image statement-harbor:dev
 
 It copies compose.yaml and the container's security profile into a folder
 of its own and starts them there with Docker Compose, under a project and
@@ -225,7 +225,7 @@ def self_test() -> None:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--image", default="paperpull-server:dev",
+    ap.add_argument("--image", default="statement-harbor:dev",
                     help="the image to start, default %(default)s")
     ap.add_argument("--keep", action="store_true",
                     help="leave the project running afterwards, to look at it")

@@ -1,0 +1,25 @@
+{
+  "paperless": {
+    "mode": "consume",
+    "url": "https://paperless.home.arpa",
+    "token_file": "/run/secrets/paperless_token",
+    "create_metadata": true,
+    "account_categories": {"Ally/primary": "Checking", "Nelnet/primary": "Loan"}
+  },
+  "home_assistant": {
+    "enabled": false,
+    "url": "https://homeassistant.home.arpa",
+    "token_file": "/run/secrets/home_assistant_token"
+  },
+  "mail": {
+    "enabled": false,
+    "host": "proton-bridge.home.arpa",
+    "port": 1143,
+    "folder": "Billing",
+    "ca_file": "/run/secrets/bridge_ca",
+    "username_file": "/run/secrets/bridge_username",
+    "password_file": "/run/secrets/bridge_password",
+    "authserv_id": "REPLACE_WITH_VERIFIED_PROTON_AUTHSERV_ID",
+    "mappings": []
+  }
+}

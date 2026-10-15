@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: statement-harbor
+  namespace: statement-harbor
+spec:
+  template:
+    spec:
+      containers:
+        - name: collector
+          env:
+            - name: HARBOR_INTEGRATIONS
+              value: /run/harbor/integrations.json
+          volumeMounts:
+            - name: consume
+              $patch: delete
+            - {name: integrations-config, mountPath: /run/harbor, readOnly: true}
+            - {name: integrations-secrets, mountPath: /run/secrets, readOnly: true}
+      volumes:
+        - name: consume
+          $patch: delete
+        - name: integrations-config
+          configMap:
+            name: harbor-integrations-config
+        - name: integrations-secrets
+          secret:
+            secretName: harbor-integrations
+            defaultMode: 0440

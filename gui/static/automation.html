@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Statement Harbor · Automation</title>
+<style>
+:root{color-scheme:dark;--bg:#101722;--panel:#192433;--line:#344455;--muted:#b7c5d2;--accent:#80dfc2}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#edf5fa;font:16px/1.5 system-ui,sans-serif}main{max-width:1280px;margin:auto;padding:32px 24px}a{color:var(--accent)}header{display:flex;justify-content:space-between;align-items:center;gap:20px}h1{font-size:32px;margin:8px 0}h2{font-size:19px}p{color:var(--muted)}section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;margin:24px 0}button,input,select{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px}button{cursor:pointer}button:hover,button:focus-visible{border-color:var(--accent)}input[type=checkbox]{accent-color:var(--accent)}label{display:inline-flex;flex-direction:column;gap:5px;font-size:14px}label.check{flex-direction:row;align-items:center}.controls{display:flex;flex-wrap:wrap;align-items:end;gap:14px}table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:13px 10px;text-align:left;border-bottom:1px solid var(--line)}th{color:var(--muted)}.scroll{overflow:auto}.state{font:13px ui-monospace,monospace;color:var(--accent)}#message{min-height:24px;color:#ffd59b}.actions{display:flex;flex-wrap:wrap;gap:6px}.small{font-size:13px}input[type=number]{width:110px}#cron{width:180px}
+</style></head><body><main>
+<header><div><a href="/">← Accounts &amp; sign-in</a><h1>Statement Harbor</h1><p>Financial document automation, derived from PaperPull.</p></div><span class="state">PRIVATE · SELF-HOSTED</span></header>
+<p id="message" role="status" aria-live="polite"></p><p id="attention" role="status" aria-live="polite"></p>
+<section><h2>Scheduler</h2><form id="settings" class="controls">
+<label class="check"><input type="checkbox" id="global"> Enable scheduler</label>
+<label>Concurrent accounts<input type="number" id="concurrency" min="1" max="8" value="2"></label>
+<label>Minimum interval (seconds)<input type="number" id="interval" min="3600" max="604800" value="21600"></label>
+<label>Retry delay (seconds)<input type="number" id="backoff" min="3600" max="604800" value="21600"></label>
+<label>Retries<input type="number" id="retries" min="0" max="5" value="2"></label><button>Save settings</button>
+</form><p class="small">Run now is an explicit manual request, including when automatic scheduling is disabled. Provider backoff and concurrency limits still apply. Scheduled work pauses while a sign-in screen is connected. Resolve authentication yourself, close the screen, then resume the account below.</p></section>
+<section><h2>Account schedule</h2><form id="schedule" class="controls">
+<label>Provider<select id="provider" required></select></label><label>Account<select id="account" required></select></label>
+<label>Frequency<select id="frequency"><option value="0 9 10 * *">Monthly, day 10 at 09:00</option><option value="0 9 * * 1">Weekly, Monday at 09:00</option><option value="0 9 * * *">Daily at 09:00</option><option value="custom">Custom cron</option></select></label>
+<label>Cron (minute hour day month weekday)<input id="cron" value="0 9 10 * *" required></label>
+<label>Timezone<input id="zone" value="America/New_York" required></label>
+<label class="check"><input type="checkbox" id="enabled"> Automation enabled</label><button>Save account</button>
+</form><p class="small">Cron uses Monday=0 through Sunday=6. A monthly day 31 skips shorter months. Use day 10 or another publication date suitable for this institution. No authentication keepalive requests are made.</p></section>
+<section><h2>Accounts</h2><div class="scroll"><table><thead><tr><th>Provider / account</th><th>Automation</th><th>Status</th><th>Last attempt</th><th>Last successful check</th><th>New PDFs</th><th>Next eligible run</th><th>Actions</th></tr></thead><tbody id="rows"></tbody></table></div><p class="small">AUTH_REQUIRED, CHALLENGE_REQUIRED and PAUSED need human action. All real-account integrations remain UNVERIFIED for your accounts. Edit a provider's date scope on the Accounts page before a historical backfill.</p></section>
+<section><h2>Paperless delivery</h2><p id="delivery"></p><button id="retryDelivery">Retry pending handoffs</button><p class="small">HANDED_OFF confirms publication to the consume folder. Paperless processing must be checked in Paperless. UNCERTAIN requires operator reconciliation and is never automatically resent. CORRUPT documents are quarantined from delivery.</p></section>
+<section><h2>Historical backfill</h2><form id="backfill" class="controls"><label>From<input id="backfillStart" type="date" required></label><label>Through<input id="backfillEnd" type="date" required></label><button>Queue selected account</button></form><p class="small">Uses the provider and account selected above. Discovers existing documents in the chosen range and skips downloaded documents. Authentication stops and concurrency limits still apply.</p></section>
+<section><h2>Integrations &amp; archive expectations</h2><p id="integrations"></p><p id="missing"></p>
+<form id="expectations"><p class="small">Select the provider and account above. Each expectation describes one statement cycle. Quarterly cycles advance from the start month. Use a SHA-256 account key for separate financial accounts under one login. Only local archive records are analyzed.</p>
+<label>Expected documents (JSON array)<textarea id="rules" rows="7" cols="80" spellcheck="false">[]</textarea></label>
+<div class="actions"><button type="button" id="loadRules">Load selected account</button><button>Save expectations</button></div></form>
+<p class="small">Example: [{"start":"2026-01-01","cycle":"monthly","available_day":10,"grace_days":7,"publication_lag_months":1,"document_type":"statement"}]</p>
+<p class="small">Configure optional Paperless API, Proton Bridge and Home Assistant origins in the private integrations.json file. Credentials come from mounted secret files. Mail never opens links or bypasses authentication.</p>
+<div id="deliveryRows"></div></section>
+<section><h2>Recent outcomes</h2><ol id=events class=small></ol></section><footer><p class="small">Read-only provider access · User-managed sign-in and MFA · <a href="https://github.com/rheeloaded/paperpull" rel="noreferrer">Upstream source</a></p></footer>
+</main><script>__AUTOMATION_JS__</script></body></html>

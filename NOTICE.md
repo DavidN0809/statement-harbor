@@ -1,5 +1,10 @@
 # Notice
 
+Statement Harbor modifications, 2026, by the fork contributors.
+Source: https://github.com/DavidN0809/statement-harbor
+This is a modified version derived from PaperPull. It is not an official
+PaperPull release. The original notices and AGPL-3.0-only license are retained.
+
 PaperPull
 Copyright (c) 2026 PaperPull, a trade name of TNE Enterprises LLC, and the PaperPull contributors
 
