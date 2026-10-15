@@ -146,7 +146,7 @@ def panel_checks() -> None:
             page, landed = r.read().decode("utf-8", "replace"), r.url
         with urllib.request.urlopen(PANEL + "/favicon.ico", timeout=10) as r:
             icon, kind = r.read(), r.headers.get("Content-Type", "")
-        check("panel", "<title>PaperPull</title>" in page and icon[:4] == b"\x00\x00\x01\x00",
+        check("panel", "<title>Statement Harbor</title>" in page and icon[:4] == b"\x00\x00\x01\x00",
               "page and tab icon (%s, %d bytes)" % (kind, len(icon)))
         sent_to = urllib.parse.urlsplit(landed).path
         api, screen = status_of(PANEL + "/api/apps"), status_of(PANEL + "/screen")

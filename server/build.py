@@ -1,6 +1,6 @@
 """Build the PaperPull Server image from the files git tracks, and no others.
 
-    python server/build.py                  build paperpull-server:<VERSION> and :dev
+    python server/build.py                  build statement-harbor:<VERSION> and :dev
     python server/build.py --save FILE.tar  and write it to a file a NAS can import
 
 Docker is handed a folder made here, not the working copy. It holds only
@@ -87,12 +87,12 @@ def make_context(dest: Path, repo: Path = REPO) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--save", metavar="FILE", help="also write the image to FILE with docker save")
-    ap.add_argument("--name", default="paperpull-server", help="image name, default %(default)s")
+    ap.add_argument("--name", default="statement-harbor", help="image name, default %(default)s")
     args = ap.parse_args(argv)
 
     version = (REPO / "VERSION").read_text(encoding="utf-8").strip()
     tags = ["%s:%s" % (args.name, version), "%s:dev" % args.name]
-    ctx = Path(tempfile.mkdtemp(prefix="paperpull-server-"))
+    ctx = Path(tempfile.mkdtemp(prefix="statement-harbor-"))
     try:
         n = make_context(ctx)
         print("build context, %d tracked files in %s" % (n, ctx), flush=True)
@@ -119,7 +119,7 @@ def main(argv=None) -> int:
         print("  %s on disk" % disk[0], flush=True)
     if args.save:
         # Both tags, since SERVER.md has a person who imports the file write
-        # paperpull-server:dev in compose.yaml, and an import brings back
+        # statement-harbor:dev in compose.yaml, and an import brings back
         # only the tags that were saved.
         subprocess.run(["docker", "save", "-o", args.save, *tags], check=True)
         print("saved %s, %.0f MB" % (args.save, Path(args.save).stat().st_size / 1e6))

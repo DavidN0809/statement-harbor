@@ -91,6 +91,14 @@ def load_config(path: Optional[Path] = None) -> dict:
     cfg.setdefault("browser", "auto")
     for key, value in sp.config_defaults.items():
         cfg.setdefault(key, value)
+    if os.environ.get("HARBOR_SCHEDULED") == "1":
+        # A provider title, account label or addressee may contain an entire
+        # account number. Automated filenames use only the date and the fixed
+        # provider name. unique_path and the existing document keys preserve
+        # different PDFs on the same date. The saved config stays unchanged.
+        cfg["filename_pattern"] = "{date:yyyy-mm-dd} {provider} Document"
+        cfg["owner_in_filename"] = False
+        cfg["addressee_in_filename"] = False
     # How files are named (#50). Read here because every app loads its
     # config before it names anything, so no app has to remember to.
     set_filename_patterns(cfg)

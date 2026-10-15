@@ -126,7 +126,12 @@ def held():
     return (app_module._SAMPLE, app_module._LAST_EXPORT, tuple(sorted(app_module._RUNNING)),
             tuple(sorted(server_mode._SESSIONS)),
             tuple(sorted((k, v[0]) for k, v in server_mode._FAILS.items())),
-            server_mode._SETUP["code"])
+            server_mode._SETUP["code"],
+            # SQLite writes happen below Python's file audit events. Observe
+            # their bytes too, so mutations remain visible to this census.
+            tuple((name, (server_mode.config_dir() / name).read_bytes())
+                  for name in ("automation.sqlite3", "delivery.sqlite3")
+                  if (server_mode.config_dir() / name).exists()))
 
 
 # -- asking the app, in this process ----------------------------------------------------
@@ -231,6 +236,11 @@ def _history(box) -> dict:
 
 
 ROUTES = {
+    ("GET", "/healthz"): dict(page=True, desktop="reads", server="reads"),
+    ("GET", "/automation"): dict(page=True, desktop="reads", server="reads"),
+    ("GET", "/api/automation"): dict(desktop="reads", server="reads"),
+    ("POST", "/api/automation/{operation}"): dict(ask="/api/automation/settings",
+        body={"enabled": True}, desktop="reads", server="changes"),
     ("GET", "/api/apps"): dict(desktop="changes", server="changes"),
     ("POST", "/api/export"): dict(body={"csv": True}, desktop="changes", server="changes"),
     ("GET", "/api/export/providers"): dict(desktop="reads", server="reads"),
@@ -367,6 +377,12 @@ def box(tmp_path, monkeypatch):
     server_mode._SETUP["code"] = None
 
     b = Box()
+    from automation import Store
+    from paperpull_core.outbox import Outbox
+    monkeypatch.setattr(app_module.app.state, "automation",
+                        Store(tmp_path / "config" / "automation.sqlite3"), raising=False)
+    monkeypatch.setattr(app_module.app.state, "outbox",
+                        Outbox(tmp_path / "config" / "delivery.sqlite3"), raising=False)
     b.root = tmp_path / "apps"
     b.elsewhere = tmp_path / "Elsewhere"
     b.elsewhere.mkdir()

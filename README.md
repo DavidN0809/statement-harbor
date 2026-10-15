@@ -1,4 +1,14 @@
-# PaperPull
+# Statement Harbor
+
+This repository is **Statement Harbor**, a modified fork of PaperPull with
+durable server automation. Start with [the fork overview](docs/STATEMENT-HARBOR.md),
+[operations](docs/OPERATIONS.md) and [validation status](docs/VALIDATION.md).
+The upstream README is preserved below for the inherited provider tools.
+Real-account operation and the deployment environment remain UNVERIFIED.
+
+---
+
+# PaperPull (upstream documentation)
 
 ![Version](https://img.shields.io/github/v/tag/rheeloaded/paperpull?sort=semver&label=version&color=blue)
 ![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)

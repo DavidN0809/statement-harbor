@@ -116,3 +116,15 @@ dist/
 # A failing suite's whole pytest output, kept by tools/run_all_tests.py. It
 # holds whatever a test printed, so it stays on the machine that ran it.
 test-output/
+
+# Statement Harbor durable state, session volumes and local deployment secrets.
+*.sqlite3
+*.sqlite3-*
+*.sqlite
+*.sqlite-*
+deploy/data/
+deploy/profiles/
+deploy/settings/
+deploy/browser/
+deploy/secrets/
+.baseline/

@@ -71,6 +71,9 @@ LONGEST_WAIT = 15 * 60
 _SESSIONS: dict = {}
 _FAILS: dict = {}
 _SETUP = {"code": None}
+# A connected browser screen can control any visible provider. Dispatch pauses
+# globally, and connecting it cancels active scheduled runs (see app lifespan).
+INTERACTIVE_SCREENS = 0
 
 
 def enabled() -> bool:
@@ -347,7 +350,7 @@ def client_of(scope) -> str:
 
 # -- the gate ------------------------------------------------------------------------
 
-OPEN_PATHS = {"/login", "/setup", "/favicon.ico"}
+OPEN_PATHS = {"/login", "/setup", "/favicon.ico", "/healthz"}
 
 
 class SignInGate:
@@ -394,7 +397,7 @@ async def _respond(send, status: int, body: bytes, kind: str, extra=()) -> None:
 PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PaperPull</title><link rel="icon" href="/favicon.ico">
+<title>Statement Harbor</title>
 <style>
   :root { color-scheme: light dark; --bg:#0f1115; --panel:#171a21; --fg:#e6e6e6;
           --muted:#98a0ad; --accent:#4c8dff; --line:#262b36; --bad:#ff5c5c; }
@@ -419,7 +422,7 @@ def page(body: str) -> str:
 
 def login_body(message: str = "") -> str:
     said = '<p class="bad">%s</p>' % html.escape(message) if message else ""
-    return ("<h1>PaperPull</h1><p>Sign in to this PaperPull Server.</p>"
+    return ("<h1>Statement Harbor</h1><p>Sign in to this server, derived from PaperPull.</p>"
             '<form method="post" action="/login">'
             '<label for="password">Password</label>'
             '<input id="password" name="password" type="password" autocomplete="current-password" autofocus required>'
@@ -428,7 +431,7 @@ def login_body(message: str = "") -> str:
 
 def setup_body(message: str = "") -> str:
     said = '<p class="bad">%s</p>' % html.escape(message) if message else ""
-    return ("<h1>PaperPull</h1><p>Choose the password for this PaperPull Server. "
+    return ("<h1>Statement Harbor</h1><p>Choose the password for this server. "
             "The setup code is in the container's log.</p>"
             '<form method="post" action="/setup">'
             '<label for="code">Setup code</label>'
@@ -465,6 +468,7 @@ def server_bar() -> str:
     div, since a form inside a paragraph closes the paragraph where the
     form starts."""
     return ('<div class="serverbar">'
+            '<a class="btn btn-s" href="/automation">Automation</a>'
             '<span id="paperlesspill" class="pill pill-ok" hidden>'
             '<span class="dot" aria-hidden="true"></span>New files go to Paperless</span>'
             '<a id="screenbtn" class="btn btn-s screenbtn" href="/screen" target="_blank" rel="noopener"'
@@ -601,6 +605,7 @@ def install(app) -> None:
 
     @app.websocket("/screen/websockify")
     async def screen_socket(websocket: WebSocket):
+        global INTERACTIVE_SCREENS
         if not enabled():
             await websocket.close(code=1008)
             return
@@ -616,8 +621,15 @@ def install(app) -> None:
         except OSError:
             await close_quietly(websocket, 1011)
             return
-        await bridge(websocket.receive, websocket.send_bytes, reader, writer,
-                     allowed=lambda: session_valid(token))
+        INTERACTIVE_SCREENS += 1
+        try:
+            cancel = getattr(app.state, "pause_automation", None)
+            if cancel:
+                await cancel()
+            await bridge(websocket.receive, websocket.send_bytes, reader, writer,
+                         allowed=lambda: session_valid(token))
+        finally:
+            INTERACTIVE_SCREENS -= 1
         await close_quietly(websocket, 1000 if session_valid(token) else 1008)
 
 
@@ -702,7 +714,12 @@ def run_finished(meta: dict, account: str, action: str, started: float,
                  code: int, result) -> dict:
     """What every plug-in is told about a run that has ended."""
     install = Path(meta["dir"])
+    try:
+        archive = str(output_root(install, account))
+    except ValueError:
+        archive = ""
     return {"event": "run-finished", "version": 1,
+            "archive_root": archive,
             "provider": meta.get("name", ""), "account": account, "action": action,
             "install": str(install), "exit_code": code, "result": result,
             "new_files": new_files(install, account, started)}

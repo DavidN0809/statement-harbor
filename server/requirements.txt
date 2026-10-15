@@ -9,3 +9,5 @@ openpyxl==3.1.5
 pdfplumber==0.11.10
 pypdf[crypto]==6.19.0
 playwright==1.63.0
+APScheduler==3.11.2
+tzdata==2026.5

@@ -640,9 +640,9 @@ def test_each_edition_says_only_what_is_true_of_it_at_the_bottom(base, on_server
     server = _footer(ask(base + "/", session=signed_in(base))[2])
     monkeypatch.delenv("PAPERPULL_SERVER")
     desktop = _footer(ask(base + "/")[2])
-    assert "PaperPull Server v%s &middot;" % app_module.VERSION in server
+    assert "Statement Harbor v%s &middot;" % app_module.VERSION in server
     assert "beta" not in server.lower()
-    assert "runs on your own server" in server and "ko-fi.com/rheeloaded" in server
+    assert "derived from PaperPull" in server and "DavidN0809/statement-harbor" in server
     assert "runs locally" not in server and "Store edition" not in server
     assert "paperpull#support" not in server
     assert "PaperPull v%s" % app_module.VERSION in desktop and "PaperPull Server" not in desktop

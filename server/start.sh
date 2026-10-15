@@ -7,6 +7,7 @@
 # screen reaches it through the panel, on the panel's port and behind the
 # same password (gui/server_mode.py).
 set -u
+umask 077
 LOGS=/config/logs
 mkdir -p "$LOGS"
 

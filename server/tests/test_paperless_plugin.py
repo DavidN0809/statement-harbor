@@ -18,7 +18,8 @@ PLUGIN = Path(__file__).resolve().parents[1] / "plugins" / "paperless"
 
 def run(event, consume, **env):
     """(exit code, what it said) for one run of the plug-in."""
-    full = dict(os.environ, PAPERLESS_CONSUME_DIR=str(consume))
+    full = dict(os.environ, PAPERLESS_CONSUME_DIR=str(consume), PAPERPULL_DURABLE_DELIVERY="0",
+                PAPERPULL_CONFIG=str(consume.parent / "server-settings"))
     full.pop("PAPERLESS_SUBFOLDERS", None)
     full.update(env)
     done = subprocess.run([sys.executable, "paperless.py"], cwd=PLUGIN,
@@ -128,3 +129,34 @@ def test_the_manifest_says_what_the_panel_needs():
     manifest = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))
     assert manifest["events"] == ["run-finished"]
     assert manifest["run"] == ["python", "paperless.py"]
+
+
+def test_durable_plugin_validates_and_does_not_republish_consumed_pdf(tmp_path):
+    from pypdf import PdfWriter
+    consume = tmp_path / "consume"
+    consume.mkdir()
+    source = tmp_path / "synthetic.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    writer.write(source)
+    private = {"PAPERPULL_DURABLE_DELIVERY": "1", "PAPERPULL_CONFIG": str(tmp_path / "config")}
+    event = event_for([source], provider="Synthetic Bank")
+    code, said = run(event, consume, **private, PAPERLESS_SUBFOLDERS="1")
+    assert code == 0 and '"HANDED_OFF": 1' in said
+    handed = next(consume.rglob("*.pdf"))
+    assert handed.parent.name == "Synthetic Bank"
+    handed.unlink()
+    code, said = run(event, consume, **private, PAPERLESS_SUBFOLDERS="1")
+    assert code == 0 and '"HANDED_OFF": 1' in said
+    assert not list(consume.rglob("*.pdf"))
+    assert source.exists()
+
+
+def test_durable_plugin_rejects_html_and_preserves_queue_for_mount_recovery(tmp_path):
+    source = tmp_path / "synthetic.pdf"
+    source.write_bytes(b"<html>login password secret</html>")
+    private = {"PAPERPULL_DURABLE_DELIVERY": "1", "PAPERPULL_CONFIG": str(tmp_path / "config")}
+    consume = tmp_path / "consume"
+    code, said = run(event_for([source]), consume, **private)
+    assert code == 1 and '"CORRUPT": 1' in said
+    assert "password" not in said and not consume.exists()

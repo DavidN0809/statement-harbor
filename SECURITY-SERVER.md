@@ -1,5 +1,12 @@
 # Security, PaperPull Server
 
+Statement Harbor adds a server scheduler and durable delivery tracking. Its
+additional boundaries and recovery procedures are documented in
+[the operational runbook](docs/OPERATIONS.md). Existing provider allowlists,
+safe-control checks, image-only execution and Chrome sandbox remain in place.
+Scheduled runs never extend inactivity sessions or answer authentication
+challenges. Keep the new SQLite files in the private settings volume.
+
 The desktop app listens on nothing your network can reach, see
 [SECURITY.md](SECURITY.md). PaperPull Server does, by design, because you
 use it from a browser on another computer. This page says what protects it,

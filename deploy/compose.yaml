@@ -1,0 +1,35 @@
+# Build first with: python server/build.py --name statement-harbor
+name: statement-harbor
+services:
+  collector:
+    image: statement-harbor:dev
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    shm_size: 2gb
+    security_opt:
+      - seccomp=../server/seccomp-chrome.json
+    ports:
+      # Use an authenticated private reverse proxy or an SSH/VPN tunnel.
+      - "127.0.0.1:8765:8765"
+    environment:
+      TZ: America/New_York
+      PUID: "1000"
+      PGID: "1000"
+      PAPERPULL_DURABLE_DELIVERY: "1"
+      # PAPERPULL_HOSTS: "statements.home.arpa"
+      PAPERLESS_CONSUME_DIR: /paperless
+    volumes:
+      - ./data:/data
+      - profiles:/profiles
+      - settings:/config
+      - browser:/browser
+      # Set PAPERLESS_CONSUME_HOST to the existing consume directory.
+      - ${PAPERLESS_CONSUME_HOST:?Set PAPERLESS_CONSUME_HOST to your Paperless consume directory}:/paperless
+    mem_limit: 4g
+    cpus: 2
+volumes:
+  profiles:
+  settings:
+  browser:

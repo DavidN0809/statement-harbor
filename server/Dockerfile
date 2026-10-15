@@ -109,15 +109,18 @@ ENV DISPLAY=:99 \
     XDG_CONFIG_HOME=/config \
     APPS_ROOT=/data
 
+ENV PAPERPULL_DURABLE_DELIVERY=1
+
 # The panel, behind its password, with the browser screen on the same port.
 EXPOSE 8765
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=3)"
 VOLUME ["/data", "/profiles", "/config", "/browser"]
 ENTRYPOINT ["/opt/paperpull/server/entrypoint.sh"]
 
 # What the image is. The source is what links a published image to this
 # repository on GitHub's registry. server/build.py adds the version.
-LABEL org.opencontainers.image.title="PaperPull Server" \
-      org.opencontainers.image.description="PaperPull on an always-on machine at home, used from a browser on the home network." \
-      org.opencontainers.image.source="https://github.com/rheeloaded/paperpull" \
-      org.opencontainers.image.vendor="TNE Enterprises LLC" \
+LABEL org.opencontainers.image.title="Statement Harbor" \
+      org.opencontainers.image.description="Self-hosted financial document automation derived from PaperPull." \
+      org.opencontainers.image.source="https://github.com/DavidN0809/statement-harbor" \
       org.opencontainers.image.licenses="AGPL-3.0-only"

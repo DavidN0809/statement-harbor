@@ -193,7 +193,7 @@ def test_on_the_server_such_a_link_is_refused_in_a_signed_in_browser(browser, po
         assert answer.status == 403, answer.text()
         assert "link" in answer.json()["detail"]
         answer = opened_by_the_browser(tab, base + "/")
-        assert answer.status == 200 and tab.title() == "PaperPull"
+        assert answer.status == 200 and tab.title() == "Statement Harbor"
     finally:
         context.close()
     assert not (shop / "ran.txt").exists(), "a link started a run"
@@ -254,7 +254,7 @@ def test_on_the_server_its_own_forms_still_set_the_password_and_sign_in_and_out(
         tab.fill("#password", PASSWORD)
         with tab.expect_navigation():
             tab.get_by_role("button", name="Sign in").click()
-        assert tab.url == base + "/" and tab.title() == "PaperPull"
+        assert tab.url == base + "/" and tab.title() == "Statement Harbor"
     finally:
         context.close()
 

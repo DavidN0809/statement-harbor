@@ -334,8 +334,8 @@ def with_this_core(*after) -> dict:
 # its Playwright.
 NEEDS = {
     "core": ("pytest", "pypdf", "playwright", "openpyxl", "pdfplumber"),
-    "gui": ("pytest", "fastapi"),
-    "server": ("pytest",),
+    "gui": ("pytest", "fastapi", "apscheduler", "httpx"),
+    "server": ("pytest", "pypdf", "yaml"),
     "app": ("pytest", "paperpull_core", "pypdf", "playwright"),
 }
 WHY = {
@@ -346,6 +346,9 @@ WHY = {
     "openpyxl": "the purchases and transactions workbooks",
     "pdfplumber": "reading transactions out of statement PDFs",
     "fastapi": "the control panel",
+    "apscheduler": "durable automation cron calculations",
+    "httpx": "the automation API integration tests",
+    "yaml": "the deployment manifest checks",
 }
 CANARY = "test_failure_canary"
 # The suite that runs the canary, and the canary's file in that suite's

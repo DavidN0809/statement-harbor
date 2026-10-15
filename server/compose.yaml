@@ -17,7 +17,7 @@ services:
   paperpull:
     # Published by every PaperPull release. For an image built with
     # server/build.py, write paperpull-server:dev here instead.
-    image: ghcr.io/rheeloaded/paperpull-server:latest
+    image: ghcr.io/davidn0809/statement-harbor:latest
     container_name: paperpull
     init: true
     # Time for the sign-in browsers to close properly and keep their sessions.

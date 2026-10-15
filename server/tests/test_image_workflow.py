@@ -77,15 +77,15 @@ def test_the_image_names_this_repository_as_its_source():
     """The source label is what links a published image to the repository
     on GitHub's registry, and the license is the repository's own."""
     dockerfile = (SERVER / "Dockerfile").read_text(encoding="utf-8")
-    assert 'org.opencontainers.image.source="https://github.com/rheeloaded/paperpull"' in dockerfile
+    assert 'org.opencontainers.image.source="https://github.com/DavidN0809/statement-harbor"' in dockerfile
     assert 'org.opencontainers.image.licenses="AGPL-3.0-only"' in dockerfile
     assert 'license = { text = "AGPL-3.0-only" }' in (REPO / "core" / "pyproject.toml").read_text(encoding="utf-8")
 
 
 def test_compose_names_the_image_the_workflow_publishes():
     compose_file = (SERVER / "compose.yaml").read_text(encoding="utf-8")
-    assert re.search(r"^    image: ghcr\.io/rheeloaded/paperpull-server:latest$", compose_file, re.M)
-    assert 'image="ghcr.io/${OWNER,,}/paperpull-server"' in jobs()["publish"]
+    assert re.search(r"^    image: ghcr\.io/davidn0809/statement-harbor:latest$", compose_file, re.M)
+    assert 'image="ghcr.io/${OWNER,,}/statement-harbor"' in jobs()["publish"]
 
 
 def test_the_smoke_run_starts_a_persons_compose_file_as_it_is(tmp_path):

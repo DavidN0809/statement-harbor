@@ -1,0 +1,205 @@
+# Prerequisites in docs/OPERATIONS.md. Replace image digest and PVC names.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: statement-harbor
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: harbor-data
+  namespace: statement-harbor
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: harbor-profiles
+  namespace: statement-harbor
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: harbor-settings
+  namespace: statement-harbor
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: harbor-browser
+  namespace: statement-harbor
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 3Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: statement-harbor
+  namespace: statement-harbor
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: statement-harbor
+  template:
+    metadata:
+      labels:
+        app: statement-harbor
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        kubernetes.io/os: linux
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: Localhost
+          localhostProfile: profiles/statement-harbor-chrome.json
+      # This root-only bootstrap preserves upstream's signed Chrome download.
+      # Provider code and the dashboard run as UID 1000 with a read-only image.
+      initContainers:
+        - name: chrome-bootstrap
+          image: statement-harbor:dev
+          imagePullPolicy: IfNotPresent
+          command: [/bin/sh, -ec]
+          args:
+            - >-
+              /opt/paperpull/server/chrome.sh &&
+              chown 1000:1000 /data /profiles /config &&
+              chmod 700 /profiles /config
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN, FOWNER, DAC_OVERRIDE]
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: profiles, mountPath: /profiles}
+            - {name: settings, mountPath: /config}
+            - {name: browser, mountPath: /browser}
+      containers:
+        - name: collector
+          image: statement-harbor:dev
+          imagePullPolicy: IfNotPresent
+          command: [/opt/paperpull/server/start.sh]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - {name: TZ, value: America/New_York}
+            - {name: HOME, value: /home/pp}
+            - {name: PAPERPULL_HOSTS, value: statements.home.arpa}
+            - {name: PAPERPULL_DURABLE_DELIVERY, value: "1"}
+            - {name: PAPERLESS_CONSUME_DIR, value: /paperless}
+          ports:
+            - {name: http, containerPort: 8765}
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: "2", memory: 4Gi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: profiles, mountPath: /profiles}
+            - {name: settings, mountPath: /config}
+            - {name: browser, mountPath: /browser, readOnly: true}
+            - {name: consume, mountPath: /paperless}
+            - {name: shm, mountPath: /dev/shm}
+            - {name: temporary, mountPath: /tmp}
+            - {name: home, mountPath: /home/pp}
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: harbor-data}}
+        - {name: profiles, persistentVolumeClaim: {claimName: harbor-profiles}}
+        - {name: settings, persistentVolumeClaim: {claimName: harbor-settings}}
+        - {name: browser, persistentVolumeClaim: {claimName: harbor-browser}}
+        # Existing shared RWX consume claim, made available in this namespace.
+        - {name: consume, persistentVolumeClaim: {claimName: paperless-consume}}
+        - {name: shm, emptyDir: {medium: Memory, sizeLimit: 2Gi}}
+        - {name: temporary, emptyDir: {sizeLimit: 2Gi}}
+        - {name: home, emptyDir: {sizeLimit: 512Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: statement-harbor
+  namespace: statement-harbor
+spec:
+  type: ClusterIP
+  selector:
+    app: statement-harbor
+  ports:
+    - {name: http, port: 8765, targetPort: http}
+---
+# Adapt the namespace label to the homelab's private ingress controller.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: private-dashboard
+  namespace: statement-harbor
+spec:
+  podSelector:
+    matchLabels:
+      app: statement-harbor
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - {protocol: TCP, port: 8765}
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 127.0.0.0/8]
+      ports:
+        - {protocol: TCP, port: 443}
+        - {protocol: TCP, port: 80}
