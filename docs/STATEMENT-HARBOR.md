@@ -51,11 +51,12 @@ Additional implementation:
 
 Outstanding live-account dependency:
 
-NCSECU and SoFi are disabled adapter boundaries, **not implemented download
-adapters**. Their authenticated document lists and download controls need an
-actual authorized session. FFSB-NC remains a disabled mortgage placeholder;
-public eStatements do not establish mortgage coverage. Aqua and Rutherford are
-future entries. No selectors or provider functionality have been invented.
+NCSECU, SoFi and FFSB have no runnable adapters yet and are tracked as planned
+work in repository issues. No stub providers are shipped. Authenticated
+document lists and download controls need actual authorized sessions;
+FFSB's public eStatements page does not establish mortgage coverage.
+Aqua and Rutherford remain future work. No selectors or provider functionality
+have been invented.
 See [PROVIDER-VALIDATION.md](PROVIDER-VALIDATION.md) for evidence and acceptance.
 The complete project definition of done remains unfulfilled until those provider
 adapters, actual service ingestion and homelab deployment are validated.

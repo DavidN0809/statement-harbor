@@ -71,7 +71,7 @@ def test_dashboard_schedule_controls_and_intervention_notice(tmp_path, monkeypat
                 page.locator("#rules").fill('[]')
                 page.locator("#loadRules").click()
                 assert 'quarterly' in page.locator("#rules").input_value()
-                assert 'UNVERIFIED' in page.locator("#pendingProviders").inner_text()
+                assert page.locator("#pendingProviders").count() == 0
                 assert not errors, errors
                 output = Path(__file__).resolve().parents[2] / "test-output"
                 output.mkdir(exist_ok=True)

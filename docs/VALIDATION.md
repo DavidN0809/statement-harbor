@@ -77,8 +77,8 @@ A persistent local onboarding container is started separately from the temporary
 smoke project, using deploy/compose.local.yaml. It has no Paperless mount or token:
 this does not establish real ingestion. The configured homelab Kubernetes API was
 unreachable during read-only discovery, so no cluster resources were modified.
-NCSECU and SoFi remain disabled boundaries requiring actual authenticated portal
-implementation, and FFSB-NC remains a disabled mortgage placeholder. The project
-must not be described as fully operational for those providers.
+NCSECU, SoFi and FFSB require actual authenticated portal implementation and
+are tracked as planned work. No stub providers are shipped. The project must
+not be described as fully operational for those providers.
 
 Latest built onboarding image: `sha256:e32e5e3a10b2304922db6fd5c273e8f46cf6843e2cded2330a008852ba51cf52`. Local `/healthz` returned HTTP 200 and Docker reported healthy.

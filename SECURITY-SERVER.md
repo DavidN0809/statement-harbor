@@ -149,5 +149,5 @@ Paperless API uploads commit SUBMITTING before network submission. Ambiguous
 results reconcile without resending; retrieved originals require a SHA-256 match.
 Metadata and notifications discard free-text provider titles and account details.
 Home Assistant receives fixed intervention messages and opaque notification IDs.
-Its outage and Bridge outages do not stop the provider dispatcher. Unvalidated
-NCSECU, SoFi and future provider boundaries cannot perform page interactions.
+Its outage and Bridge outages do not stop the provider dispatcher. Unimplemented
+providers are tracked as issues and have no runtime adapters or dashboard entries.

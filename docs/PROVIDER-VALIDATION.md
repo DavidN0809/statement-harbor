@@ -1,11 +1,21 @@
 # Provider readiness and authorized acceptance
 
-New document portals cannot be implemented honestly from public marketing pages.
-`paperpull_core.pending_providers` provides a consistent, fail-closed adapter
-boundary and product inventory. All its operations stop before interacting with
-a page. These entries are **disabled placeholders, not working download adapters**.
-They are visible in Automation and cannot be installed as runnable templates.
-Do not report Milestone 3 or the full project definition of done as achieved yet.
+NCSECU, SoFi and FFSB are planned integrations tracked as repository issues.
+There are no stub adapters or dashboard entries for unimplemented providers.
+After the user signs in and completes MFA, each completed adapter must
+automatically discover and download existing documents using the PaperPull
+engine, then reuse the authorized session for scheduled collection. Expired
+sessions must require human sign-in again. See the issues for acceptance criteria.
+Public pages establish investigation evidence, not authenticated selectors.
+
+## Implementation issues
+
+- [NCSECU: automatic document collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/2)
+- [SoFi: automatic document collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/3)
+- [FFSB-NC: mortgage document collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/4)
+
+The GitHub fork is the working repository and issue tracker. `origin` points to
+DavidN0809/statement-harbor and `upstream` remains rheeloaded/paperpull.
 
 ## Evidence gathered on 2026-10-15
 

@@ -145,15 +145,12 @@ def install(panel):
 
     @app.get("/api/automation", dependencies=[Depends(panel._same_origin_only)])
     def overview():
-        from dataclasses import asdict
-        from paperpull_core.pending_providers import PROVIDERS
         value = store()
         return {"settings": value.settings(), "schedules": value.rows(), "events": value.events(),
                 "accounts": {key: meta["accounts"] for key, meta in panel.discover_apps().items()
                              if meta.get("runnable", True)},
                 "delivery": app.state.outbox.counts(), "documents": app.state.outbox.overview(),
-                "integrations": app.state.integrations.overview(),
-                "pending_providers": [asdict(provider) for provider in PROVIDERS]}
+                "integrations": app.state.integrations.overview()}
 
     @app.post("/api/automation/{operation}", dependencies=[Depends(panel._same_origin_only)])
     async def change(operation: str, request: Request):

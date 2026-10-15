@@ -59,7 +59,7 @@ jobs:
         run: >-
           python -m pytest -q core/tests/test_automation_runner.py
           core/tests/test_process_lock.py core/tests/test_outbox.py
-          core/tests/test_paperless_api_delivery.py core/tests/test_pending_providers.py
+          core/tests/test_paperless_api_delivery.py
           gui/tests/test_automation.py gui/tests/test_automation_api.py
           gui/tests/test_integrations.py
           gui/tests/test_automation_in_a_browser.py server/tests

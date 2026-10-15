@@ -108,12 +108,6 @@ async function refresh() {
     $('missing').textContent = value.missing.map(row => row.app + ' / ' + row.account + ': missing ' + row.periods.join(', ')).join(' · ') || 'No missing documents detected for configured expectations.';
   }
   $('deliveryRows').replaceChildren();
-  $('pendingProviders').replaceChildren();
-  for (const provider of model.pending_providers || []) {
-    const li = document.createElement('li');
-    li.textContent = provider.name + ' · ' + provider.verification + ' · ' + provider.products.join(', ');
-    $('pendingProviders').append(li);
-  }
   for (const row of model.documents || []) {
     const p = document.createElement('p');
     p.className = 'small';
