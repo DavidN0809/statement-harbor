@@ -10,9 +10,24 @@ Public pages establish investigation evidence, not authenticated selectors.
 
 ## Implementation issues
 
+The [project tracking issue](https://github.com/DavidN0809/statement-harbor/issues/7)
+groups the following adapters and their shared acceptance requirements.
+
 - [NCSECU: automatic document collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/2)
 - [SoFi: automatic document collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/3)
 - [FFSB-NC: mortgage document collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/4)
+- [Aqua Water: automatic bill collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/5)
+- [Rutherford Electric: automatic bill collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/6)
+- [Sallie Mae: automatic loan document collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/8)
+
+[Application user accounts](https://github.com/DavidN0809/statement-harbor/issues/9)
+are tracked separately, including per-user provider, browser, document and
+schedule isolation. The current shared dashboard password is not multi-user support.
+
+[Secure remote-browser clipboard paste](https://github.com/DavidN0809/statement-harbor/issues/10)
+tracks the reported inability to paste passwords from the local browser into
+the VNC sign-in session. Pasted credentials must remain user-controlled and
+ephemeral, with no logging, persistence or access from another user's session.
 
 The GitHub fork is the working repository and issue tracker. `origin` points to
 DavidN0809/statement-harbor and `upstream` remains rheeloaded/paperpull.
