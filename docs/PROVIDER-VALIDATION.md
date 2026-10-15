@@ -1,6 +1,6 @@
 # Provider readiness and authorized acceptance
 
-NCSECU, SoFi and FFSB are planned integrations tracked as repository issues.
+The requested custom providers below are planned integrations tracked as repository issues.
 There are no stub adapters or dashboard entries for unimplemented providers.
 After the user signs in and completes MFA, each completed adapter must
 automatically discover and download existing documents using the PaperPull
@@ -19,6 +19,29 @@ groups the following adapters and their shared acceptance requirements.
 - [Aqua Water: automatic bill collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/5)
 - [Rutherford Electric: automatic bill collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/6)
 - [Sallie Mae: automatic loan document collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/8)
+- [Voya: automatic document collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/11)
+- [Aetna: automatic insurance document collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/12)
+- [MyChart: organization-specific document collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/13)
+- [North Carolina Farm Bureau: automatic insurance document collection after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/15)
+- [NCDMV: automatic collection of existing downloadable documents after manual sign-in](https://github.com/DavidN0809/statement-harbor/issues/16)
+
+Voya requires confirmation of the actual product and servicing portal. Aetna
+requires confirmation of the member plan/portal and chosen insurance document
+categories. MyChart requires the healthcare organization's exact portal; clinical
+PDFs are in scope only if the user explicitly opts in. North Carolina Farm Bureau
+requires confirmation of the policy product and actual document portal, starting
+from the [official site](https://www.ncfbins.com/) supplied by the user. NCDMV
+requires establishing the official service portal and its actual downloadable
+document capabilities. These issues do not claim live support. Insurance claims,
+policy changes, medical messages/actions, DMV renewals/applications and payments
+are outside read-only collection.
+
+[Automatic Paperless ingestion](https://github.com/DavidN0809/statement-harbor/issues/14)
+tracks completion and end-to-end validation of the existing consume-folder and
+REST API implementations. It requires independent durable ingestion retries,
+processing confirmation for API delivery, accurate consume handoff/uncertain
+states, metadata, duplicate prevention and crash recovery. Real Paperless
+processing remains an acceptance step; mocked requests alone do not establish it.
 
 [Application user accounts](https://github.com/DavidN0809/statement-harbor/issues/9)
 are tracked separately, including per-user provider, browser, document and

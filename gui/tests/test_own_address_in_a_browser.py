@@ -261,8 +261,7 @@ def test_on_the_server_its_own_forms_still_set_the_password_and_sign_in_and_out(
 
 def test_the_browser_screen_still_shows_novnc_in_its_frame(browser, port, shop, tmp_path,
                                                             monkeypatch):
-    """noVNC's page is the one answer that may be framed, and only by a
-    page of the panel's own. Framed by nobody, the screen would be blank."""
+    """The wrapper embeds noVNC, restricted to the panel's own origin."""
     (tmp_path / "novnc").mkdir()
     (tmp_path / "novnc" / "vnc.html").write_text(
         "<!doctype html><title>noVNC</title><p id=screen>the screen</p>", encoding="utf-8")
@@ -276,7 +275,7 @@ def test_the_browser_screen_still_shows_novnc_in_its_frame(browser, port, shop, 
     try:
         tab = context.new_page()
         tab.goto(base + "/screen")
-        assert tab.title() == "PaperPull Browser Screen"
+        assert tab.title() == "Statement Harbor sign-in window"
         screen = tab.frame_locator("iframe").locator("#screen")
         assert screen.inner_text(timeout=15000) == "the screen"
     finally:
@@ -307,7 +306,7 @@ def test_the_sign_in_window_docks_beside_the_accounts_on_the_server(browser, por
         assert not tab.is_visible("#dock")
         tab.click("#screenbtn")
         assert tab.is_visible("#dock") and tab.url == base + "/"
-        screen = tab.frame_locator("#dockframe").locator("#screen")
+        screen = tab.frame_locator("#dockframe").frame_locator("#remote-screen").locator("#screen")
         assert screen.inner_text(timeout=15000) == "the screen"
         tab.get_by_role("button", name="Done", exact=True).click()
         assert not tab.is_visible("#dock")

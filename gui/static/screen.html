@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Statement Harbor sign-in window</title>
+  <link rel="icon" href="/favicon.ico">
+  <style>
+    :root {color-scheme: dark; font-family: system-ui, sans-serif; color: #edf1f8; background: #111720}
+    * {box-sizing: border-box}
+    html, body {margin: 0; height: 100%}
+    body {display: flex; flex-direction: column}
+    header {padding: 12px 14px; border-bottom: 1px solid #364052; background: #1a2330}
+    h1 {margin: 0 0 6px; font-size: 16px}
+    p {margin: 5px 0; font-size: 12px; line-height: 1.45; color: #c8d2e2}
+    form {display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin-top: 9px}
+    label {display: flex; flex: 1 1 145px; flex-direction: column; gap: 4px; font-size: 12px}
+    input, select, button {font: inherit; font-size: 14px; min-height: 36px; border: 1px solid #68758b; border-radius: 5px}
+    input, select {min-width: 0; width: 100%; background: #111720; color: #edf1f8; padding: 6px 8px}
+    button {background: #c6dcff; color: #10213b; padding: 6px 12px; cursor: pointer}
+    button:disabled {opacity: .55; cursor: default}
+    :focus-visible {outline: 2px solid #a3c8ff; outline-offset: 2px}
+    #paste-status {min-height: 18px; margin-bottom: 0}
+    iframe {border: 0; width: 100%; flex: 1 1 auto; min-height: 220px; background: #0f1115}
+    @media (max-width: 430px) {header {padding: 9px} label {flex-basis: 100%} button {width: 100%}}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Sign in to your provider</h1>
+    <p>Select the account below, click its sign-in field in the remote browser, then paste normally.
+      You can also paste into the masked box and choose Paste into field.</p>
+    <p>Text goes only to the selected account's focused field. Statement Harbor does not save pasted text.</p>
+    <form id="paste-form" autocomplete="off">
+      <label for="paste-account">Destination account
+        <select id="paste-account" required aria-describedby="paste-status"><option value="">Loading accounts…</option></select>
+      </label>
+      <label for="paste-text">Text to paste (masked)
+        <input id="paste-text" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" aria-describedby="paste-status">
+      </label>
+      <button id="paste-send" type="submit" disabled>Paste into field</button>
+    </form>
+    <p id="paste-status" role="status" aria-live="polite">Connecting to the remote browser…</p>
+  </header>
+  <iframe id="remote-screen" title="Remote browser sign-in screen"
+    src="/screen/novnc/vnc.html?autoconnect=1&amp;reconnect=1&amp;resize=scale&amp;path=screen/websockify&amp;logging=none"></iframe>
+  <script>__SCREEN_JS__</script>
+</body>
+</html>

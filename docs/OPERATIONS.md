@@ -32,6 +32,23 @@ Statement Harbor branding. Internal `PAPERPULL_*` names stay for compatibility.
 
 ## Compose trial
 
+### Paste into an interactive sign-in
+
+Open the sign-in screen, select the provider/account in the paste toolbar,
+and click the desired field inside its remote browser. Paste from your local
+password manager with Ctrl+V (Command+V on macOS), or paste into the masked
+toolbar field and click **Paste into field**. Submit the institution's form
+yourself. MFA and other challenges remain interactive.
+
+This explicit action sends the text through the authenticated application to
+the selected account's existing browser. Text is held only in memory and is
+not saved or logged. Automatic clipboard synchronization is disabled. Paste
+requires a connected screen in the same signed-in session and a focused,
+editable field on an allowed provider host. Reconnect and select the account
+again if the screen disconnects. The current dashboard uses one shared admin
+identity; isolated application user accounts are tracked in GitHub issue #9.
+
+
 Set `PAPERLESS_CONSUME_HOST` to Paperless's existing consume directory, then:
 
 ```sh

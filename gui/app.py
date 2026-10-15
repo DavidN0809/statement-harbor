@@ -532,7 +532,7 @@ class NotInAFrame:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
-        own = scope.get("path", "").startswith("/screen/novnc/")
+        own = scope.get("path", "") == "/screen" or scope.get("path", "").startswith("/screen/novnc/")
 
         async def framed(message):
             if message["type"] == "http.response.start":
@@ -3766,4 +3766,6 @@ HTML = _page()
 # Imported after the panel's run and request-validation functions exist.
 import automation_api  # noqa: E402
 automation_api.install(sys.modules[__name__])
+import screen_input  # noqa: E402
+screen_input.install(sys.modules[__name__])
 

@@ -320,6 +320,10 @@ ROUTES = {
                              desktop="reads", server="changes"),
     ("POST", "/logout"): dict(form=True, body={}, desktop="reads", server="changes"),
     ("GET", "/screen"): dict(page=True, desktop="reads", server="reads"),
+    ("GET", "/api/screen/accounts"): dict(desktop="reads", server="reads"),
+    ("POST", "/api/screen/paste"): dict(
+        body={"app": "Kroger Receipts", "account": "primary", "text": "synthetic input"},
+        desktop="reads", server="changes"),
     ("GET", "/screen/novnc/{rest:path}"): dict(page=True, ask="/screen/novnc/vnc.html",
                                                desktop="reads", server="reads"),
     ("WEBSOCKET", "/screen/websockify"): dict(desktop="reads", server="changes"),
@@ -375,6 +379,7 @@ def box(tmp_path, monkeypatch):
     server_mode._SESSIONS.clear()
     server_mode._FAILS.clear()
     server_mode._SETUP["code"] = None
+    monkeypatch.setattr(server_mode, "INTERACTIVE_TOKENS", {})
 
     b = Box()
     from automation import Store
@@ -390,6 +395,17 @@ def box(tmp_path, monkeypatch):
     b.elsewhere = tmp_path / "Elsewhere"
     b.elsewhere.mkdir()
     b.token, b.code = "", ""
+    b.pastes = 0
+
+    async def insert_text(meta, account, text):
+        # Observe the protected side effect without echoing submitted text or
+        # launching any browser. The installed account below is synthetic.
+        assert Path(meta["dir"]).name == "Kroger Receipts" and account == "primary"
+        b.pastes += 1
+        _note("inserted text into the selected synthetic field")
+
+    import screen_input
+    monkeypatch.setattr(screen_input, "insert_text", insert_text)
     shop = b.root / SHOP
     (shop / "Diagnostics").mkdir(parents=True)
     (shop / "shop_receipts.py").write_text("print('a run')\n", encoding="utf-8")
@@ -424,6 +440,7 @@ def box(tmp_path, monkeypatch):
         monkeypatch.setenv("APPS_ROOT", str(b.root))
         server_mode.set_password(PASSWORD)
         b.token = server_mode.new_session()
+        server_mode.INTERACTIVE_TOKENS[b.token] = 1
     b.serve = serve
     return b
 
@@ -515,7 +532,7 @@ def framing_problem(path: str, answer: dict) -> str:
     policy stands beside any other policy the answer carries."""
     if answer.get("sent") is not None:
         return ""
-    own = path.startswith("/screen/novnc/")
+    own = path == "/screen" or path.startswith("/screen/novnc/")
     frames = [v for k, v in answer["headers"] if k == "x-frame-options"]
     if frames != ["SAMEORIGIN" if own else "DENY"]:
         return "X-Frame-Options was %r" % frames

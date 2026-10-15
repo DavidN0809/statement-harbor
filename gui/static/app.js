@@ -1233,10 +1233,10 @@ function openDock(provider) {
   if (!SERVER) return;
   $('dock-title').textContent = provider ? provider + ' sign-in window' : 'Sign-in window';
   $('dock-say').textContent = 'Sign in below the way you would on ' + (provider ? provider + "'s" : "the provider's") +
-    ' own site. Your password goes to the provider, never to PaperPull. Leave it signed in when you are done.';
+    ' own site. Select the destination account before pasting. Credentials enter only its focused remote field and are not stored by Statement Harbor. Leave it signed in when you are done.';
   const frame = $('dockframe');
   if (frame.getAttribute('src') === 'about:blank') {
-    frame.src = '/screen/novnc/vnc.html?autoconnect=1&reconnect=1&resize=scale&path=screen/websockify';
+    frame.src = '/screen?path=screen/websockify';
   }
   document.body.classList.add('docked');
   $('dock').querySelector('[data-do=dock-close]').focus();

@@ -325,20 +325,20 @@ def test_off_the_server_the_panel_answers_only_at_its_own_address(base):
 
 
 def test_no_other_site_may_show_the_panel_in_a_frame(base, on_server, tmp_path, monkeypatch):
-    """Every answer says so, a refusal included. The one page that may be
-    framed, by the panel's own Browser Screen alone, is noVNC's."""
+    """Only the screen wrapper and noVNC allow same-origin frames."""
     (tmp_path / "novnc").mkdir()
     (tmp_path / "novnc" / "vnc.html").write_text("<title>noVNC</title>", encoding="utf-8")
     monkeypatch.setenv("PAPERPULL_NOVNC", str(tmp_path / "novnc"))
     session = signed_in(base)
-    for path, headers in (("/", {}), ("/screen", {}), ("/api/apps", {}), ("/login", {}),
+    for path, headers in (("/", {}), ("/api/apps", {}), ("/api/screen/accounts", {}), ("/login", {}),
                           ("/api/apps", {"Host": "rebind.example"})):
         _, answer, _ = ask(base + path, session=session, headers=headers)
         assert answer["X-Frame-Options"] == "DENY", path
         assert answer["Content-Security-Policy"] == "frame-ancestors 'none'", path
-    _, answer, _ = ask(base + "/screen/novnc/vnc.html", session=session)
-    assert answer["X-Frame-Options"] == "SAMEORIGIN"
-    assert answer["Content-Security-Policy"] == "frame-ancestors 'self'"
+    for path in ("/screen", "/screen/novnc/vnc.html"):
+        _, answer, _ = ask(base + path, session=session)
+        assert answer["X-Frame-Options"] == "SAMEORIGIN", path
+        assert answer["Content-Security-Policy"] == "frame-ancestors 'self'", path
 
 
 def test_what_only_means_something_on_a_desktop_is_not_offered(base, on_server):
@@ -362,7 +362,8 @@ def test_the_screen_is_behind_the_password(base, on_server, tmp_path, monkeypatc
     session = signed_in(base)
     status, _, page = ask(base + "/screen", session=session)
     assert status == 200 and "path=screen/websockify" in page and "/favicon.ico" in page
-    assert "<title>PaperPull Browser Screen</title>" in page
+    assert "<title>Statement Harbor sign-in window</title>" in page
+    assert 'id="paste-text" type="password"' in page
     assert ask(base + "/screen/novnc/vnc.html", session=session)[2] == "<title>noVNC</title>"
     assert ask(base + "/screen/novnc/%2e%2e/secret.txt", session=session)[0] == 404
 
@@ -609,7 +610,7 @@ def test_the_sign_in_window_is_a_button_at_the_top_and_docks_on_sign_in(base, on
     assert "if (SERVER && action === 'login') openDock(r.provider);" in page
     login = " ".join(page.split("const loginSay = SERVER", 1)[1].split(";\n", 1)[0].split())
     assert "in the sign-in window, docked beside this page" in login
-    assert "frame.src = '/screen/novnc/vnc.html?" in page
+    assert "frame.src = '/screen?path=screen/websockify'" in page
 
 
 def test_both_editions_say_what_discover_is_for(base, on_server, monkeypatch):

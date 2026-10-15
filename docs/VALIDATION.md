@@ -81,4 +81,21 @@ NCSECU, SoFi and FFSB require actual authenticated portal implementation and
 are tracked as planned work. No stub providers are shipped. The project must
 not be described as fully operational for those providers.
 
-Latest built onboarding image: `sha256:e32e5e3a10b2304922db6fd5c273e8f46cf6843e2cded2330a008852ba51cf52`. Local `/healthz` returned HTTP 200 and Docker reported healthy.
+## Interactive paste (GitHub issue #10)
+
+The manual paste path was checked with 40 focused API/browser tests and 157
+existing route, frame-policy and server-browser checks. A disposable Linux
+container exercised actual sandboxed Chrome with synthetic password, Unicode,
+multiline and embedded-frame inputs. It verified refusal for unfocused,
+disabled, read-only, wrong-profile and untrusted-host targets, no form submit,
+and no persistent test-text leaks. No real profiles or credentials were used.
+
+This adds manual paste support; provider implementation and real-account
+acceptance remain tracked separately in PROVIDER-VALIDATION.md.
+
+The expanded GUI/server/outbox run passed 922 tests with eight platform skips.
+Its sole initial failure was an existing documentation punctuation rule. The
+sentence was corrected and all 14 documentation checks then passed. The rebuilt
+Docker image passed fresh setup, authentication, provider setup and the runtime
+self-test, including namespace sandbox, seccomp and private VNC checks. The
+actual CLI helper also passed synthetic insertion and silent refusal checks.

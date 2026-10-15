@@ -52,7 +52,7 @@ from urllib.parse import parse_qs, urlsplit
 # read as names from this module, and FastAPI has to find Request there to
 # know the argument is the request.
 from fastapi import HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
 SESSION_COOKIE = "paperpull_session"
 SESSION_SECONDS = 14 * 86400
@@ -74,6 +74,7 @@ _SETUP = {"code": None}
 # A connected browser screen can control any visible provider. Dispatch pauses
 # globally, and connecting it cancels active scheduled runs (see app lifespan).
 INTERACTIVE_SCREENS = 0
+INTERACTIVE_TOKENS: dict = {}
 
 
 def enabled() -> bool:
@@ -443,14 +444,9 @@ def setup_body(message: str = "") -> str:
             "%s<button>Set the password</button></form>" % (MIN_PASSWORD, said))
 
 
-SCREEN = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PaperPull Browser Screen</title><link rel="icon" href="/favicon.ico">
-<style>html,body{margin:0;height:100%;background:#0f1115}
-iframe{border:0;width:100%;height:100%;display:block}</style></head>
-<body><iframe src="/screen/novnc/vnc.html?autoconnect=1&amp;reconnect=1&amp;resize=scale&amp;path=screen/websockify"
-title="The Browser Screen"></iframe></body></html>"""
+_STATIC = Path(__file__).resolve().parent / "static"
+SCREEN = (_STATIC / "screen.html").read_text(encoding="utf-8").replace(
+    "__SCREEN_JS__", (_STATIC / "screen.js").read_text(encoding="utf-8"))
 
 
 # A screen, drawn with the page's own color so it suits light and dark.
@@ -601,6 +597,21 @@ def install(app) -> None:
         target = (root / rest).resolve()
         if root not in target.parents or not target.is_file():
             raise HTTPException(404)
+        if rest == "core/util/logging.js":
+            # Keysyms and native clipboard snippets are secrets too. Force
+            # noVNC logging off regardless of query parameters or UI settings.
+            return Response("export const Debug=()=>{},Info=()=>{},Warn=()=>{},Error=()=>{};"
+                            "export function initLogging(){};export function getLogging(){return 'none';}",
+                            media_type="application/javascript", headers={"Cache-Control": "no-store"})
+        if rest == "app/ui.js":
+            source = target.read_text(encoding="utf-8")
+            source += "\nUI.clipboardReceive=()=>{};UI.clipboardSend=()=>{};\n"
+            return Response(source, media_type="application/javascript", headers={"Cache-Control": "no-store"})
+        if rest == "vnc.html" and (root / "app" / "ui.js").is_file():
+            source = target.read_text(encoding="utf-8")
+            bridge_script = (_STATIC / "screen_bridge.js").read_text(encoding="utf-8")
+            source = source.replace("</body>", '<script type="module">' + bridge_script + "</script></body>")
+            return HTMLResponse(source, headers={"Cache-Control": "no-store"})
         return FileResponse(target)
 
     @app.websocket("/screen/websockify")
@@ -622,6 +633,7 @@ def install(app) -> None:
             await close_quietly(websocket, 1011)
             return
         INTERACTIVE_SCREENS += 1
+        INTERACTIVE_TOKENS[token] = INTERACTIVE_TOKENS.get(token, 0) + 1
         try:
             cancel = getattr(app.state, "pause_automation", None)
             if cancel:
@@ -630,6 +642,11 @@ def install(app) -> None:
                          allowed=lambda: session_valid(token))
         finally:
             INTERACTIVE_SCREENS -= 1
+            count = INTERACTIVE_TOKENS.get(token, 1) - 1
+            if count > 0:
+                INTERACTIVE_TOKENS[token] = count
+            else:
+                INTERACTIVE_TOKENS.pop(token, None)
         await close_quietly(websocket, 1000 if session_valid(token) else 1008)
 
 

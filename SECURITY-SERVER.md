@@ -146,7 +146,7 @@ Bridge installation. No email URL, attachment or HTML is followed. Hints cannot
 override authentication states, enablement, rate limits or trusted provider code.
 
 Paperless API uploads commit SUBMITTING before network submission. Ambiguous
-results reconcile without resending; retrieved originals require a SHA-256 match.
+results reconcile without resending. Retrieved originals require a SHA-256 match.
 Metadata and notifications discard free-text provider titles and account details.
 Home Assistant receives fixed intervention messages and opaque notification IDs.
 Its outage and Bridge outages do not stop the provider dispatcher. Unimplemented
